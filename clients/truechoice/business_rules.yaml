@@ -1,0 +1,49 @@
+# True Choice business rules. Edit freely; validated by app/core/client_config.py.
+# Values marked (default) are placeholders until True Choice confirms them.
+
+business_hours:            # (default) used for handoff wording ("tomorrow morning")
+  days: [mon, tue, wed, thu, fri, sat]
+  open: "09:30"
+  close: "19:00"
+
+emi:                       # (default) indicative only; never a loan approval
+  annual_rate_min_pct: 10.5
+  annual_rate_max_pct: 14.0
+  tenure_months_options: [12, 24, 36, 48, 60]
+  default_down_payment_pct: 20
+  disclaimer_en: "This is only an indicative estimate. Final EMI depends on the bank's approval and terms."
+  disclaimer_ml: "ഇത് ഏകദേശ കണക്ക് മാത്രമാണ്. അന്തിമ EMI ബാങ്കിന്റെ അംഗീകാരത്തെയും നിബന്ധനകളെയും ആശ്രയിച്ചിരിക്കും."
+
+alerts:
+  send_window: {start: "09:00", end: "20:00"}   # IST
+  global_daily_cap: 200
+  max_cars_per_message: 3
+  max_unanswered: 3          # then one "still looking?" then expire
+  requirement_ttl_days: 60
+  reply_context_hours: 72    # a reply within this window gets the alert as context
+  near_match:
+    budget_over_pct: 10
+    years_older: 1
+    max_per_days: 7
+
+bot:
+  auto_resume_hours: 24      # paused (handed-off) chats resume after this
+  history_messages: 20       # messages of history sent to the LLM
+
+retention_days: 90           # messages/audio metadata older than this are deleted
+
+# Added to the built-in stop / venda / not interested lists.
+opt_out_extra_phrases: []
+
+model_aliases:
+  swift: [maruti swift, suzuki swift, swift dzire]
+  dzire: [swift dzire, maruti dzire]
+  baleno: [maruti baleno]
+  wagon r: [wagonr, wagon-r]
+  innova crysta: [crysta, innova]
+  creta: [hyundai creta]
+  i20: [i 20, elite i20]
+  xuv700: [xuv 700, xuv7oo, xuv 7oo]
+  nexon: [tata nexon]
+  city: [honda city]
+  ertiga: [maruti ertiga]

@@ -1,0 +1,76 @@
+# True Choice: pre-owned cars, Kerala.
+# ${VAR} values come from the environment (.env locally, Lambda env on AWS).
+# *_secret values are secret NAMES (env var locally, Secrets Manager on AWS), never values.
+
+client_id: truechoice
+display_name: True Choice
+assistant_name: True Choice virtual assistant
+languages: [ml, manglish, en]
+
+# Staff WhatsApp numbers allowed to send RESUME / WISH and receive lead summaries.
+# Comma-separated in .env: TRUECHOICE_STAFF_NUMBERS=+9198xxxxxxxx,+9194xxxxxxxx
+staff_numbers: "${TRUECHOICE_STAFF_NUMBERS}"
+
+whatsapp:
+  phone_number_id: "${TRUECHOICE_WHATSAPP_PHONE_NUMBER_ID:-not-set}"
+  graph_api_version: v21.0
+  access_token_secret: truechoice/whatsapp_token
+  app_secret_secret: truechoice/whatsapp_app_secret
+  verify_token_secret: truechoice/whatsapp_verify_token
+  # Names must match the templates approved in Meta (see docs/whatsapp_templates.md).
+  templates:
+    car_alert_1: tc_car_alert_1
+    car_alert_2: tc_car_alert_2
+    car_alert_3: tc_car_alert_3
+    still_looking: tc_still_looking
+    staff_lead_alert: tc_staff_lead_alert
+  template_languages: {ml: ml, en: en, manglish: en}
+
+inventory:
+  adapter: mock
+  options:
+    path: inventory_mock.json   # relative to this folder
+
+providers:
+  llm:
+    deepseek:
+      kind: openai_compatible
+      base_url: https://api.deepseek.com
+      model: deepseek-chat
+      api_key_secret: deepseek_api_key
+    openrouter:
+      kind: openai_compatible
+      base_url: https://openrouter.ai/api/v1
+      model: "${OPENROUTER_MODEL}"
+      api_key_secret: openrouter_api_key
+    gemini:
+      kind: openai_compatible
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+      model: "${GEMINI_MODEL}"
+      api_key_secret: gemini_api_key
+    anthropic:
+      kind: anthropic
+      model: "${ANTHROPIC_MODEL}"   # fill in the current Claude Haiku model ID in .env
+      api_key_secret: anthropic_api_key
+  llm_chain: [deepseek, openrouter, anthropic]
+  # Sarvam model/speaker names are verified against the live API in step 7.
+  stt:
+    kind: sarvam
+    api_key_secret: sarvam_api_key
+    model: "${SARVAM_STT_MODEL:-saarika:v2.5}"
+    language_code: unknown        # auto-detect ml / en / code-mixed
+  tts:
+    kind: sarvam
+    api_key_secret: sarvam_api_key
+    model: "${SARVAM_TTS_MODEL:-bulbul:v2}"
+    language_code: ml-IN
+    speaker: "${SARVAM_TTS_SPEAKER:-anushka}"
+
+voice:
+  policy: mirror          # reply with voice only if the customer sent voice or asked
+  max_audio_seconds: 60
+  tts_timeout_s: 8
+  daily_char_cap: 20000
+
+dashboard:
+  password_secret: truechoice/dashboard_password
