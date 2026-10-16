@@ -13,7 +13,7 @@ staff_numbers: "${TRUECHOICE_STAFF_NUMBERS}"
 
 whatsapp:
   phone_number_id: "${TRUECHOICE_WHATSAPP_PHONE_NUMBER_ID:-not-set}"
-  graph_api_version: v21.0
+  graph_api_version: v25.0
   access_token_secret: truechoice/whatsapp_token
   app_secret_secret: truechoice/whatsapp_app_secret
   verify_token_secret: truechoice/whatsapp_verify_token

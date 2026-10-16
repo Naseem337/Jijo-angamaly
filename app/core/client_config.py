@@ -146,7 +146,7 @@ class VoiceConfig(BaseModel):
 
 class WhatsAppConfig(BaseModel):
     phone_number_id: str
-    graph_api_version: str = "v21.0"
+    graph_api_version: str = "v25.0"
     access_token_secret: str
     app_secret_secret: str
     verify_token_secret: str
