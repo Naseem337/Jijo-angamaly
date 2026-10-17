@@ -67,11 +67,13 @@ class OpenAICompatibleLLM:
         model: str,
         api_key: str,
         timeout_s: float = 30.0,
+        thinking_headroom_tokens: int = 0,
         extra: dict[str, Any] | None = None,
         http: httpx.Client | None = None,
     ) -> None:
         self.name = name
         self.model = model
+        self._headroom = thinking_headroom_tokens
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._headers = {"Authorization": f"Bearer {api_key}"}
         self._extra = dict(extra or {})  # e.g. {"temperature": 0.3}
@@ -87,7 +89,7 @@ class OpenAICompatibleLLM:
         body: dict[str, Any] = {
             "model": self.model,
             "messages": _to_wire(system, messages),
-            "max_tokens": max_tokens,
+            "max_tokens": max_tokens + self._headroom,
             **self._extra,
         }
         if tools:

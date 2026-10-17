@@ -104,6 +104,9 @@ class LLMProviderConfig(BaseModel):
     model: str | None = None
     api_key_secret: str | None = None
     timeout_s: float = 30.0
+    # Some reasoning models (e.g. Gemini 3.x) count hidden thinking against max_tokens,
+    # which cuts the visible reply short. This many tokens are added on top for them.
+    thinking_headroom_tokens: int = Field(0, ge=0)
     extra: dict[str, Any] = {}
 
     @field_validator("model", "base_url", mode="before")

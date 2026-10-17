@@ -48,6 +48,15 @@ providers:
       base_url: https://generativelanguage.googleapis.com/v1beta/openai/
       model: "${GEMINI_MODEL}"
       api_key_secret: gemini_api_key
+      thinking_headroom_tokens: 2048   # Gemini 3.x thinking counts against max_tokens
+      extra: {reasoning_effort: low}
+    gemini_backup:                     # an older Gemini, used when the main one is overloaded
+      kind: openai_compatible
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+      model: "${GEMINI_BACKUP_MODEL}"
+      api_key_secret: gemini_api_key
+      thinking_headroom_tokens: 2048
+      extra: {reasoning_effort: low}
     anthropic:
       kind: anthropic
       model: "${ANTHROPIC_MODEL}"   # fill in the current Claude Haiku model ID in .env

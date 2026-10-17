@@ -258,3 +258,12 @@ def test_build_llm_explains_when_nothing_is_usable(config) -> None:
         build_llm(config, DictSecrets())
     message = str(info.value)
     assert "deepseek" in message and "anthropic: no model name set" in message
+
+
+@respx.mock
+def test_thinking_headroom_is_added_to_max_tokens() -> None:
+    route = respx.post(URL).mock(return_value=httpx.Response(200, json={
+        "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}))
+    OpenAICompatibleLLM("gemini", base_url="https://api.example.com", model="m", api_key="k",
+                        thinking_headroom_tokens=2048).complete("S", [ChatMessage.user("hi")], max_tokens=300)
+    assert json.loads(route.calls[0].request.content)["max_tokens"] == 2348

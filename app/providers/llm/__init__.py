@@ -46,7 +46,8 @@ def _build_one(name: str, cfg: LLMProviderConfig, secrets: SecretResolver) -> LL
     if not cfg.base_url:
         raise LLMNotConfigured(f"{name}: no base_url set")
     return OpenAICompatibleLLM(name, base_url=cfg.base_url, model=cfg.model, api_key=api_key,
-                               timeout_s=cfg.timeout_s, extra=cfg.extra)
+                               timeout_s=cfg.timeout_s,
+                               thinking_headroom_tokens=cfg.thinking_headroom_tokens, extra=cfg.extra)
 
 
 def build_llm(config: ClientConfig, secrets: SecretResolver) -> FallbackLLM:

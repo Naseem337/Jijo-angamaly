@@ -31,7 +31,8 @@ everything above it. Build order is PLAN.md §6.
 | 6–14 | Not started |
 
 The user chose to build the **AI brain first (Steps 4 → 5)**, then WhatsApp (Step 6).
-203 tests pass.
+Tests: all pass (`.venv\Scripts\python.exe -m pytest -q`). tests/conftest.py blanks LLM_CHAIN so a
+local `.env` override can't change test results.
 
 ## External setup done by the user
 
@@ -44,11 +45,15 @@ The user chose to build the **AI brain first (Steps 4 → 5)**, then WhatsApp (S
   - **Webhook not configured yet.** That happens in Step 6, via a cloudflared tunnel to
     `/webhook/truechoice`.
 - `scripts/send_test_message.ps1` sends a test text from the test number.
-- **AI keys: none yet.** `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` and
-  `ANTHROPIC_MODEL` are all empty. The user was in the middle of creating a DeepSeek account
-  (platform.deepseek.com).
-  - Next user steps: add a small amount of credit ($2–5), create the API key, paste it into `.env`.
-  - Then verify it with `python -m app.providers.llm --client truechoice --each`.
+- **AI provider for testing: Gemini free tier** (user's choice on 2026-10-17, no DeepSeek credit yet).
+  - `.env` has `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-3.8-flash`, `GEMINI_BACKUP_MODEL=gemini-3.5-flash`
+    and `LLM_CHAIN=gemini,gemini_backup`. Both models were verified with
+    `python -m app.providers.llm --client truechoice --each`.
+  - Gemini 3.x counts hidden thinking against `max_tokens`, so client.yaml gives it
+    `thinking_headroom_tokens: 2048` and `reasoning_effort: low`. `gemini-2.5-*` is no longer offered
+    to new accounts. The free tier sometimes returns 503 "high demand"; that's why there's a backup model.
+  - The free tier may use chats for training, so it's for testing only. Go-live means removing
+    `LLM_CHAIN` from `.env`, which restores the default deepseek → openrouter → anthropic chain with paid keys.
 - WhatsApp templates (docs/whatsapp_templates.md) have **not** been submitted yet. They're only
   needed for alerts (Step 10).
 
