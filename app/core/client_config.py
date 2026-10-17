@@ -124,6 +124,14 @@ class SpeechProviderConfig(BaseModel):
 class ProvidersConfig(BaseModel):
     llm: dict[str, LLMProviderConfig]
     llm_chain: list[str]
+
+    @field_validator("llm_chain", mode="before")
+    @classmethod
+    def _split_chain(cls, v: Any) -> Any:
+        """Accept a YAML list or a comma-separated string (so .env can override it)."""
+        if isinstance(v, str):
+            return [name.strip() for name in v.split(",") if name.strip()]
+        return v
     stt: SpeechProviderConfig
     tts: SpeechProviderConfig
 

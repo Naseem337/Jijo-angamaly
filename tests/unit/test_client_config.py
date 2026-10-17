@@ -60,9 +60,17 @@ def _edit_yaml(path: Path, mutate) -> None:
 
 def test_unknown_provider_in_chain_is_rejected(env, clients_dir: Path, tmp_path: Path) -> None:
     path = _copy_client(tmp_path, clients_dir)
-    _edit_yaml(path, lambda d: d["providers"]["llm_chain"].append("nope"))
+    _edit_yaml(path, lambda d: d["providers"].update(llm_chain=["deepseek", "nope"]))
     with pytest.raises(ConfigError, match="undefined providers"):
         load_client_config("truechoice", tmp_path)
+
+
+def test_llm_chain_can_be_overridden_from_env(env, clients_dir: Path) -> None:
+    env.setenv("LLM_CHAIN", "gemini, deepseek")
+    assert load_client_config("truechoice", clients_dir).providers.llm_chain == ["gemini", "deepseek"]
+    env.setenv("LLM_CHAIN", "gemini,typo")
+    with pytest.raises(ConfigError, match="undefined providers"):
+        load_client_config("truechoice", clients_dir)
 
 
 def test_invalid_staff_number_is_rejected(env, clients_dir: Path, tmp_path: Path) -> None:

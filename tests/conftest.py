@@ -13,6 +13,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLIENTS_DIR = PROJECT_ROOT / "clients"
 
 
+@pytest.fixture(autouse=True)
+def _ignore_local_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A developer's .env may override the LLM chain; tests use the committed default.
+    (An empty value wins over .env, because load_dotenv never overwrites existing vars.)"""
+    monkeypatch.setenv("LLM_CHAIN", "")
+
+
 @pytest.fixture
 def clock() -> FixedClock:
     """Thursday 16 Oct 2026, 10:00 IST."""

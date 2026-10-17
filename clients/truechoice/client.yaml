@@ -52,7 +52,8 @@ providers:
       kind: anthropic
       model: "${ANTHROPIC_MODEL}"   # fill in the current Claude Haiku model ID in .env
       api_key_secret: anthropic_api_key
-  llm_chain: [deepseek, openrouter, anthropic]
+  # Order to try providers in. Override in .env, e.g. LLM_CHAIN=gemini (free tier, testing only).
+  llm_chain: "${LLM_CHAIN:-deepseek,openrouter,anthropic}"
   # Sarvam model/speaker names are verified against the live API in step 7.
   stt:
     kind: sarvam
