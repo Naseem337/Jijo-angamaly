@@ -26,7 +26,7 @@ from app.inventory.aliases import ModelAliases, compact
 Fuel = Literal["petrol", "diesel", "cng", "electric", "hybrid"]
 Transmission = Literal["manual", "automatic"]
 BodyType = Literal["hatchback", "sedan", "suv", "muv", "pickup", "other"]
-CarStatus = Literal["available", "booked", "sold"]
+CarStatus = Literal["available", "booked", "sold", "coming_soon"]  # coming_soon: e.g. under inspection
 
 
 class InventoryError(RuntimeError):

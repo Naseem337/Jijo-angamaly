@@ -109,3 +109,18 @@ def test_unknown_transmission_does_not_hide_a_car() -> None:
     from app.inventory.base import apply_query
     cars, _ = parse_sheet_csv(CSV)
     assert len(apply_query(cars, CarQuery(transmission="automatic", body_type="suv", limit=10))) == 3
+
+
+def test_dealer_body_types_and_statuses() -> None:
+    text = """Car ID,Make,Model,Body Type,Year,Fuel Type,Gearbox,Owners,Odometer (km),Location,Price (INR),Status
+B1,Tata,Nexon,Compact SUV,2021,Petrol,Automatic,1,"30,000",Kochi,"800,000",Available
+B2,Maruti Suzuki,Ertiga,MUV/MPV,2020,CNG,Manual,2,"50,000",Kochi,"700,000",Under Inspection
+B3,Hyundai,i20,Hatchback,2019,Petrol,Manual,1,"40,000",Kochi,"500,000",Sold
+B4,Honda,City,Sedan,2018,Petrol,Manual,1,"60,000",Kochi,"600,000",Pending paperwork
+"""
+    cars, warnings = parse_sheet_csv(text)
+    by_id = {c.id: c for c in cars}
+    assert (by_id["B1"].body_type, by_id["B1"].transmission, by_id["B1"].is_available) == ("suv", "automatic", True)
+    assert (by_id["B2"].body_type, by_id["B2"].status, by_id["B2"].is_available) == ("muv", "coming_soon", False)
+    assert by_id["B3"].status == "sold"
+    assert "B4" not in by_id and "unknown status" in warnings[0]  # unknown wording is not offered

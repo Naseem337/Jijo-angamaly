@@ -179,7 +179,7 @@ def test_bad_tool_arguments_go_back_to_the_model(make_agent) -> None:
 def test_sold_car_is_flagged_by_get_car_details(make_agent) -> None:
     agent, llm = make_agent(MockLLM.tool("get_car_details", car_id="TC-1030"), MockLLM.text("Sorry, that one is sold."))
     agent.handle(PHONE, "Seltos TC-1030 available?")
-    assert "do not offer it" in tool_result(llm)["note"]
+    assert tool_result(llm)["note"] == "This car is sold. Do not offer it."
 
 
 def test_endless_tool_calls_stop_with_a_fallback(make_agent) -> None:

@@ -196,7 +196,9 @@ def get_car_details(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         return ToolResult(_dump({"error": f"no car with id {car_id or '(missing)'}"}), is_error=True)
     details = car.to_summary()
     if not car.is_available:
-        details["note"] = f"This car is {car.status}; do not offer it."
+        why = {"booked": "already booked by another customer", "sold": "sold",
+               "coming_soon": "not ready for sale yet (under inspection); it may be available soon"}
+        details["note"] = f"This car is {why.get(car.status, car.status)}. Do not offer it."
     return ToolResult(_dump(details))
 
 

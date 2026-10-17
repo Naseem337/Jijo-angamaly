@@ -81,12 +81,13 @@ local `.env` override can't change test results.
   "anyone with the link"; `app/inventory/sheet_adapter.py` reads it as CSV, refreshes every 5 minutes,
   and keeps the last good copy for up to 1 hour if Google is unreachable. Columns are matched by
   header name.
-  - The sheet has Car ID, Make, Model, Year, Fuel Type, Odometer, Expected Mileage, Tyre Condition,
-    Color and Price.
-  - It has **no** transmission, owners, location, status or body type. An unknown transmission or body
-    type doesn't filter a car out of a search.
-  - Sold cars must be **deleted from the sheet**, or a `Status` column added (Sold/Booked/Available).
-    Ask the user which.
+  - Columns since the user's update on 2026-10-17: Car ID, Make, Model, Body Type, Year, Fuel Type,
+    Gearbox, Owners, Odometer, Expected Mileage, Tyre Condition, Color, Location, Price, Status.
+    199 of the 300 cars are Available.
+  - Status mapping: Available is offered. Booked, Sold and **Under Inspection (`coming_soon`)** are never
+    offered. Unknown status wording is skipped with a warning, which is the safe default.
+  - Body Type: "Compact SUV" maps to suv and "MUV/MPV" to muv.
+  - The sheet's locations are all over India, not just Kerala (it's likely sample data).
   - The sheet id is only in `.env` (`TRUECHOICE_INVENTORY_ADAPTER=google_sheet`,
     `TRUECHOICE_INVENTORY_SHEET_ID`), never in git. Tests force the mock stock (tests/conftest.py).
   - So no inventory page is needed in the dashboard.

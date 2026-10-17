@@ -51,9 +51,14 @@ COLUMNS: dict[str, tuple[str, ...]] = {
     "highlights": ("highlights", "features", "notes"),
 }
 _INT_FIELDS = {"year", "km", "price", "owners", "tyre_condition_pct"}
-_STATUS = {"available": "available", "in stock": "available", "": "available",
+_STATUS = {"available": "available", "in stock": "available", "ready": "available", "": "available",
            "booked": "booked", "reserved": "booked", "on hold": "booked", "hold": "booked",
-           "sold": "sold", "sold out": "sold", "delivered": "sold"}
+           "sold": "sold", "sold out": "sold", "delivered": "sold",
+           "under inspection": "coming_soon", "inspection": "coming_soon", "in workshop": "coming_soon",
+           "refurbishing": "coming_soon", "coming soon": "coming_soon", "incoming": "coming_soon"}
+_BODY = {"hatchback": "hatchback", "hatch": "hatchback", "sedan": "sedan", "saloon": "sedan",
+         "suv": "suv", "compact suv": "suv", "mini suv": "suv", "crossover": "suv",
+         "muv": "muv", "mpv": "muv", "muv mpv": "muv", "van": "muv", "pickup": "pickup", "pick up": "pickup"}
 _TRANSMISSION = {"manual": "manual", "mt": "manual", "automatic": "automatic", "auto": "automatic",
                  "at": "automatic", "amt": "automatic", "cvt": "automatic", "dct": "automatic"}
 
@@ -93,7 +98,10 @@ def _row_to_car(row: dict[str, str], mapping: dict[str, str]) -> Car:
     for field, header in mapping.items():
         value = (row.get(header) or "").strip()
         if field == "status":
-            data[field] = _STATUS.get(value.lower(), "available")
+            status = _STATUS.get(" ".join(value.lower().split()))
+            if status is None:  # unknown wording: safer not to offer the car
+                raise ValueError(f"unknown status {value!r} (use Available, Booked, Sold or Under Inspection)")
+            data[field] = status
         elif field == "transmission":
             data[field] = _TRANSMISSION.get(value.lower())
         elif field == "highlights":
@@ -105,8 +113,7 @@ def _row_to_car(row: dict[str, str], mapping: dict[str, str]) -> Car:
         elif field == "mileage_kmpl":
             data[field] = _number(value)
         elif field == "body_type":
-            body = value.lower()
-            data[field] = body if body in ("hatchback", "sedan", "suv", "muv", "pickup") else "other"
+            data[field] = _BODY.get(" ".join(re.sub(r"[^a-z]+", " ", value.lower()).split()), "other")
         else:
             data[field] = value
     return Car.model_validate(data)
