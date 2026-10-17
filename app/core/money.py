@@ -349,6 +349,13 @@ def extract_numbers(text: str) -> list[ParsedNumber]:
             nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
 
             if value is not None:
+                if current is None and last_mult is not None and is_digit:
+                    # "6.95 lakh, 28500 km" / "6.95 lakh, 28.5k km": digits after a lakh/crore
+                    # start a new number, unless they are "5 lakh 50 thousand".
+                    m = _multiplier(nxt)
+                    after = tokens[i + 2] if i + 2 < len(tokens) else ""
+                    if m is None or m >= last_mult or "." in tok or _is_km(after):
+                        break
                 if current is None:
                     current = value
                 elif (not is_digit and not prev_was_digit and current >= 20

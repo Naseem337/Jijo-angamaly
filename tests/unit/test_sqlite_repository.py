@@ -125,3 +125,9 @@ def test_delete_customer_data_and_purge_old_data(repository):
     assert repository.get_customer("one", PHONE) is None
     assert repository.list_leads("one") == []
     assert repository.list_requirements("one") == []
+
+def test_messages_with_equal_timestamps_keep_insertion_order(repository):
+    for text in ["question", "answer", "follow-up"]:
+        repository.add_message(Message("one", PHONE, "in", text, NOW))
+    assert [m.text for m in repository.list_messages("one", PHONE)] == ["question", "answer", "follow-up"]
+    assert [m.text for m in repository.list_messages("one", PHONE, limit=2)] == ["answer", "follow-up"]

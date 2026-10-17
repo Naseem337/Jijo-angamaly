@@ -65,7 +65,10 @@ class Repository(Protocol):
         ...
 
     def list_messages(self, client_id: str, phone: str, limit: int = 50) -> list[Message]:
-        """The newest `limit` messages, returned oldest-first (ready for an LLM prompt)."""
+        """The newest `limit` messages, returned oldest-first (ready for an LLM prompt).
+
+        Messages with the same timestamp keep the order they were added in.
+        """
         ...
 
     # ------------------------------------------------------------------ pending (voice confirm)

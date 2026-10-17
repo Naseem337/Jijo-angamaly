@@ -267,3 +267,20 @@ def test_thinking_headroom_is_added_to_max_tokens() -> None:
     OpenAICompatibleLLM("gemini", base_url="https://api.example.com", model="m", api_key="k",
                         thinking_headroom_tokens=2048).complete("S", [ChatMessage.user("hi")], max_tokens=300)
     assert json.loads(route.calls[0].request.content)["max_tokens"] == 2348
+
+
+@respx.mock
+def test_gemini_thought_signature_is_echoed_back() -> None:
+    signature = {"google": {"thought_signature": "abc123"}}
+    route = respx.post(URL).mock(side_effect=[
+        httpx.Response(200, json={"choices": [{"finish_reason": "tool_calls", "message": {"tool_calls": [
+            {"id": "c1", "extra_content": signature,
+             "function": {"name": "search_cars", "arguments": '{"model": "swift"}'}}]}}]}),
+        httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": "done"}}]}),
+    ])
+    llm = openai_llm()
+    first = llm.complete("S", [ChatMessage.user("swift?")], [SEARCH])
+    assert first.tool_calls[0].extra_content == signature
+    llm.complete("S", [ChatMessage.user("swift?"), first.to_message(), ChatMessage.tool_result("c1", "[]")], [SEARCH])
+    sent = json.loads(route.calls[1].request.content)["messages"][2]["tool_calls"][0]
+    assert sent["extra_content"] == signature

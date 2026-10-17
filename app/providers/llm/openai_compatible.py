@@ -26,6 +26,16 @@ _FINISH: dict[str, StopReason] = {
 }
 
 
+def _call_to_wire(c: ToolCall) -> dict[str, Any]:
+    wire: dict[str, Any] = {
+        "id": c.id, "type": "function",
+        "function": {"name": c.name, "arguments": json.dumps(c.arguments, ensure_ascii=False)},
+    }
+    if c.extra_content:
+        wire["extra_content"] = c.extra_content
+    return wire
+
+
 def _to_wire(system: str, messages: list[ChatMessage]) -> list[dict[str, Any]]:
     wire: list[dict[str, Any]] = [{"role": "system", "content": system}]
     for m in messages:
@@ -35,11 +45,7 @@ def _to_wire(system: str, messages: list[ChatMessage]) -> list[dict[str, Any]]:
             wire.append({
                 "role": "assistant",
                 "content": m.content or None,
-                "tool_calls": [
-                    {"id": c.id, "type": "function",
-                     "function": {"name": c.name, "arguments": json.dumps(c.arguments, ensure_ascii=False)}}
-                    for c in m.tool_calls
-                ],
+                "tool_calls": [_call_to_wire(c) for c in m.tool_calls],
             })
         else:
             wire.append({"role": m.role, "content": m.content})
@@ -48,14 +54,15 @@ def _to_wire(system: str, messages: list[ChatMessage]) -> list[dict[str, Any]]:
 
 def _parse_tool_call(raw: dict[str, Any]) -> ToolCall:
     fn = raw.get("function") or {}
+    call_id, name, extra = raw.get("id", ""), fn.get("name", ""), raw.get("extra_content")
     text = fn.get("arguments") or "{}"
     try:
         args = json.loads(text) if isinstance(text, str) else text
     except json.JSONDecodeError as exc:
-        return ToolCall(raw.get("id", ""), fn.get("name", ""), {}, f"arguments are not valid JSON: {exc}")
+        return ToolCall(call_id, name, {}, f"arguments are not valid JSON: {exc}", extra)
     if not isinstance(args, dict):
-        return ToolCall(raw.get("id", ""), fn.get("name", ""), {}, "arguments must be a JSON object")
-    return ToolCall(raw.get("id", ""), fn.get("name", ""), args)
+        return ToolCall(call_id, name, {}, "arguments must be a JSON object", extra)
+    return ToolCall(call_id, name, args, None, extra)
 
 
 class OpenAICompatibleLLM:

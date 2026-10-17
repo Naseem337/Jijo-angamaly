@@ -33,7 +33,8 @@ class MockLLM:
         return LLMResponse(text, provider="mock", model="mock")
 
     @staticmethod
-    def tool(name: str, call_id: str = "call_1", text: str = "", **arguments: Any) -> LLMResponse:
+    def tool(name: str, /, call_id: str = "call_1", text: str = "", **arguments: Any) -> LLMResponse:
+        """A reply that calls tool `name`; keyword arguments become the tool's arguments."""
         return LLMResponse(text, [ToolCall(call_id, name, arguments)], "tool_calls",
                            provider="mock", model="mock")
 

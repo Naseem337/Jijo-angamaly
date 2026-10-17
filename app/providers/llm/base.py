@@ -42,6 +42,9 @@ class ToolCall:
     # Set when the model produced arguments that are not a JSON object. The agent
     # reports it back to the model as a tool error instead of running the tool.
     arguments_error: str | None = None
+    # Provider fields that must be echoed back with the call, e.g. Gemini's
+    # {"google": {"thought_signature": ...}} (requests fail with HTTP 400 without it).
+    extra_content: dict[str, Any] | None = field(default=None, compare=False)
 
 
 @dataclass

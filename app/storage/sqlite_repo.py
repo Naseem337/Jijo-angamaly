@@ -333,8 +333,8 @@ class SQLiteRepository:
     def list_messages(self, client_id: str, phone: str, limit: int = 50) -> list[Message]:
         with self._lock:
             rows = self._connection.execute(
-                """SELECT * FROM (SELECT * FROM messages WHERE client_id=? AND phone=?
-                ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC""",
+                """SELECT * FROM (SELECT rowid AS seq, * FROM messages WHERE client_id=? AND phone=?
+                ORDER BY ts DESC, seq DESC LIMIT ?) ORDER BY ts ASC, seq ASC""",
                 (client_id, phone, limit),
             ).fetchall()
         return [self._message(row) for row in rows]

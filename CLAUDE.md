@@ -27,10 +27,25 @@ everything above it. Build order is PLAN.md §6.
 | 2 Storage: models, Repository, SQLite | Done |
 | 3 Inventory: 30-car mock JSON, mock adapter, real stub, model aliases | Done (`python -m app.inventory --client truechoice --model swift --budget 7L`) |
 | 4 LLM providers: OpenAI-compatible, Anthropic SDK, mock, fallback chain | Done (`python -m app.providers.llm --client truechoice --each` checks real keys) |
-| **5 Agent: prompt, tools, EMI, guardrails, tool loop, `cli_chat.py`** | **NEXT** |
-| 6–14 | Not started |
+| 5 Agent: prompt, tools, EMI, guardrails, voice confirmation, tool loop | Done (`python -m app.cli_chat --client truechoice`); tested live on Gemini |
+| **6 WhatsApp: client, webhook, signature check, dedupe, router (text only)** | **NEXT** |
+| 7–14 | Not started |
 
-The user chose to build the **AI brain first (Steps 4 → 5)**, then WhatsApp (Step 6).
+The AI brain (Steps 4–5) is done; WhatsApp (Step 6) is next.
+
+Agent design notes (app/agent/):
+- `Agent.handle()` owns a whole customer turn: it stores the inbound and outbound messages, and the
+  router in Step 6 should call it. The router itself handles opt-out, staff commands and paused chats.
+- The system prompt depends only on config, so it's cache-friendly. Per-turn facts (reply language,
+  time, pending read-back notes) go in `turn_context()`, put in front of the latest customer message.
+- Guardrails: every ₹, km and year figure must come from a tool result, an earlier message, or the
+  customer. Promise words are blocked. A failing reply gets one rewrite (with no tools); after that the
+  bot sends a safe fallback and hands off.
+- `AgentReply.handoff` is only a request. Step 9 does the actual pause, staff summary and customer notice.
+- Gemini tool calls carry `extra_content.google.thought_signature`, which must be echoed back
+  (`ToolCall.extra_content`).
+- The Gemini free tier allows **5 requests/min per model**, and one customer turn uses 2–3 requests,
+  so the backup model often answers.
 Tests: all pass (`.venv\Scripts\python.exe -m pytest -q`). tests/conftest.py blanks LLM_CHAIN so a
 local `.env` override can't change test results.
 
