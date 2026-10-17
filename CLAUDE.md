@@ -28,7 +28,7 @@ everything above it. Build order is PLAN.md §6.
 | 3 Inventory: 30-car mock JSON, mock adapter, real stub, model aliases | Done (`python -m app.inventory --client truechoice --model swift --budget 7L`) |
 | 4 LLM providers: OpenAI-compatible, Anthropic SDK, mock, fallback chain | Done (`python -m app.providers.llm --client truechoice --each` checks real keys) |
 | 5 Agent: prompt, tools, EMI, guardrails, voice confirmation, tool loop | Done (`python -m app.cli_chat --client truechoice`); tested live on Gemini |
-| **6 WhatsApp: client, webhook, signature check, dedupe, router (text only)** | **NEXT** |
+| 6 WhatsApp: client, webhook, signature check, dedupe, router (text only) | Code done and tested. **Live hookup in progress:** the user is installing cloudflared (`winget install --id Cloudflare.cloudflared`). Then run `uvicorn app.main:app --port 8000` plus `cloudflared tunnel --url http://localhost:8000`, and set the Meta webhook to `<tunnel>/webhook/truechoice` with the verify token from `.env`, subscribed to `messages`. |
 | 7–14 | Not started |
 
 The AI brain (Steps 4–5) is done; WhatsApp (Step 6) is next.
@@ -77,12 +77,20 @@ local `.env` override can't change test results.
 - **Database:** SQLite locally, DynamoDB on AWS (Step 11). The user asked about Supabase. The reasons
   to keep DynamoDB: one AWS account, no server, near-zero cost, and Supabase free projects pause when
   idle. Switching would mean a Postgres repository. Undecided only if the user raises it again.
-- **Inventory management UI:** the staff dashboard (Step 12) covers leads, chats, wishlists and alerts.
-  Whether it also needs an Inventory page depends on where True Choice keeps its stock:
-  - an API means no page is needed;
-  - Excel or Google Sheets means reading the sheet;
-  - nothing means adding an Inventory page to the dashboard.
-  **We are waiting on the user to ask True Choice.**
+- **Inventory = True Choice's Google Sheet** (shared on 2026-10-17; 300 cars). The sheet is
+  "anyone with the link"; `app/inventory/sheet_adapter.py` reads it as CSV, refreshes every 5 minutes,
+  and keeps the last good copy for up to 1 hour if Google is unreachable. Columns are matched by
+  header name.
+  - The sheet has Car ID, Make, Model, Year, Fuel Type, Odometer, Expected Mileage, Tyre Condition,
+    Color and Price.
+  - It has **no** transmission, owners, location, status or body type. An unknown transmission or body
+    type doesn't filter a car out of a search.
+  - Sold cars must be **deleted from the sheet**, or a `Status` column added (Sold/Booked/Available).
+    Ask the user which.
+  - The sheet id is only in `.env` (`TRUECHOICE_INVENTORY_ADAPTER=google_sheet`,
+    `TRUECHOICE_INVENTORY_SHEET_ID`), never in git. Tests force the mock stock (tests/conftest.py).
+  - So no inventory page is needed in the dashboard.
+- Hosting is still the AWS plan. The user once pasted a Hetzner link, but that was a mistake.
 - `purge_old_data` deletes old `pending_actions` (the interface docstring wins). The test was fixed
   to match.
 - The anthropic SDK is 1.x (uses httpx2, so respx can't mock it). Its tests use a fake client object.

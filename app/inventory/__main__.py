@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(adapter.list_all_cars())} cars available; {len(cars)} shown")
     for car in cars:
         print(f"  {car.id}  {car.title:<40} {format_lakh(car.price):>13}  "
-              f"{car.km:>7,} km  {car.fuel:<8} {car.transmission}")
+              f"{car.km:>7,} km  {car.fuel:<8} {car.transmission or '-'}")
     return 0
 
 

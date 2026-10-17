@@ -168,7 +168,7 @@ class WhatsAppConfig(BaseModel):
 
 
 class InventoryConfig(BaseModel):
-    adapter: Literal["mock", "real"]
+    adapter: Literal["mock", "google_sheet", "real"]
     options: dict[str, Any] = {}
 
 

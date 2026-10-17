@@ -46,7 +46,7 @@ class Car(BaseModel):
     price: int = Field(gt=0)
     km: int = Field(ge=0)
     fuel: Fuel
-    transmission: Transmission
+    transmission: Transmission | None = None  # None = not listed (e.g. the sheet has no column)
     owners: int = Field(1, ge=1)
     color: str = ""
     body_type: BodyType = "other"
@@ -55,6 +55,8 @@ class Car(BaseModel):
     status: CarStatus = "available"
     listed_on: date | None = None
     highlights: list[str] = []
+    mileage_kmpl: float | None = None  # expected fuel efficiency, km per litre
+    tyre_condition_pct: int | None = Field(None, ge=0, le=100)
 
     @field_validator("fuel", "transmission", "body_type", "status", mode="before")
     @classmethod
@@ -81,7 +83,7 @@ class Car(BaseModel):
             "price_text": f"{format_inr(self.price)} ({format_lakh(self.price)})",
             "km": self.km,
             "fuel": self.fuel,
-            "transmission": self.transmission,
+            "transmission": self.transmission or "not listed",
             "owners": self.owners,
             "color": self.color,
             "body_type": self.body_type,
@@ -89,6 +91,8 @@ class Car(BaseModel):
             "location": self.location,
             "status": self.status,
             "highlights": list(self.highlights),
+            **({"mileage_kmpl": self.mileage_kmpl} if self.mileage_kmpl is not None else {}),
+            **({"tyre_condition_pct": self.tyre_condition_pct} if self.tyre_condition_pct is not None else {}),
         }
 
 
@@ -122,9 +126,11 @@ def _matches(car: Car, q: CarQuery, aliases: ModelAliases) -> bool:
         return False
     if q.fuel and car.fuel != q.fuel.strip().lower():
         return False
-    if q.transmission and car.transmission != q.transmission.strip().lower():
+    # Unknown transmission / body type don't exclude a car: the agent sees "not listed"
+    # and can say it will check, which beats hiding half the stock of a sparse sheet.
+    if q.transmission and car.transmission and car.transmission != q.transmission.strip().lower():
         return False
-    if q.body_type and car.body_type != q.body_type.strip().lower():
+    if q.body_type and car.body_type != "other" and car.body_type != q.body_type.strip().lower():
         return False
     if q.make:
         wanted, have = compact(q.make), compact(car.make)

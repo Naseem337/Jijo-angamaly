@@ -27,9 +27,14 @@ whatsapp:
   template_languages: {ml: ml, en: en, manglish: en}
 
 inventory:
-  adapter: mock
+  # mock = inventory_mock.json below; google_sheet = the dealer's Google Sheet (shared as
+  # "anyone with the link can view"). Set both in .env so the sheet link stays out of git.
+  adapter: "${TRUECHOICE_INVENTORY_ADAPTER:-mock}"
   options:
-    path: inventory_mock.json   # relative to this folder
+    path: inventory_mock.json   # mock: relative to this folder
+    sheet_id: "${TRUECHOICE_INVENTORY_SHEET_ID}"   # the long id in the sheet's URL
+    gid: "${TRUECHOICE_INVENTORY_SHEET_GID}"       # which tab: the number after gid= in its URL; empty = first tab
+    cache_seconds: 300          # re-read the sheet at most every 5 minutes
 
 providers:
   llm:
