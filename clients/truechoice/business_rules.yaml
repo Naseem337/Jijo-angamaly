@@ -39,7 +39,8 @@ opt_out_extra_phrases: []
 # the text replies and the voice notes. Edit freely, then restart the bot.
 speaking_style: >
   Friendly, warm everyday Kerala Malayalam, the way an experienced, trusted salesman at a
-  Kochi showroom talks to a customer: colloquial, never newspaper or textbook Malayalam.
+  Malappuram showroom talks to a customer: colloquial, never newspaper or textbook Malayalam.
+  A light Malabar flavour is fine, but keep it easy for any Keralite to follow.
   Respectful (use "ningal", never "nee"). Use common English car words as people say them
   (car, budget, EMI, test drive, automatic, diesel). Keep it short and natural.
 

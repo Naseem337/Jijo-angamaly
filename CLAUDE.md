@@ -82,7 +82,7 @@ local `.env` override can't change test results.
   - **Hard 30 s limit per request**, so longer notes are cut into 28 s WAV pieces with ffmpeg.
   - OGG/Opus is accepted, but only with MIME `audio/ogg` (`; codecs=opus` gets a 400).
   - `keyterms` (≤50) is set in client.yaml.
-  - TTS: **only `bulbul:v3` speaks Malayalam** (v4-flash doesn't). Voice is **`anand` (male), to match the persona Arjun**; the user noticed the female `kavya` voice didn't fit. Override it with `SARVAM_TTS_SPEAKER`.
+  - TTS: **only `bulbul:v3` speaks Malayalam** (v4-flash doesn't). Voice is **`anand` (male), to match the male persona (now Anees)**; the user noticed the female `kavya` voice didn't fit. Override it with `SARVAM_TTS_SPEAKER`.
     The user heard samples in data/voice_samples (kavya, priya, shreya, kavitha, anand, gokul, plus a
     Gemini TTS sample) but hasn't picked one yet. Malayalam needs native script, so Manglish replies are
     spoken in Malayalam script. A ~11 s note takes ~5 s to generate and is ~40 KB.
@@ -116,7 +116,8 @@ local `.env` override can't change test results.
   `app/agent/prompts.py` with our tools, inventory-only and consent rules. Differences from the user's
   text: EMI gives the indicative tool range (only loan approval and rates are handed off), the bot never
   asks for the phone number, and the car id stays at the end of each car line.
-  - `bot_name: Arjun` and `city: Kerala` in client.yaml are **placeholders the user still has to confirm**.
+  - Persona confirmed on 2026-10-19: `bot_name: Anees`, `city: Makkaraparamba, Malappuram, Kerala`.
+    speaking_style says Malappuram showroom, with a light Malabar flavour.
   - `speaking_style` in business_rules.yaml (dialect and tone, plain words) feeds both the text prompt and
     the voice-script prompt.
 - Hosting is still the AWS plan. The user once pasted a Hetzner link, but that was a mistake.
