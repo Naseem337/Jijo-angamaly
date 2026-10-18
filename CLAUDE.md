@@ -30,8 +30,9 @@ everything above it. Build order is PLAN.md §6.
 | 5 Agent: prompt, tools, EMI, guardrails, voice confirmation, tool loop | Done (`python -m app.cli_chat --client truechoice`); tested live on Gemini |
 | 6 WhatsApp: client, webhook, signature check, dedupe, router (text only) | **Done and live-tested on 2026-10-18**: the user chatted with the bot from their phone. Run it with `.venv\Scripts\python.exe scripts\dev_whatsapp.py`, which starts uvicorn plus a cloudflared quick tunnel and re-points Meta's webhook through the Graph API (app id from debug_token, app token = id\|secret). |
 | 7 Voice in: download, length check, Sarvam STT, unclear check, read-back | Done; live-tested with Sarvam |
-| **8 Voice out (Sarvam TTS → OGG/Opus)** | **NEXT** |
-| 9–14 | Not started |
+| 8 Voice out: spoken_text (LLM, digits checked by guardrails, then words), Sarvam bulbul:v3, ffmpeg OGG/Opus, upload, `voice: true`, daily char cap, media-id cache | Done; live chain tested |
+| **9 Handoff, staff commands (RESUME / WISH), opt-out + confirmation, 24 h auto-resume** | **NEXT** |
+| 10–14 | Not started |
 
 Steps 1–6 are done; the bot answers on WhatsApp through the test number.
 
@@ -77,10 +78,14 @@ local `.env` override can't change test results.
     `LLM_CHAIN` from `.env`, which restores the default deepseek → openrouter → anthropic chain with paid keys.
 - **Sarvam** key is in `.env` (`SARVAM_API_KEY`). Facts checked live on 2026-10-18:
   - STT: `saaras:v4` with `language_code=unknown`, which returns `language_code` and `language_probability`.
+  - A Meta media download timed out once at 15 s, so downloads now get 60 s plus one retry.
   - **Hard 30 s limit per request**, so longer notes are cut into 28 s WAV pieces with ffmpeg.
   - OGG/Opus is accepted, but only with MIME `audio/ogg` (`; codecs=opus` gets a 400).
   - `keyterms` (≤50) is set in client.yaml.
-  - TTS (Step 8): `bulbul:v3` is the default; `bulbul:v4-flash` is recommended; v2 is still served.
+  - TTS: **only `bulbul:v3` speaks Malayalam** (v4-flash doesn't). Voice `kavya` is set by `SARVAM_TTS_SPEAKER`.
+    The user heard samples in data/voice_samples (kavya, priya, shreya, kavitha, anand, gokul, plus a
+    Gemini TTS sample) but hasn't picked one yet. Malayalam needs native script, so Manglish replies are
+    spoken in Malayalam script. A ~11 s note takes ~5 s to generate and is ~40 KB.
     Its fields are `text` and `language_code`, and it returns `audios` (base64 WAV). `opus` output is
     rejected on v3/v4-flash, so WAV must be converted to OGG/Opus with ffmpeg. Max 2500 chars.
 - ffmpeg 9.0.2 is a plain exe at `%USERPROFILE%\tools\ffmpeg.exe` (found by `app.providers.audio.find_ffmpeg`,

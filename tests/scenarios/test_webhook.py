@@ -17,6 +17,8 @@ from app.core.clock import FixedClock
 from app.main import create_app
 from app.providers.llm import MockLLM
 from app.providers.stt import MockSTT, STTError, Transcript
+from app.providers.tts import MockTTS
+import app.conversation.voice_out as voice_out_module
 from app.runtime import Runtime
 from app.settings import SecretNotFound
 from app.storage.sqlite_repo import SQLiteRepository
@@ -66,18 +68,22 @@ def stt() -> MockSTT:
     return MockSTT()
 
 
-def make_env(monkeypatch, clients_dir: Path, tmp_path: Path, clock: FixedClock, stt):
+def make_env(monkeypatch, clients_dir: Path, tmp_path: Path, clock: FixedClock, stt, tts=None):
     monkeypatch.setenv("TRUECHOICE_WHATSAPP_PHONE_NUMBER_ID", PHONE_ID)
     monkeypatch.setenv("TRUECHOICE_STAFF_NUMBERS", "")
     config = load_client_config("truechoice", clients_dir)
     repo = SQLiteRepository(tmp_path / "webhook.db")
     llm = MockLLM()
-    runtime = Runtime({"truechoice": config}, repo, DictSecrets(), clock, llm=llm, stt=stt)
+    runtime = Runtime({"truechoice": config}, repo, DictSecrets(), clock, llm=llm, stt=stt, tts=tts,
+                      ffmpeg="ffmpeg" if tts else None)
+    monkeypatch.setattr(voice_out_module, "wav_to_ogg_opus", lambda wav, ffmpeg: b"OggS" + wav)
     with respx.mock(assert_all_called=False) as graph:
         sent = graph.post(GRAPH).mock(return_value=httpx.Response(200, json={"messages": [{"id": "wamid.out"}]}))
         graph.get("https://graph.facebook.com/v25.0/media-1").mock(return_value=httpx.Response(200, json={
             "url": MEDIA_URL, "mime_type": "audio/ogg; codecs=opus", "file_size": len(VOICE_BYTES), "id": "media-1"}))
         graph.get(MEDIA_URL).mock(return_value=httpx.Response(200, content=VOICE_BYTES))
+        graph.post(f"https://graph.facebook.com/v25.0/{PHONE_ID}/media").mock(
+            return_value=httpx.Response(200, json={"id": "uploaded-voice"}))
         yield TestClient(create_app(runtime)), llm, repo, sent
     repo.close()
 
@@ -85,6 +91,14 @@ def make_env(monkeypatch, clients_dir: Path, tmp_path: Path, clock: FixedClock, 
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch, clients_dir: Path, tmp_path: Path, clock: FixedClock, stt: MockSTT):
     yield from make_env(monkeypatch, clients_dir, tmp_path, clock, stt)
+
+
+@pytest.fixture
+def env_with_voice(monkeypatch: pytest.MonkeyPatch, clients_dir: Path, tmp_path: Path, clock: FixedClock,
+                   stt: MockSTT):
+    tts = MockTTS()
+    for item in make_env(monkeypatch, clients_dir, tmp_path, clock, stt, tts):
+        yield (*item, tts)
 
 
 @pytest.fixture
@@ -250,3 +264,33 @@ def test_client_error_carries_graph_code_and_long_text_is_cut() -> None:
         wa.send_text(CUSTOMER, "hi")
     assert info.value.code == 131047 and info.value.status == 400
     assert wa.mark_read("wamid.1") is False  # best effort, never raises
+
+
+
+def test_voice_note_gets_text_then_voice_reply(env_with_voice, stt) -> None:
+    client, llm, repo, sent, tts = env_with_voice
+    stt.script.append(Transcript("Swift undo?", "en-IN", 0.95))
+    llm.script += [MockLLM.text("Yes! Which year and budget?"), MockLLM.text("ഉണ്ട്! ഏത് വർഷവും ബജറ്റും?")]
+    post(client, payload(VOICE))
+    bodies = sent_bodies(sent)
+    assert [b.get("type", "read") for b in bodies] == ["read", "text", "audio"]
+    assert bodies[1]["text"]["body"] == "Yes! Which year and budget?"
+    assert bodies[2]["audio"] == {"id": "uploaded-voice", "voice": True}
+    assert tts.calls == [("ഉണ്ട്! ഏത് വർഷവും ബജറ്റും?", "ml-IN")]  # Manglish/ml customer -> Malayalam voice
+
+
+def test_text_message_gets_text_only(env_with_voice) -> None:
+    client, llm, _, sent, tts = env_with_voice
+    llm.script.append(MockLLM.text("Hello!"))
+    post(client, payload(text_msg("Hi")))
+    assert [b.get("type", "read") for b in sent_bodies(sent)] == ["read", "text"] and tts.calls == []
+
+
+def test_unclear_voice_note_reply_is_spoken_too(env_with_voice, stt) -> None:
+    client, llm, _, sent, tts = env_with_voice
+    stt.script.append(Transcript("", "ml-IN", 1.0))
+    post(client, payload(VOICE))
+    assert [b.get("type", "read") for b in sent_bodies(sent)] == ["read", "text", "audio"]
+    # a brand-new customer has no language yet, so text and voice are in English
+    assert tts.calls == [("Sorry, I couldn't hear that clearly. Could you say it again, or type it?", "en-IN")]
+    assert llm.calls == []

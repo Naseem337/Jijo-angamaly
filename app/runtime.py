@@ -14,11 +14,14 @@ import httpx
 from app.agent import Agent
 from app.conversation.router import MessageRouter
 from app.conversation.voice_in import VoiceIn
+from app.conversation.voice_out import VoiceOut
 from app.core.client_config import ClientConfig, load_all_clients
 from app.core.clock import Clock, SystemClock
 from app.inventory import InventoryAdapter, build_inventory_adapter
 from app.providers.llm import LLMProvider, build_llm
+from app.providers.audio import find_ffmpeg
 from app.providers.stt import STTProvider, build_stt
+from app.providers.tts import TTSProvider, build_tts
 from app.settings import EnvSecretResolver, SecretNotFound, SecretResolver, Settings, get_settings
 from app.storage.repository import Repository
 from app.whatsapp.client import WhatsAppClient
@@ -38,6 +41,7 @@ def build_repository(settings: Settings) -> Repository:
 class ClientRuntime:
     def __init__(self, config: ClientConfig, repo: Repository, secrets: SecretResolver, clock: Clock,
                  *, llm: LLMProvider | None = None, stt: STTProvider | None = None,
+                 tts: TTSProvider | None = None, ffmpeg: str | None = None,
                  http: httpx.Client | None = None) -> None:
         self.config = config
         self.repo = repo
@@ -45,6 +49,8 @@ class ClientRuntime:
         self.clock = clock
         self._llm = llm
         self._stt = stt
+        self._tts = tts
+        self._ffmpeg = ffmpeg
         self._http = http
 
     def secret(self, name: str) -> str:
@@ -75,17 +81,34 @@ class ClientRuntime:
         return VoiceIn(self.whatsapp, stt, max_seconds=self.config.voice.max_audio_seconds)
 
     @cached_property
+    def voice_out(self) -> VoiceOut | None:
+        if self.config.voice.policy == "never":
+            return None
+        ffmpeg = self._ffmpeg or find_ffmpeg()
+        if ffmpeg is None:
+            log.warning("Voice replies disabled for %s: ffmpeg not found", self.config.client_id)
+            return None
+        try:
+            tts = self._tts or build_tts(self.config, self.secrets)
+        except SecretNotFound as exc:
+            log.warning("Voice replies disabled for %s: %s", self.config.client_id, exc)
+            return None
+        return VoiceOut(self.config, tts, self.whatsapp, self.repo, self.clock, ffmpeg)
+
+    @cached_property
     def router(self) -> MessageRouter:
         return MessageRouter(self.config, self.repo, lambda: self.agent, self.whatsapp, self.clock,
-                             lambda: self.voice_in)
+                             lambda: self.voice_in, lambda: self.voice_out)
 
 
 class Runtime:
     def __init__(self, clients: dict[str, ClientConfig], repo: Repository, secrets: SecretResolver,
                  clock: Clock | None = None, *, llm: LLMProvider | None = None,
-                 stt: STTProvider | None = None, http: httpx.Client | None = None) -> None:
+                 stt: STTProvider | None = None, tts: TTSProvider | None = None,
+                 ffmpeg: str | None = None, http: httpx.Client | None = None) -> None:
         self.clients = {
-            cid: ClientRuntime(cfg, repo, secrets, clock or SystemClock(), llm=llm, stt=stt, http=http)
+            cid: ClientRuntime(cfg, repo, secrets, clock or SystemClock(), llm=llm, stt=stt, tts=tts,
+                               ffmpeg=ffmpeg, http=http)
             for cid, cfg in clients.items()
         }
 

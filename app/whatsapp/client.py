@@ -28,6 +28,7 @@ class WhatsAppClient:
                  timeout_s: float = 15.0, http: httpx.Client | None = None) -> None:
         self._graph = f"https://graph.facebook.com/{api_version}"
         self._url = f"{self._graph}/{phone_number_id}/messages"
+        self._media_url = f"{self._graph}/{phone_number_id}/media"
         self._headers = {"Authorization": f"Bearer {access_token}"}
         self._http = http or httpx.Client(timeout=timeout_s)
 
@@ -55,6 +56,27 @@ class WhatsAppClient:
                            "text": {"preview_url": False, "body": text}})
         message_id = data["messages"][0]["id"]
         log.info("WhatsApp text sent to %s (%s)", mask_phone(to), message_id)
+        return message_id
+
+    def upload_media(self, data: bytes, mime_type: str = "audio/ogg", filename: str = "voice.ogg") -> str:
+        """Upload a file for sending; returns its media id (WhatsApp keeps it ~30 days)."""
+        try:
+            resp = self._http.post(self._media_url, headers=self._headers,
+                                   files={"file": (filename, data, mime_type)},
+                                   data={"messaging_product": "whatsapp", "type": mime_type},
+                                   timeout=MEDIA_TIMEOUT_S)
+        except httpx.HTTPError as exc:
+            raise WhatsAppError(f"media upload failed: {exc!r}") from exc
+        if resp.status_code != 200 or "id" not in resp.text:
+            raise WhatsAppError(f"media upload HTTP {resp.status_code}: {resp.text[:300]}", status=resp.status_code)
+        return resp.json()["id"]
+
+    def send_audio(self, to: str, media_id: str, *, voice: bool = True) -> str:
+        """Send uploaded audio; voice=True shows it as a voice note (needs mono OGG/Opus)."""
+        data = self._post({"recipient_type": "individual", "to": to_wa_id(to), "type": "audio",
+                           "audio": {"id": media_id, "voice": voice}})
+        message_id = data["messages"][0]["id"]
+        log.info("WhatsApp voice note sent to %s (%s)", mask_phone(to), message_id)
         return message_id
 
     def send_template(self, to: str, name: str, language: str, body_params: list[str]) -> str:

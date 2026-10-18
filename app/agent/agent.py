@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from app.agent import prompts
 from app.agent.confirmation import resolve_pending
 from app.agent.guardrails import SourcedFacts, Violation, check_reply, facts_from
+from app.agent.spoken import draft_spoken, speech_language, to_speech
 from app.agent.tools import TOOL_SPECS, HandoffRequest, ToolContext, run_tool
 from app.core.client_config import ClientConfig
 from app.core.clock import Clock
@@ -39,6 +40,7 @@ class AgentReply:
     problems: list[str] = field(default_factory=list)
     provider: str = ""
     saved: list[str] = field(default_factory=list)
+    spoken_text: str | None = None  # set when a voice reply was requested and passed the checks
 
 
 class Agent:
@@ -54,7 +56,7 @@ class Agent:
     # ------------------------------------------------------------------ public
 
     def handle(self, phone: str, text: str, *, source: str = "text",
-               message_id: str | None = None) -> AgentReply:
+               message_id: str | None = None, want_voice: bool = False) -> AgentReply:
         now = self.clock.now()
         cid = self.config.client_id
         customer = self.repo.get_or_create_customer(cid, phone, now)
@@ -74,6 +76,7 @@ class Agent:
         notes = [n for n in [resolve_pending(ctx, text)] if n]
         context = prompts.turn_context(self.config, language=language, now=now,
                                        customer_name=customer.name, source=source, notes=notes)
+        history = [m for m in history if not m.meta.get("voice_note")]  # voice copies of text replies
         messages = [ChatMessage("user" if m.direction == "in" else "assistant", m.text) for m in history]
         while messages and messages[0].role == "assistant":  # e.g. an alert we sent first
             messages.pop(0)
@@ -83,13 +86,31 @@ class Agent:
 
         reply = self._run(messages, ctx, facts, language)
         reply.saved = list(ctx.saved)
+        if want_voice:
+            reply.spoken_text = self._spoken(reply, facts)
         self.repo.add_message(Message(cid, phone, "out", reply.text, self.clock.now(), meta={
             "provider": reply.provider, "tools": reply.tools_used, "guardrail": reply.guardrail,
             "problems": reply.problems, "handoff": reply.handoff.reason if reply.handoff else None,
+            "spoken": reply.spoken_text is not None,
         }))
         return reply
 
     # ------------------------------------------------------------------ internals
+
+    def _spoken(self, reply: AgentReply, facts: SourcedFacts) -> str | None:
+        """Voice-note script for the reply, or None to send text only."""
+        if reply.guardrail in ("fallback", "llm_error"):
+            # Fixed safe wording; speak it in the voice's script (cacheable, no LLM needed).
+            texts = prompts.FALLBACK_REPLY if reply.guardrail == "fallback" else prompts.TECHNICAL_ISSUE_REPLY
+            return texts[speech_language(reply.language)]
+        draft = draft_spoken(self.llm, reply.text, reply.language)
+        if not draft:
+            return None
+        problems = check_reply(draft, facts)
+        if problems:
+            log.warning("Spoken version failed guardrails, sending text only: %s", problems)
+            return None
+        return to_speech(draft, reply.language) or None
 
     def _complete(self, messages: list[ChatMessage]) -> LLMResponse:
         return self.llm.complete(self.system_prompt, messages, TOOL_SPECS, MAX_REPLY_TOKENS)

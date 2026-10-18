@@ -47,6 +47,23 @@ def ogg_duration_seconds(data: bytes) -> float | None:
     return max(granule - pre_skip, 0) / 48_000
 
 
+def wav_to_ogg_opus(wav: bytes, ffmpeg: str) -> bytes:
+    """TTS WAV → what WhatsApp needs for a voice note: OGG container, Opus codec, mono.
+    32 kbit/s speech keeps a 30 s note around 120 KB (play button shows up to 512 KB)."""
+    try:
+        done = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-ar", "48000",
+             "-c:a", "libopus", "-b:a", "32k", "-application", "voip", "-f", "ogg", "pipe:1"],
+            input=wav, check=True, capture_output=True, timeout=30,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        detail = getattr(exc, "stderr", b"") or b""
+        raise AudioError(f"ffmpeg could not convert to OGG/Opus: {detail[:300]!r}") from exc
+    if not done.stdout.startswith(b"OggS"):
+        raise AudioError("ffmpeg produced no OGG audio")
+    return done.stdout
+
+
 def split_to_wav_chunks(data: bytes, chunk_seconds: float, ffmpeg: str) -> list[bytes]:
     """Cut audio into mono 16 kHz WAV pieces of at most `chunk_seconds` (what STT likes)."""
     with tempfile.TemporaryDirectory(prefix="voice-") as tmp:

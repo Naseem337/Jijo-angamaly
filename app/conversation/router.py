@@ -16,6 +16,7 @@ from typing import Literal
 
 from app.agent import Agent
 from app.conversation.voice_in import VOICE_PROBLEM_REPLY, VoiceIn
+from app.conversation.voice_out import VoiceOut
 from app.core.client_config import ClientConfig
 from app.core.clock import Clock
 from app.core.phone import mask_phone
@@ -38,13 +39,15 @@ UNSUPPORTED_REPLY = {
 class MessageRouter:
     def __init__(self, config: ClientConfig, repo: Repository, agent: Callable[[], Agent],
                  whatsapp: WhatsAppClient, clock: Clock,
-                 voice_in: Callable[[], VoiceIn | None] = lambda: None) -> None:
+                 voice_in: Callable[[], VoiceIn | None] = lambda: None,
+                 voice_out: Callable[[], VoiceOut | None] = lambda: None) -> None:
         self.config = config
         self.repo = repo
         self._agent = agent  # built lazily, so a missing LLM key doesn't break the webhook
         self.whatsapp = whatsapp
         self.clock = clock
         self._voice_in = voice_in  # returns None when speech-to-text isn't configured
+        self._voice_out = voice_out  # returns None when TTS or ffmpeg isn't available
 
     def handle(self, msg: InboundMessage) -> Outcome:
         cid, phone, now = self.config.client_id, msg.phone, self.clock.now()
@@ -71,6 +74,10 @@ class MessageRouter:
                                               source="voice", id=msg.id))
                 replies = VOICE_PROBLEM_REPLY[problem]
                 ok = self._send(phone, replies.get(customer.language, replies["en"]), store=True)
+                voice_out = self._voice_out()
+                if ok and problem != "failed" and voice_out and voice_out.wants_voice("voice"):
+                    spoken_language = "en" if customer.language == "en" else "ml"
+                    voice_out.send(phone, replies[spoken_language], spoken_language)
                 return "voice_problem" if ok else "send_failed"
             text, source = result.text, "voice"
         elif not msg.is_text:
@@ -80,11 +87,17 @@ class MessageRouter:
         else:
             self.whatsapp.mark_read(msg.id, typing=True)
 
-        reply = self._agent().handle(phone, text, source=source, message_id=msg.id)
+        voice_out = self._voice_out()
+        want_voice = bool(voice_out and voice_out.wants_voice(source))
+        reply = self._agent().handle(phone, text, source=source, message_id=msg.id, want_voice=want_voice)
         if reply.handoff:
             log.warning("Handoff requested for %s: %s (staff notification arrives in step 9)",
                         mask_phone(phone), reply.handoff.reason)
-        return "replied" if self._send(phone, reply.text, store=False) else "send_failed"
+        if not self._send(phone, reply.text, store=False):
+            return "send_failed"
+        if voice_out and reply.spoken_text:
+            voice_out.send(phone, reply.spoken_text, reply.language)  # text already sent; best effort
+        return "replied"
 
     def _send(self, phone: str, text: str, *, store: bool) -> bool:
         try:

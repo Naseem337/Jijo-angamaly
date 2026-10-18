@@ -338,6 +338,7 @@ def extract_numbers(text: str) -> list[ParsedNumber]:
             continue
 
         start = i
+        money_marked = start > 0 and tokens[start - 1] in _CURRENCY_BEFORE  # "₹6.95 lakh", "rs 5 lakh"
         total = 0.0
         current: float | None = None
         last_mult: int | None = None
@@ -350,11 +351,12 @@ def extract_numbers(text: str) -> list[ParsedNumber]:
 
             if value is not None:
                 if current is None and last_mult is not None and is_digit:
-                    # "6.95 lakh, 28500 km" / "6.95 lakh, 28.5k km": digits after a lakh/crore
-                    # start a new number, unless they are "5 lakh 50 thousand".
+                    # "₹6.95 lakh, 28500 km" / "₹6.95 lakh, 28.5k km": digits after a lakh/crore
+                    # start a new number, unless they are "5 lakh 50 thousand" (or the km
+                    # reading "1 lakh 35 thousand km", which has no ₹ in front).
                     m = _multiplier(nxt)
                     after = tokens[i + 2] if i + 2 < len(tokens) else ""
-                    if m is None or m >= last_mult or "." in tok or _is_km(after):
+                    if m is None or m >= last_mult or "." in tok or (money_marked and _is_km(after)):
                         break
                 if current is None:
                     current = value

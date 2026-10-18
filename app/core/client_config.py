@@ -123,6 +123,7 @@ class SpeechProviderConfig(BaseModel):
     speaker: str | None = None  # TTS voice
     timeout_s: float = 20.0
     keyterms: list[str] = []  # STT spelling hints (car names), at most 50
+    pace: float = Field(1.0, ge=0.5, le=2.0)  # TTS speaking speed
 
 
 class ProvidersConfig(BaseModel):
