@@ -89,6 +89,8 @@ class BusinessRules(BaseModel):
     bot: BotRules = BotRules()
     retention_days: int = 90
     opt_out_extra_phrases: list[str] = []
+    # How the bot talks (dialect, slang, politeness), in plain words. Used for text and voice.
+    speaking_style: str = "Friendly, respectful, everyday Kerala Malayalam."
     # canonical model name -> spellings customers use ("xuv 7oo", "crysta", …)
     model_aliases: dict[str, list[str]] = {}
 

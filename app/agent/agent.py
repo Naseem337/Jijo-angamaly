@@ -103,7 +103,7 @@ class Agent:
             # Fixed safe wording; speak it in the voice's script (cacheable, no LLM needed).
             texts = prompts.FALLBACK_REPLY if reply.guardrail == "fallback" else prompts.TECHNICAL_ISSUE_REPLY
             return texts[speech_language(reply.language)]
-        draft = draft_spoken(self.llm, reply.text, reply.language)
+        draft = draft_spoken(self.llm, reply.text, reply.language, self.config.business_rules.speaking_style)
         if not draft:
             return None
         problems = check_reply(draft, facts)

@@ -44,11 +44,12 @@ def speech_language(language: str) -> str:
     return "en" if language == "en" else "ml"
 
 
-def draft_spoken(llm: LLMProvider, reply_text: str, language: str) -> str | None:
+def draft_spoken(llm: LLMProvider, reply_text: str, language: str, style: str = "") -> str | None:
     """LLM step: the digit version of the voice script, or None if the LLM failed."""
     lang = speech_language(language)
+    instruction = SPOKEN_INSTRUCTION[lang] + (f"\nTone and dialect: {style.strip()}" if style.strip() else "")
     try:
-        response = llm.complete(SPOKEN_INSTRUCTION[lang], [ChatMessage.user(reply_text)], None, 600)
+        response = llm.complete(instruction, [ChatMessage.user(reply_text)], None, 600)
     except LLMError:
         return None
     text = response.text.strip()

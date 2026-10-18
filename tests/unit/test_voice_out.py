@@ -195,3 +195,12 @@ def test_upload_and_send_voice_note() -> None:
     upload.mock(return_value=httpx.Response(400, json={"error": {"message": "bad file"}}))
     with pytest.raises(WhatsAppError, match="upload HTTP 400"):
         wa.upload_media(b"x")
+
+
+def test_speaking_style_reaches_text_and_voice_prompts(agent_with) -> None:
+    agent, llm = agent_with(MockLLM.text("Namaskaram! Ethu car aanu nokkunnath?"),
+                            MockLLM.text("നമസ്കാരം! ഏത് കാർ ആണ് നോക്കുന്നത്?"))
+    agent.handle(PHONE, "hi", source="voice", want_voice=True)
+    style = agent.config.business_rules.speaking_style.strip()
+    assert f"Tone and dialect: {style}" in llm.calls[0].system
+    assert llm.calls[1].system.endswith(f"Tone and dialect: {style}")

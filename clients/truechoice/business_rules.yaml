@@ -35,6 +35,14 @@ retention_days: 90           # messages/audio metadata older than this are delet
 # Added to the built-in stop / venda / not interested lists.
 opt_out_extra_phrases: []
 
+# How the bot talks: dialect, slang and politeness, written in plain words. It shapes both
+# the text replies and the voice notes. Edit freely, then restart the bot.
+speaking_style: >
+  Friendly, warm everyday Kerala Malayalam, the way a helpful young salesperson at a
+  Kochi showroom talks to a customer: colloquial, not bookish or news-reader Malayalam.
+  Respectful (use "ningal", never "nee"). Use common English car words as people say them
+  (car, budget, EMI, test drive, automatic, diesel). Keep it short and natural.
+
 model_aliases:
   swift: [maruti swift, suzuki swift, swift dzire]
   dzire: [swift dzire, maruti dzire]
