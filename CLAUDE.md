@@ -61,7 +61,7 @@ local `.env` override can't change test results.
   - The webhook is configured (Meta app id 1116318957515906, `messages` subscribed). Quick-tunnel URLs
     change on every start, and `scripts/dev_whatsapp.py` updates Meta automatically. Quick tunnels die
     when the laptop sleeps.
-  - cloudflared is a plain exe at `%USERPROFILE%	ools\cloudflared.exe` (winget needed admin, which
+  - cloudflared is a plain exe at `%USERPROFILE%\tools\cloudflared.exe` (winget needed admin, which
     the user missed).
   - If port 8000 is busy, check for an old `uvicorn --reload` and its `spawn_main` child process.
 - `scripts/send_test_message.ps1` sends a test text from the test number.
