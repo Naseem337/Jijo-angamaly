@@ -82,7 +82,14 @@ local `.env` override can't change test results.
   - **Hard 30 s limit per request**, so longer notes are cut into 28 s WAV pieces with ffmpeg.
   - OGG/Opus is accepted, but only with MIME `audio/ogg` (`; codecs=opus` gets a 400).
   - `keyterms` (≤50) is set in client.yaml.
-  - TTS: **only `bulbul:v3` speaks Malayalam** (v4-flash doesn't). Voice is **`anand` (male), to match the male persona (now Anees)**; the user noticed the female `kavya` voice didn't fit. Override it with `SARVAM_TTS_SPEAKER`.
+  - **Main voice: Gemini TTS `gemini-3.8-flash-tts`, voice `Algenib`, with a style prompt (calm, warm
+    Malayali salesman in his late 40s).** The user picked it by ear on 2026-10-19
+    (data/voice_samples/mature_gemini_algenib.wav). `tts_backup` = Sarvam `anand` speaks when Gemini fails
+    (free-tier quota), and VoiceOut tries the voices in order. It takes ~10 s per note and speaks slowly.
+    Pricing (checked 2026-10-19): Gemini TTS costs $0.00225 per 10 s of audio until 2026-12-31, then double.
+    Sarvam costs ₹30 per 10k chars. Roughly ₹0.25 vs ₹0.60 per voice note. The Gemini free tier trains on the
+    data, so production needs a paid key.
+  - Sarvam TTS: **only `bulbul:v3` speaks Malayalam** (v4-flash doesn't). Voice is **`anand` (male), to match the male persona (now Anees)**; the user noticed the female `kavya` voice didn't fit. Override it with `SARVAM_TTS_SPEAKER`.
     The user heard samples in data/voice_samples (kavya, priya, shreya, kavitha, anand, gokul, plus a
     Gemini TTS sample) but hasn't picked one yet. Malayalam needs native script, so Manglish replies are
     spoken in Malayalam script. A ~11 s note takes ~5 s to generate and is ~40 KB.

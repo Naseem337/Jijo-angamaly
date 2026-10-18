@@ -205,3 +205,51 @@ def test_speaking_style_reaches_text_and_voice_prompts(agent_with) -> None:
     style = agent.config.business_rules.speaking_style.strip()
     assert f"Tone and dialect: {style}" in llm.calls[0].system
     assert llm.calls[1].system.endswith(f"Tone and dialect: {style}")
+
+
+# --------------------------------------------------------------------------- Gemini voice + backup
+
+
+@respx.mock
+def test_gemini_tts_request_and_audio_formats() -> None:
+    import base64, io, wave
+    from app.providers.tts import GeminiTTS
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-tts:generateContent"
+    pcm = b"\x00\x01" * 2400
+    route = respx.post(url).mock(return_value=httpx.Response(200, json={"candidates": [{"content": {"parts": [
+        {"inlineData": {"mimeType": "audio/L16;codec=pcm;rate=24000", "data": base64.b64encode(pcm).decode()}}]}}]}))
+    tts = GeminiTTS("key", model="gemini-tts", speaker="Algenib", style="Speak like a calm 45-year-old.")
+    wav = tts.synthesize("നമസ്കാരം", "ml-IN")
+    with wave.open(io.BytesIO(wav)) as w:
+        assert (w.getframerate(), w.getnchannels(), w.readframes(w.getnframes())) == (24000, 1, pcm)
+    request = route.calls[0].request
+    body = json.loads(request.content)
+    assert request.headers["x-goog-api-key"] == "key" and "key=" not in str(request.url)
+    assert body["contents"][0]["parts"][0]["text"] == "Speak like a calm 45-year-old. Say: നമസ്കാരം"
+    assert body["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Algenib"
+    route.mock(return_value=httpx.Response(429, json={"error": {"message": "quota exceeded"}}))
+    with pytest.raises(TTSError, match="429: quota exceeded"):
+        tts.synthesize("hi", "en-IN")
+
+
+def test_backup_voice_speaks_when_main_voice_fails(voice_out) -> None:
+    main, backup, wa = MockTTS(TTSError("Gemini 429")), MockTTS(), FakeWhatsApp()
+    vo = voice_out(None, wa)
+    vo.voices = [main, backup]
+    assert vo.send(PHONE, "നമസ്കാരം", "ml")
+    assert main.calls and backup.calls and wa.sent == [(PHONE, "media-1")]
+    both_fail = voice_out(None, FakeWhatsApp())
+    both_fail.voices = [MockTTS(TTSError("down")), MockTTS(TTSError("down"))]
+    assert both_fail.send(PHONE, "ഹലോ", "ml") is False
+
+
+def test_truechoice_voice_order(clients_dir) -> None:
+    from app.providers.tts import GeminiTTS, SarvamTTS, build_tts
+
+    class Keys:
+        def get(self, name: str) -> str:
+            return "k"
+    voices = build_tts(load_client_config("truechoice", clients_dir), Keys())
+    assert [type(v) for v in voices] == [GeminiTTS, SarvamTTS]
+    assert (voices[0].speaker, voices[1].speaker) == ("Algenib", "anand")
+    assert "late 40s" in voices[0].style

@@ -118,7 +118,7 @@ class LLMProviderConfig(BaseModel):
 
 
 class SpeechProviderConfig(BaseModel):
-    kind: Literal["sarvam", "mock"]
+    kind: Literal["sarvam", "gemini", "mock"]
     api_key_secret: str | None = None
     model: str | None = None
     language_code: str = "ml-IN"
@@ -127,6 +127,7 @@ class SpeechProviderConfig(BaseModel):
     keyterms: list[str] = []  # STT spelling hints (car names), at most 50
     pace: float = Field(1.0, ge=0.5, le=2.0)  # TTS speaking speed
     temperature: float | None = Field(None, ge=0.01, le=1.0)  # TTS expressiveness (bulbul:v3)
+    style: str | None = None  # Gemini TTS: how to speak (age, tone), in plain words
 
 
 class ProvidersConfig(BaseModel):
@@ -142,6 +143,7 @@ class ProvidersConfig(BaseModel):
         return v
     stt: SpeechProviderConfig
     tts: SpeechProviderConfig
+    tts_backup: SpeechProviderConfig | None = None  # used when the main voice fails (e.g. quota)
 
     @model_validator(mode="after")
     def _chain_known(self) -> "ProvidersConfig":

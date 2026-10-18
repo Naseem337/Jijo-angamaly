@@ -89,7 +89,7 @@ class ClientRuntime:
             log.warning("Voice replies disabled for %s: ffmpeg not found", self.config.client_id)
             return None
         try:
-            tts = self._tts or build_tts(self.config, self.secrets)
+            tts = [self._tts] if self._tts else build_tts(self.config, self.secrets)
         except SecretNotFound as exc:
             log.warning("Voice replies disabled for %s: %s", self.config.client_id, exc)
             return None
