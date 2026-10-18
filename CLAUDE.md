@@ -112,6 +112,13 @@ local `.env` override can't change test results.
   - The sheet id is only in `.env` (`TRUECHOICE_INVENTORY_ADAPTER=google_sheet`,
     `TRUECHOICE_INVENTORY_SHEET_ID`), never in git. Tests force the mock stock (tests/conftest.py).
   - So no inventory page is needed in the dashboard.
+- **System prompt** = the user's own sales-persona prompt (shared on 2026-10-19), merged in
+  `app/agent/prompts.py` with our tools, inventory-only and consent rules. Differences from the user's
+  text: EMI gives the indicative tool range (only loan approval and rates are handed off), the bot never
+  asks for the phone number, and the car id stays at the end of each car line.
+  - `bot_name: Arjun` and `city: Kerala` in client.yaml are **placeholders the user still has to confirm**.
+  - `speaking_style` in business_rules.yaml (dialect and tone, plain words) feeds both the text prompt and
+    the voice-script prompt.
 - Hosting is still the AWS plan. The user once pasted a Hetzner link, but that was a mistake.
 - `purge_old_data` deletes old `pending_actions` (the interface docstring wins). The test was fixed
   to match.

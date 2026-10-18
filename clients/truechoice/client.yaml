@@ -5,6 +5,8 @@
 client_id: truechoice
 display_name: True Choice
 assistant_name: True Choice virtual assistant
+bot_name: Arjun          # (placeholder) the name the bot uses in chat
+city: Kerala             # (placeholder) dealership city, e.g. Kochi
 languages: [ml, manglish, en]
 
 # Staff WhatsApp numbers allowed to send RESUME / WISH and receive lead summaries.

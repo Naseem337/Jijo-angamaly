@@ -184,6 +184,8 @@ class ClientConfig(BaseModel):
     client_id: str = Field(pattern=r"^[a-z0-9_]{2,32}$")
     display_name: str
     assistant_name: str
+    bot_name: str = "Arjun"  # the persona name customers see in the chat
+    city: str = "Kerala"  # where the dealership is, for the prompt
     languages: list[Literal["ml", "en", "manglish"]]
     staff_numbers: list[str] = []
     whatsapp: WhatsAppConfig

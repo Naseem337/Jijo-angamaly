@@ -192,4 +192,4 @@ def test_off_topic_question_gets_plain_text(make_agent) -> None:
     agent, llm = make_agent(MockLLM.text("I can only help with True Choice cars. What car are you looking for?"))
     reply = agent.handle(PHONE, "Who will win the election?")
     assert reply.guardrail == "ok" and reply.handoff is None
-    assert "Only talk about buying a car from True Choice" in llm.calls[0].system
+    assert "bring it back to True Choice's cars" in llm.calls[0].system
