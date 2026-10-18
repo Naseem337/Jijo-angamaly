@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from app.agent import prompts
 from app.agent.confirmation import resolve_pending
 from app.agent.guardrails import SourcedFacts, Violation, check_reply, facts_from
-from app.agent.spoken import draft_spoken, speech_language, to_speech
+from app.agent.spoken import draft_spoken, to_speech
 from app.agent.tools import TOOL_SPECS, HandoffRequest, ToolContext, run_tool
 from app.core.client_config import ClientConfig
 from app.core.clock import Clock
@@ -98,11 +98,12 @@ class Agent:
     # ------------------------------------------------------------------ internals
 
     def _spoken(self, reply: AgentReply, facts: SourcedFacts) -> str | None:
-        """Voice-note script for the reply, or None to send text only."""
+        """Voice-note script for the reply, or None to send text only.
+
+        Apologies (AI down, "let me check with the team") stay text only: speaking them
+        adds cost and nothing for the customer (user decision, 2026-10-19)."""
         if reply.guardrail in ("fallback", "llm_error"):
-            # Fixed safe wording; speak it in the voice's script (cacheable, no LLM needed).
-            texts = prompts.FALLBACK_REPLY if reply.guardrail == "fallback" else prompts.TECHNICAL_ISSUE_REPLY
-            return texts[speech_language(reply.language)]
+            return None
         draft = draft_spoken(self.llm, reply.text, reply.language, self.config.business_rules.speaking_style)
         if not draft:
             return None

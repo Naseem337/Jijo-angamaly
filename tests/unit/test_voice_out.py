@@ -81,11 +81,11 @@ def test_spoken_version_with_invented_number_is_dropped(agent_with) -> None:
     assert reply.guardrail == "ok" and reply.spoken_text is None
 
 
-def test_fallback_reply_is_spoken_in_malayalam_script(agent_with) -> None:
+def test_apologies_are_never_spoken(agent_with) -> None:
     agent, llm = agent_with(MockLLM.text("Loan guaranteed!"), MockLLM.text("Still guaranteed!"))
     reply = agent.handle(PHONE, "loan kittumo?", source="voice", want_voice=True)
-    assert reply.guardrail == "fallback" and reply.spoken_text.startswith("ക്ഷമിക്കണം")
-    assert len(llm.calls) == 2  # no LLM call for the fixed wording
+    assert reply.guardrail == "fallback" and reply.spoken_text is None
+    assert len(llm.calls) == 2  # no spoken-version call either
 
 
 def test_no_spoken_text_unless_asked_and_voice_copies_skip_history(agent_with, repo, clock) -> None:
@@ -225,7 +225,9 @@ def test_gemini_tts_request_and_audio_formats() -> None:
     request = route.calls[0].request
     body = json.loads(request.content)
     assert request.headers["x-goog-api-key"] == "key" and "key=" not in str(request.url)
-    assert body["contents"][0]["parts"][0]["text"] == "Speak like a calm 45-year-old. Say: നമസ്കാരം"
+    # the style must never be in the spoken text (it was read aloud when it was)
+    assert body["contents"][0]["parts"][0]["text"] == "നമസ്കാരം"
+    assert body["systemInstruction"]["parts"][0]["text"] == "Speak like a calm 45-year-old."
     assert body["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Algenib"
     route.mock(return_value=httpx.Response(429, json={"error": {"message": "quota exceeded"}}))
     with pytest.raises(TTSError, match="429: quota exceeded"):
@@ -250,6 +252,4 @@ def test_truechoice_voice_order(clients_dir) -> None:
         def get(self, name: str) -> str:
             return "k"
     voices = build_tts(load_client_config("truechoice", clients_dir), Keys())
-    assert [type(v) for v in voices] == [GeminiTTS, SarvamTTS]
-    assert (voices[0].speaker, voices[1].speaker) == ("Algenib", "anand")
-    assert "late 40s" in voices[0].style
+    assert [(type(v), v.speaker) for v in voices] == [(SarvamTTS, "anand")]  # Gemini off until verified

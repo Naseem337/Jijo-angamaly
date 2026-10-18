@@ -286,11 +286,14 @@ def test_text_message_gets_text_only(env_with_voice) -> None:
     assert [b.get("type", "read") for b in sent_bodies(sent)] == ["read", "text"] and tts.calls == []
 
 
-def test_unclear_voice_note_reply_is_spoken_too(env_with_voice, stt) -> None:
+def test_voice_problems_and_ai_outage_get_text_only(env_with_voice, stt) -> None:
     client, llm, _, sent, tts = env_with_voice
     stt.script.append(Transcript("", "ml-IN", 1.0))
     post(client, payload(VOICE))
-    assert [b.get("type", "read") for b in sent_bodies(sent)] == ["read", "text", "audio"]
-    # a brand-new customer has no language yet, so text and voice are in English
-    assert tts.calls == [("Sorry, I couldn't hear that clearly. Could you say it again, or type it?", "en-IN")]
-    assert llm.calls == []
+    assert [b.get("type", "read") for b in sent_bodies(sent)] == ["read", "text"]
+    from app.providers.llm import LLMError
+    stt.script.append(Transcript("Swift undo?", "en-IN", 0.95))
+    llm.script.append(LLMError("fallback", "all providers failed: 429"))
+    post(client, payload({**VOICE, "id": "wamid.v2"}))
+    assert [b.get("type", "read") for b in sent_bodies(sent)][2:] == ["read", "text"]
+    assert tts.calls == []

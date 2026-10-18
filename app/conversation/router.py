@@ -74,11 +74,7 @@ class MessageRouter:
                                               source="voice", id=msg.id))
                 replies = VOICE_PROBLEM_REPLY[problem]
                 ok = self._send(phone, replies.get(customer.language, replies["en"]), store=True)
-                voice_out = self._voice_out()
-                if ok and problem != "failed" and voice_out and voice_out.wants_voice("voice"):
-                    spoken_language = "en" if customer.language == "en" else "ml"
-                    voice_out.send(phone, replies[spoken_language], spoken_language)
-                return "voice_problem" if ok else "send_failed"
+                return "voice_problem" if ok else "send_failed"  # text only: no voice for problems
             text, source = result.text, "voice"
         elif not msg.is_text:
             self.repo.add_message(Message(cid, phone, "in", msg.text or f"[{msg.type}]", now, id=msg.id))

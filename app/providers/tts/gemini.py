@@ -10,6 +10,10 @@ Gemini follows the style instruction, which Sarvam can't.
     complete WAV file when tested; raw 16-bit PCM (audio/L16;rate=…) is wrapped as WAV.
   - A ~18 s Malayalam line took 6–11 s. The free tier has small rate limits, which is
     why VoiceOut falls back to the backup voice.
+  - The style must NOT be put in front of the text: tested on 2026-10-19, "<style> Say:
+    <text>" made the voice read the whole instruction aloud. It goes in systemInstruction
+    instead. That form is NOT yet verified live (the free quota ran out), so the voice
+    stays disabled in client.yaml until a listen + transcript check shows no leak.
 """
 
 from __future__ import annotations
@@ -60,7 +64,8 @@ class GeminiTTS:
         if len(text) > MAX_CHARS:
             raise TTSError(f"text too long for TTS ({len(text)} > {MAX_CHARS} chars)")
         body = {
-            "contents": [{"parts": [{"text": f"{self.style} Say: {text}"}]}],
+            "systemInstruction": {"parts": [{"text": self.style}]},  # never spoken; see module note
+            "contents": [{"parts": [{"text": text}]}],
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
                 "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": self.speaker}}},
