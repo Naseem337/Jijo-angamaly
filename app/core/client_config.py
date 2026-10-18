@@ -126,6 +126,7 @@ class SpeechProviderConfig(BaseModel):
     timeout_s: float = 20.0
     keyterms: list[str] = []  # STT spelling hints (car names), at most 50
     pace: float = Field(1.0, ge=0.5, le=2.0)  # TTS speaking speed
+    temperature: float | None = Field(None, ge=0.01, le=1.0)  # TTS expressiveness (bulbul:v3)
 
 
 class ProvidersConfig(BaseModel):

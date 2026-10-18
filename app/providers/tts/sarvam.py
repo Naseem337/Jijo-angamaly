@@ -24,12 +24,14 @@ MAX_CHARS = 2500
 
 class SarvamTTS:
     def __init__(self, api_key: str, *, model: str = "bulbul:v3", speaker: str = "kavya",
-                 pace: float = 1.0, sample_rate: int = 24000, timeout_s: float = 20.0,
+                 pace: float = 1.0, temperature: float | None = None, sample_rate: int = 24000,
+                 timeout_s: float = 20.0,
                  http: httpx.Client | None = None) -> None:
         self._headers = {"api-subscription-key": api_key}
         self.model = model
         self.speaker = speaker
         self.pace = pace
+        self.temperature = temperature  # higher = livelier, less flat (v3 default 0.6)
         self.sample_rate = sample_rate
         self._http = http or httpx.Client(timeout=timeout_s)
 
@@ -41,6 +43,8 @@ class SarvamTTS:
             raise TTSError(f"text too long for TTS ({len(text)} > {MAX_CHARS} chars)")
         body = {"text": text, "language_code": language_code, "model": self.model,
                 "speaker": self.speaker, "pace": self.pace, "speech_sample_rate": self.sample_rate}
+        if self.temperature is not None:
+            body["temperature"] = self.temperature
         try:
             resp = self._http.post(URL, headers=self._headers, json=body)
         except httpx.HTTPError as exc:

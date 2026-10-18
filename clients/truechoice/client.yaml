@@ -90,7 +90,8 @@ providers:
     model: "${SARVAM_TTS_MODEL:-bulbul:v3}"
     language_code: ml-IN
     speaker: "${SARVAM_TTS_SPEAKER:-anand}"   # male, to match bot_name Arjun
-    pace: 1.05
+    pace: 0.95               # a touch slower sounds more relaxed and human
+    temperature: 0.9         # more expressive, less flat (Sarvam default 0.6)
 
 voice:
   policy: mirror          # reply with voice only if the customer sent voice or asked

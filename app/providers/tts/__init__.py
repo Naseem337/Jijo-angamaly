@@ -18,4 +18,5 @@ def build_tts(config: ClientConfig, secrets: SecretResolver) -> TTSProvider:
         return MockTTS()
     # voice.tts_timeout_s: the voice note is a bonus after the text, so don't wait long for it.
     return SarvamTTS(secrets.get(cfg.api_key_secret or ""), model=cfg.model or "bulbul:v3",
-                     speaker=cfg.speaker or "kavya", pace=cfg.pace, timeout_s=config.voice.tts_timeout_s)
+                     speaker=cfg.speaker or "anand", pace=cfg.pace,
+                     temperature=cfg.temperature, timeout_s=config.voice.tts_timeout_s)
