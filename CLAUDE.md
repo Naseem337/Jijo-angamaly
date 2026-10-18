@@ -83,7 +83,7 @@ local `.env` override can't change test results.
   - TTS (Step 8): `bulbul:v3` is the default; `bulbul:v4-flash` is recommended; v2 is still served.
     Its fields are `text` and `language_code`, and it returns `audios` (base64 WAV). `opus` output is
     rejected on v3/v4-flash, so WAV must be converted to OGG/Opus with ffmpeg. Max 2500 chars.
-- ffmpeg 9.0.2 is a plain exe at `%USERPROFILE%	oolsfmpeg.exe` (found by `app.providers.audio.find_ffmpeg`,
+- ffmpeg 9.0.2 is a plain exe at `%USERPROFILE%\tools\ffmpeg.exe` (found by `app.providers.audio.find_ffmpeg`,
   or `FFMPEG_PATH`). On Lambda it comes from a layer at /opt/bin.
 - WhatsApp templates (docs/whatsapp_templates.md) have **not** been submitted yet. They're only
   needed for alerts (Step 10).
