@@ -82,7 +82,7 @@ local `.env` override can't change test results.
   - **Hard 30 s limit per request**, so longer notes are cut into 28 s WAV pieces with ffmpeg.
   - OGG/Opus is accepted, but only with MIME `audio/ogg` (`; codecs=opus` gets a 400).
   - `keyterms` (≤50) is set in client.yaml.
-  - TTS: **only `bulbul:v3` speaks Malayalam** (v4-flash doesn't). Voice `kavya` is set by `SARVAM_TTS_SPEAKER`.
+  - TTS: **only `bulbul:v3` speaks Malayalam** (v4-flash doesn't). Voice is **`anand` (male), to match the persona Arjun**; the user noticed the female `kavya` voice didn't fit. Override it with `SARVAM_TTS_SPEAKER`.
     The user heard samples in data/voice_samples (kavya, priya, shreya, kavitha, anand, gokul, plus a
     Gemini TTS sample) but hasn't picked one yet. Malayalam needs native script, so Manglish replies are
     spoken in Malayalam script. A ~11 s note takes ~5 s to generate and is ~40 KB.

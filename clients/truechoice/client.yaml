@@ -89,7 +89,7 @@ providers:
     # data/voice_samples): kavya, priya, shreya, kavitha (female); anand, gokul (male).
     model: "${SARVAM_TTS_MODEL:-bulbul:v3}"
     language_code: ml-IN
-    speaker: "${SARVAM_TTS_SPEAKER:-kavya}"
+    speaker: "${SARVAM_TTS_SPEAKER:-anand}"   # male, to match bot_name Arjun
     pace: 1.05
 
 voice:
