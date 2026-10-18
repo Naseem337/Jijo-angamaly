@@ -173,3 +173,14 @@ def test_voice_in_outcomes() -> None:
     assert VoiceIn(FakeWhatsApp(b"x"), MockSTT()).process(None).problem == "failed"
     unclear = VoiceIn(FakeWhatsApp(fake_voice_note(2)), MockSTT([Transcript("", "ml-IN", 1.0)])).process("m")
     assert unclear.problem == "unclear"
+
+
+@respx.mock
+def test_slow_media_download_is_retried_once() -> None:
+    respx.get(f"{GRAPH}/m1").mock(return_value=httpx.Response(200, json={"url": MEDIA_URL, "file_size": 5}))
+    fetch = respx.get(MEDIA_URL).mock(side_effect=[httpx.ReadTimeout("slow CDN"), httpx.Response(200, content=b"audio")])
+    assert WhatsAppClient("1", "t").download_media("m1")[0] == b"audio"
+    assert fetch.call_count == 2
+    fetch.mock(side_effect=httpx.ReadTimeout("still slow"))
+    with pytest.raises(WhatsAppError, match="media download failed"):
+        WhatsAppClient("1", "t").download_media("m1")

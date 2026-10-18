@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 
 MAX_TEXT_CHARS = 4096  # WhatsApp's limit for a text message body
 MAX_MEDIA_BYTES = 16 * 1024 * 1024  # WhatsApp's own limit for audio
+MEDIA_TIMEOUT_S = 60.0
 
 
 class WhatsAppError(RuntimeError):
@@ -68,14 +69,14 @@ class WhatsAppClient:
         """(content, mime type) of an inbound voice note / image. Two calls: the media id
         gives a short-lived URL, which is fetched with the same token. Kept in memory only."""
         try:
-            meta = self._http.get(f"{self._graph}/{media_id}", headers=self._headers)
+            meta = self._get_with_retry(f"{self._graph}/{media_id}")
             if meta.status_code != 200:
                 raise WhatsAppError(f"media lookup HTTP {meta.status_code}: {meta.text[:200]}",
                                     status=meta.status_code)
             info = meta.json()
             if int(info.get("file_size") or 0) > max_bytes:
                 raise WhatsAppError(f"media too large ({info.get('file_size')} bytes)")
-            resp = self._http.get(info["url"], headers=self._headers)
+            resp = self._get_with_retry(info["url"])
         except httpx.HTTPError as exc:
             raise WhatsAppError(f"media download failed: {exc!r}") from exc
         except (KeyError, ValueError) as exc:
@@ -85,6 +86,15 @@ class WhatsAppClient:
         if len(resp.content) > max_bytes:
             raise WhatsAppError(f"media too large ({len(resp.content)} bytes)")
         return resp.content, info.get("mime_type") or resp.headers.get("content-type", "")
+
+    def _get_with_retry(self, url: str) -> httpx.Response:
+        """Media fetches: Meta's CDN is sometimes slow (a 15 s timeout failed live on
+        2026-10-18), so allow MEDIA_TIMEOUT_S and try a second time on a timeout/connection error."""
+        try:
+            return self._http.get(url, headers=self._headers, timeout=MEDIA_TIMEOUT_S)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            log.warning("Media fetch failed (%r), retrying once", exc)
+            return self._http.get(url, headers=self._headers, timeout=MEDIA_TIMEOUT_S)
 
     def mark_read(self, message_id: str, *, typing: bool = True) -> bool:
         """Blue ticks, plus a "typing…" bubble while the agent thinks. Best effort only."""
