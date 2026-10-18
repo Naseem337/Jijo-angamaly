@@ -79,6 +79,9 @@ def turn_context(config: ClientConfig, *, language: str, now: datetime, customer
         f"Reply language: {LANGUAGE_INSTRUCTIONS.get(language, LANGUAGE_INSTRUCTIONS['en'])}.",
         f"Now: {now_ist:%a %d %b %Y, %H:%M} IST. Showroom: {_next_opening(now_ist, config)}.",
         f"Customer name: {customer_name or 'unknown'}. Message type: {source}.",
+        *(["This message was transcribed from a voice note, so names and numbers may be misheard; "
+           "if something sounds odd, ask. Saving a lead or requirement will need a read-back."]
+          if source == "voice" else []),
         *(notes or []),
         "[Customer message]",
     ]

@@ -12,6 +12,7 @@ from app.core.phone import mask_phone, to_wa_id
 log = logging.getLogger(__name__)
 
 MAX_TEXT_CHARS = 4096  # WhatsApp's limit for a text message body
+MAX_MEDIA_BYTES = 16 * 1024 * 1024  # WhatsApp's own limit for audio
 
 
 class WhatsAppError(RuntimeError):
@@ -24,7 +25,8 @@ class WhatsAppError(RuntimeError):
 class WhatsAppClient:
     def __init__(self, phone_number_id: str, access_token: str, *, api_version: str = "v25.0",
                  timeout_s: float = 15.0, http: httpx.Client | None = None) -> None:
-        self._url = f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages"
+        self._graph = f"https://graph.facebook.com/{api_version}"
+        self._url = f"{self._graph}/{phone_number_id}/messages"
         self._headers = {"Authorization": f"Bearer {access_token}"}
         self._http = http or httpx.Client(timeout=timeout_s)
 
@@ -61,6 +63,28 @@ class WhatsAppClient:
                            "template": {"name": name, "language": {"code": language},
                                         "components": components}})
         return data["messages"][0]["id"]
+
+    def download_media(self, media_id: str, *, max_bytes: int = MAX_MEDIA_BYTES) -> tuple[bytes, str]:
+        """(content, mime type) of an inbound voice note / image. Two calls: the media id
+        gives a short-lived URL, which is fetched with the same token. Kept in memory only."""
+        try:
+            meta = self._http.get(f"{self._graph}/{media_id}", headers=self._headers)
+            if meta.status_code != 200:
+                raise WhatsAppError(f"media lookup HTTP {meta.status_code}: {meta.text[:200]}",
+                                    status=meta.status_code)
+            info = meta.json()
+            if int(info.get("file_size") or 0) > max_bytes:
+                raise WhatsAppError(f"media too large ({info.get('file_size')} bytes)")
+            resp = self._http.get(info["url"], headers=self._headers)
+        except httpx.HTTPError as exc:
+            raise WhatsAppError(f"media download failed: {exc!r}") from exc
+        except (KeyError, ValueError) as exc:
+            raise WhatsAppError(f"unexpected media lookup response: {exc!r}") from exc
+        if resp.status_code != 200:
+            raise WhatsAppError(f"media download HTTP {resp.status_code}", status=resp.status_code)
+        if len(resp.content) > max_bytes:
+            raise WhatsAppError(f"media too large ({len(resp.content)} bytes)")
+        return resp.content, info.get("mime_type") or resp.headers.get("content-type", "")
 
     def mark_read(self, message_id: str, *, typing: bool = True) -> bool:
         """Blue ticks, plus a "typing…" bubble while the agent thinks. Best effort only."""

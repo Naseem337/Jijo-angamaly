@@ -29,8 +29,9 @@ everything above it. Build order is PLAN.md §6.
 | 4 LLM providers: OpenAI-compatible, Anthropic SDK, mock, fallback chain | Done (`python -m app.providers.llm --client truechoice --each` checks real keys) |
 | 5 Agent: prompt, tools, EMI, guardrails, voice confirmation, tool loop | Done (`python -m app.cli_chat --client truechoice`); tested live on Gemini |
 | 6 WhatsApp: client, webhook, signature check, dedupe, router (text only) | **Done and live-tested on 2026-10-18**: the user chatted with the bot from their phone. Run it with `.venv\Scripts\python.exe scripts\dev_whatsapp.py`, which starts uvicorn plus a cloudflared quick tunnel and re-points Meta's webhook through the Graph API (app id from debug_token, app token = id\|secret). |
-| **7 Voice in (Sarvam STT)** | **NEXT**. Needs a Sarvam API key from the user. |
-| 8–14 | Not started |
+| 7 Voice in: download, length check, Sarvam STT, unclear check, read-back | Done; live-tested with Sarvam |
+| **8 Voice out (Sarvam TTS → OGG/Opus)** | **NEXT** |
+| 9–14 | Not started |
 
 Steps 1–6 are done; the bot answers on WhatsApp through the test number.
 
@@ -74,6 +75,16 @@ local `.env` override can't change test results.
     to new accounts. The free tier sometimes returns 503 "high demand"; that's why there's a backup model.
   - The free tier may use chats for training, so it's for testing only. Go-live means removing
     `LLM_CHAIN` from `.env`, which restores the default deepseek → openrouter → anthropic chain with paid keys.
+- **Sarvam** key is in `.env` (`SARVAM_API_KEY`). Facts checked live on 2026-10-18:
+  - STT: `saaras:v4` with `language_code=unknown`, which returns `language_code` and `language_probability`.
+  - **Hard 30 s limit per request**, so longer notes are cut into 28 s WAV pieces with ffmpeg.
+  - OGG/Opus is accepted, but only with MIME `audio/ogg` (`; codecs=opus` gets a 400).
+  - `keyterms` (≤50) is set in client.yaml.
+  - TTS (Step 8): `bulbul:v3` is the default; `bulbul:v4-flash` is recommended; v2 is still served.
+    Its fields are `text` and `language_code`, and it returns `audios` (base64 WAV). `opus` output is
+    rejected on v3/v4-flash, so WAV must be converted to OGG/Opus with ffmpeg. Max 2500 chars.
+- ffmpeg 9.0.2 is a plain exe at `%USERPROFILE%	oolsfmpeg.exe` (found by `app.providers.audio.find_ffmpeg`,
+  or `FFMPEG_PATH`). On Lambda it comes from a layer at /opt/bin.
 - WhatsApp templates (docs/whatsapp_templates.md) have **not** been submitted yet. They're only
   needed for alerts (Step 10).
 

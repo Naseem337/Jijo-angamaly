@@ -16,6 +16,7 @@ from app.core.client_config import load_client_config
 from app.core.clock import FixedClock
 from app.main import create_app
 from app.providers.llm import MockLLM
+from app.providers.stt import MockSTT, STTError, Transcript
 from app.runtime import Runtime
 from app.settings import SecretNotFound
 from app.storage.sqlite_repo import SQLiteRepository
@@ -56,18 +57,39 @@ def signed(body: bytes) -> dict[str, str]:
     return {"X-Hub-Signature-256": f"sha256={digest}", "Content-Type": "application/json"}
 
 
+MEDIA_URL = "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=media-1"
+VOICE_BYTES = b"OggS-not-really-audio"
+
+
 @pytest.fixture
-def env(monkeypatch: pytest.MonkeyPatch, clients_dir: Path, tmp_path: Path, clock: FixedClock):
+def stt() -> MockSTT:
+    return MockSTT()
+
+
+def make_env(monkeypatch, clients_dir: Path, tmp_path: Path, clock: FixedClock, stt):
     monkeypatch.setenv("TRUECHOICE_WHATSAPP_PHONE_NUMBER_ID", PHONE_ID)
     monkeypatch.setenv("TRUECHOICE_STAFF_NUMBERS", "")
     config = load_client_config("truechoice", clients_dir)
     repo = SQLiteRepository(tmp_path / "webhook.db")
     llm = MockLLM()
-    runtime = Runtime({"truechoice": config}, repo, DictSecrets(), clock, llm=llm)
+    runtime = Runtime({"truechoice": config}, repo, DictSecrets(), clock, llm=llm, stt=stt)
     with respx.mock(assert_all_called=False) as graph:
         sent = graph.post(GRAPH).mock(return_value=httpx.Response(200, json={"messages": [{"id": "wamid.out"}]}))
+        graph.get("https://graph.facebook.com/v25.0/media-1").mock(return_value=httpx.Response(200, json={
+            "url": MEDIA_URL, "mime_type": "audio/ogg; codecs=opus", "file_size": len(VOICE_BYTES), "id": "media-1"}))
+        graph.get(MEDIA_URL).mock(return_value=httpx.Response(200, content=VOICE_BYTES))
         yield TestClient(create_app(runtime)), llm, repo, sent
     repo.close()
+
+
+@pytest.fixture
+def env(monkeypatch: pytest.MonkeyPatch, clients_dir: Path, tmp_path: Path, clock: FixedClock, stt: MockSTT):
+    yield from make_env(monkeypatch, clients_dir, tmp_path, clock, stt)
+
+
+@pytest.fixture
+def env_without_stt(monkeypatch: pytest.MonkeyPatch, clients_dir: Path, tmp_path: Path, clock: FixedClock):
+    yield from make_env(monkeypatch, clients_dir, tmp_path, clock, None)  # no Sarvam key in DictSecrets
 
 
 def post(client: TestClient, data: dict):
@@ -137,14 +159,54 @@ def test_paused_chat_is_stored_but_not_answered(env, clock) -> None:
     assert repo.list_messages("truechoice", CUSTOMER)[0].text == "Hello, are you there?"
 
 
-def test_voice_note_gets_text_only_reply_for_now(env) -> None:
+VOICE = {"from": "919847012345", "id": "wamid.v", "timestamp": "1792219612", "type": "audio",
+         "audio": {"id": "media-1", "mime_type": "audio/ogg; codecs=opus", "voice": True}}
+
+
+def test_voice_note_is_transcribed_and_answered(env, stt) -> None:
     client, llm, repo, sent = env
-    voice = {"from": "919847012345", "id": "wamid.v", "timestamp": "1792219612", "type": "audio",
-             "audio": {"id": "media-1", "mime_type": "audio/ogg; codecs=opus", "voice": True}}
-    post(client, payload(voice))
+    stt.script.append(Transcript("എനിക്ക് പത്ത് ലക്ഷത്തിന് താഴെ ഒരു എസ്‌യുവി വേണം", "ml-IN", 1.0))
+    llm.script.append(MockLLM.text("ഉണ്ട്! ഏത് ഇന്ധനം വേണം?"))
+    post(client, payload(VOICE))
+
+    assert stt.calls == [(VOICE_BYTES, "audio/ogg; codecs=opus")]
+    prompt = llm.calls[0].messages[-1].content
+    assert "Message type: voice" in prompt and "transcribed from a voice note" in prompt
+    assert prompt.endswith("എനിക്ക് പത്ത് ലക്ഷത്തിന് താഴെ ഒരു എസ്‌യുവി വേണം")
+    assert "Reply language: Malayalam" in prompt
+    read_receipt, reply = sent_bodies(sent)
+    assert read_receipt["status"] == "read" and reply["text"]["body"] == "ഉണ്ട്! ഏത് ഇന്ധനം വേണം?"
+    inbound = repo.list_messages("truechoice", CUSTOMER)[0]
+    assert (inbound.id, inbound.source, inbound.text) == ("wamid.v", "voice", "എനിക്ക് പത്ത് ലക്ഷത്തിന് താഴെ ഒരു എസ്‌യുവി വേണം")
+
+
+@pytest.mark.parametrize(("result", "expected"), [
+    (Transcript("", "ml-IN", 0.9), "couldn't hear that clearly"),
+    (Transcript("hmm", None, 0.2), "couldn't hear that clearly"),
+    (STTError("too long", too_long=True), "too long"),
+    (STTError("Sarvam HTTP 500"), "can't process voice messages"),
+])
+def test_voice_problems_get_a_helpful_reply(env, stt, result, expected) -> None:
+    client, llm, repo, sent = env
+    stt.script.append(result)
+    post(client, payload(VOICE))
     assert llm.calls == []
-    assert "text messages" in sent_bodies(sent)[0]["text"]["body"]
-    assert [m.source for m in repo.list_messages("truechoice", CUSTOMER)] == ["voice", "text"]
+    assert expected in sent_bodies(sent)[-1]["text"]["body"]
+    assert repo.list_messages("truechoice", CUSTOMER)[0].text.startswith("[voice note:")
+
+
+def test_voice_without_speech_to_text_key_asks_to_type(env_without_stt) -> None:
+    client, llm, _, sent = env_without_stt
+    post(client, payload(VOICE))
+    assert llm.calls == [] and "type your question" in sent_bodies(sent)[-1]["text"]["body"]
+
+
+def test_images_get_text_or_voice_reply(env) -> None:
+    client, llm, _, sent = env
+    image = {"from": "919847012345", "id": "wamid.i", "timestamp": "1792219612", "type": "image",
+             "image": {"id": "media-2", "mime_type": "image/jpeg"}}
+    post(client, payload(image))
+    assert llm.calls == [] and "text and voice messages" in sent_bodies(sent)[0]["text"]["body"]
 
 
 def test_failed_send_does_not_crash(env) -> None:

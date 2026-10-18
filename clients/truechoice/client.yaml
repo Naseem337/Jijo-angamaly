@@ -72,8 +72,14 @@ providers:
   stt:
     kind: sarvam
     api_key_secret: sarvam_api_key
-    model: "${SARVAM_STT_MODEL:-saarika:v2.5}"
+    model: "${SARVAM_STT_MODEL:-saaras:v4}"   # checked live 2026-10-18; 30 s per request
     language_code: unknown        # auto-detect ml / en / code-mixed
+    # Spelling hints so car names come out right (Sarvam allows up to 50).
+    keyterms: [Maruti, Suzuki, Hyundai, Tata, Mahindra, Toyota, Honda, Kia, Skoda, Volkswagen,
+               Renault, Nissan, MG, Swift, Dzire, Baleno, Wagon R, Ertiga, Brezza, Alto, Celerio,
+               Creta, Venue, Verna, i20, i10, Innova, Innova Crysta, Fortuner, Glanza, City,
+               Amaze, XUV700, XUV300, Scorpio, Thar, Nexon, Punch, Tiago, Seltos, Sonet, EMI,
+               SUV, sedan, hatchback, automatic, diesel, petrol, CNG, True Choice]
   tts:
     kind: sarvam
     api_key_secret: sarvam_api_key
