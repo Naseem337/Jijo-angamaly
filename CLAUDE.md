@@ -28,10 +28,11 @@ everything above it. Build order is PLAN.md §6.
 | 3 Inventory: 30-car mock JSON, mock adapter, real stub, model aliases | Done (`python -m app.inventory --client truechoice --model swift --budget 7L`) |
 | 4 LLM providers: OpenAI-compatible, Anthropic SDK, mock, fallback chain | Done (`python -m app.providers.llm --client truechoice --each` checks real keys) |
 | 5 Agent: prompt, tools, EMI, guardrails, voice confirmation, tool loop | Done (`python -m app.cli_chat --client truechoice`); tested live on Gemini |
-| 6 WhatsApp: client, webhook, signature check, dedupe, router (text only) | Code done and tested. **Live hookup in progress:** the user is installing cloudflared (`winget install --id Cloudflare.cloudflared`). Then run `uvicorn app.main:app --port 8000` plus `cloudflared tunnel --url http://localhost:8000`, and set the Meta webhook to `<tunnel>/webhook/truechoice` with the verify token from `.env`, subscribed to `messages`. |
-| 7–14 | Not started |
+| 6 WhatsApp: client, webhook, signature check, dedupe, router (text only) | **Done and live-tested on 2026-10-18**: the user chatted with the bot from their phone. Run it with `.venv\Scripts\python.exe scripts\dev_whatsapp.py`, which starts uvicorn plus a cloudflared quick tunnel and re-points Meta's webhook through the Graph API (app id from debug_token, app token = id\|secret). |
+| **7 Voice in (Sarvam STT)** | **NEXT**. Needs a Sarvam API key from the user. |
+| 8–14 | Not started |
 
-The AI brain (Steps 4–5) is done; WhatsApp (Step 6) is next.
+Steps 1–6 are done; the bot answers on WhatsApp through the test number.
 
 Agent design notes (app/agent/):
 - `Agent.handle()` owns a whole customer turn: it stores the inbound and outbound messages, and the
@@ -57,8 +58,12 @@ local `.env` override can't change test results.
     against Graph API **v25.0**. The config was moved from v21.0 to v25.0.
   - App secret (32 hex characters) and staff number are in `.env`.
   - The verify token was generated into `.env`.
-  - **Webhook not configured yet.** That happens in Step 6, via a cloudflared tunnel to
-    `/webhook/truechoice`.
+  - The webhook is configured (Meta app id 1116318957515906, `messages` subscribed). Quick-tunnel URLs
+    change on every start, and `scripts/dev_whatsapp.py` updates Meta automatically. Quick tunnels die
+    when the laptop sleeps.
+  - cloudflared is a plain exe at `%USERPROFILE%	ools\cloudflared.exe` (winget needed admin, which
+    the user missed).
+  - If port 8000 is busy, check for an old `uvicorn --reload` and its `spawn_main` child process.
 - `scripts/send_test_message.ps1` sends a test text from the test number.
 - **AI provider for testing: Gemini free tier** (user's choice on 2026-10-17, no DeepSeek credit yet).
   - `.env` has `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-3.8-flash`, `GEMINI_BACKUP_MODEL=gemini-3.5-flash`

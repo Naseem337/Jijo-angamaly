@@ -17,6 +17,7 @@ from app.whatsapp import webhook
 def create_app(runtime: Runtime | None = None) -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines print full URLs (sheet id)
     runtime = runtime or Runtime.from_settings(settings)  # fails fast on bad client config
 
     app = FastAPI(title="Dealer WhatsApp Agent")
