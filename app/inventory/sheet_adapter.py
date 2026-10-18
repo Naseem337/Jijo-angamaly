@@ -43,7 +43,8 @@ COLUMNS: dict[str, tuple[str, ...]] = {
     "color": ("color", "colour"),
     "owners": ("owners", "owner", "no of owners", "ownership"),
     "body_type": ("body type", "body", "type", "segment"),
-    "registration": ("registration", "rto", "reg"),
+    "registration": ("registration", "registered city", "registration city", "reg city",
+                     "registered at", "rto", "reg"),
     "location": ("location", "branch", "showroom", "yard"),
     "status": ("status", "availability"),
     "mileage_kmpl": ("expected mileage", "mileage", "fuel efficiency", "kmpl"),
@@ -70,11 +71,23 @@ def _header_key(header: str) -> str:
     return " ".join(text.split())
 
 
-def _map_headers(headers: list[str]) -> dict[str, str]:
-    """Car field -> the sheet's actual header."""
+def _map_headers(headers: list[str], overrides: dict[str, str] | None = None) -> dict[str, str]:
+    """Car field -> the sheet's actual header.
+
+    `overrides` (client.yaml inventory.options.columns) wins over the name guessing, e.g.
+    {"registration": "Location"} for a sheet whose Location column is the registration city.
+    """
     keys = {_header_key(h): h for h in headers}
     mapping: dict[str, str] = {}
+    for field, header in (overrides or {}).items():
+        if field not in COLUMNS:
+            raise InventoryError(f"unknown car field in inventory column settings: {field}")
+        if _header_key(header) not in keys:
+            raise InventoryError(f"inventory sheet has no column {header!r} (found: {', '.join(headers)})")
+        mapping[field] = keys[_header_key(header)]
     for field, names in COLUMNS.items():
+        if field in mapping:
+            continue
         for name in names:
             if name in keys and keys[name] not in mapping.values():
                 mapping[field] = keys[name]
@@ -119,10 +132,10 @@ def _row_to_car(row: dict[str, str], mapping: dict[str, str]) -> Car:
     return Car.model_validate(data)
 
 
-def parse_sheet_csv(text: str) -> tuple[list[Car], list[str]]:
+def parse_sheet_csv(text: str, columns: dict[str, str] | None = None) -> tuple[list[Car], list[str]]:
     """Cars from CSV text, plus one warning per skipped row."""
     reader = csv.DictReader(io.StringIO(text))
-    mapping = _map_headers(list(reader.fieldnames or []))
+    mapping = _map_headers(list(reader.fieldnames or []), columns)
     cars: list[Car] = []
     warnings: list[str] = []
     seen: set[str] = set()
@@ -152,9 +165,11 @@ def sheet_csv_url(sheet_id: str, gid: str | int | None = None) -> str:
 
 class GoogleSheetInventoryAdapter(InventoryAdapter):
     def __init__(self, csv_url: str, aliases: ModelAliases | None = None, *, cache_seconds: float = 300,
-                 stale_seconds: float = 3600, http: httpx.Client | None = None,
+                 stale_seconds: float = 3600, columns: dict[str, str] | None = None,
+                 http: httpx.Client | None = None,
                  monotonic: Callable[[], float] = time.monotonic) -> None:
         self.csv_url = csv_url
+        self._columns = dict(columns or {})
         self._aliases = aliases or ModelAliases()
         self._cache_seconds = cache_seconds
         self._stale_seconds = stale_seconds
@@ -186,7 +201,7 @@ class GoogleSheetInventoryAdapter(InventoryAdapter):
             # A private sheet returns a Google sign-in page (HTML) instead of CSV.
             raise InventoryError(f"inventory sheet not readable (HTTP {resp.status_code}, "
                                  f"{resp.headers.get('content-type')}); is it shared as 'anyone with the link'?")
-        cars, warnings = parse_sheet_csv(resp.content.decode("utf-8-sig"))
+        cars, warnings = parse_sheet_csv(resp.content.decode("utf-8-sig"), self._columns)
         for warning in warnings:
             log.warning("Inventory sheet: %s", warning)
         if not cars:

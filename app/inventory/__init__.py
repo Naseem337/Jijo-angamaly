@@ -33,5 +33,6 @@ def build_inventory_adapter(config: ClientConfig) -> InventoryAdapter:
         if not sheet_id:
             raise InventoryError("inventory.adapter is google_sheet but no sheet_id is set")
         return GoogleSheetInventoryAdapter(sheet_csv_url(sheet_id, options.get("gid")), aliases,
-                                           cache_seconds=float(options.get("cache_seconds", 300)))
+                                           cache_seconds=float(options.get("cache_seconds", 300)),
+                                           columns=options.get("columns") or {})
     return RealInventoryAdapter(options)

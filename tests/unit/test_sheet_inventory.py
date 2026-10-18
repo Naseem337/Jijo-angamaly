@@ -124,3 +124,17 @@ B4,Honda,City,Sedan,2018,Petrol,Manual,1,"60,000",Kochi,"600,000",Pending paperw
     assert (by_id["B2"].body_type, by_id["B2"].status, by_id["B2"].is_available) == ("muv", "coming_soon", False)
     assert by_id["B3"].status == "sold"
     assert "B4" not in by_id and "unknown status" in warnings[0]  # unknown wording is not offered
+
+
+def test_column_override_reads_location_as_registration() -> None:
+    text = """Car ID,Make,Model,Year,Fuel Type,Odometer (km),Location,Price (INR)
+R1,Hyundai,Creta,2021,Petrol,"30,000",Delhi,"900,000"
+"""
+    [car], _ = parse_sheet_csv(text, {"registration": "Location"})
+    assert (car.registration, car.location) == ("Delhi", "")
+    [car], _ = parse_sheet_csv(text)  # without the setting, Location means where the car is
+    assert (car.registration, car.location) == ("", "Delhi")
+    with pytest.raises(InventoryError, match="no column 'Reg City'"):
+        parse_sheet_csv(text, {"registration": "Reg City"})
+    with pytest.raises(InventoryError, match="unknown car field"):
+        parse_sheet_csv(text, {"rto_code": "Location"})

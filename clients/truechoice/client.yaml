@@ -37,6 +37,9 @@ inventory:
     sheet_id: "${TRUECHOICE_INVENTORY_SHEET_ID}"   # the long id in the sheet's URL
     gid: "${TRUECHOICE_INVENTORY_SHEET_GID}"       # which tab: the number after gid= in its URL; empty = first tab
     cache_seconds: 300          # re-read the sheet at most every 5 minutes
+    # True Choice's "Location" column is the city the car is REGISTERED in, not where it
+    # is parked (all cars are at the showroom).
+    columns: {registration: Location}
 
 providers:
   llm:

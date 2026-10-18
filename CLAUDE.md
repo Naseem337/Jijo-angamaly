@@ -108,7 +108,9 @@ local `.env` override can't change test results.
   - Status mapping: Available is offered. Booked, Sold and **Under Inspection (`coming_soon`)** are never
     offered. Unknown status wording is skipped with a warning, which is the safe default.
   - Body Type: "Compact SUV" maps to suv and "MUV/MPV" to muv.
-  - The sheet's locations are all over India, not just Kerala (it's likely sample data).
+  - **The sheet's `Location` column is the city the car is REGISTERED in** (user, 2026-10-19), not where it
+    is; all cars are at the showroom. It's mapped by `inventory.options.columns: {registration: Location}`
+    in client.yaml (per-client column overrides in sheet_adapter), and the prompt explains it.
   - The sheet id is only in `.env` (`TRUECHOICE_INVENTORY_ADAPTER=google_sheet`,
     `TRUECHOICE_INVENTORY_SHEET_ID`), never in git. Tests force the mock stock (tests/conftest.py).
   - So no inventory page is needed in the dashboard.

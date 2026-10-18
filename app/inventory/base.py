@@ -50,7 +50,7 @@ class Car(BaseModel):
     owners: int = Field(1, ge=1)
     color: str = ""
     body_type: BodyType = "other"
-    registration: str = ""  # RTO code, e.g. "KL-07"
+    registration: str = ""  # where it is registered: RTO code ("KL-07") or city ("Delhi")
     location: str = ""
     status: CarStatus = "available"
     listed_on: date | None = None
