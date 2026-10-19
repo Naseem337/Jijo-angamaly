@@ -41,8 +41,10 @@ opt_out_extra_phrases: []
 dealer_facts:
   - "Showroom: True Choice, Makkaraparamba, Malappuram, Kerala (exact address / Google Maps link: the team shares it)."
   - "All listed cars are at the showroom; the registration city in the stock list is only where the car is registered."
-  - "Test drives are at the showroom; book a day and time and the team confirms."
-  - "(placeholder) We accept exchange of your old car; valuation only after the team inspects it."
+  - "Open Monday to Saturday, 9:30 AM to 7:00 PM. Closed on Sunday."
+  - "Test drives are only for customers who visit the yard/showroom; no home test drives or bringing cars to the customer."
+  - "We accept the customer's old car in exchange; its value is decided only after the team inspects it."
+  - "We also buy cars from customers (outright purchase, no need to buy one from us); price only after inspection."
   - "(placeholder) Loans can be arranged through partner banks/NBFCs; approval and rate depend on the bank."
 
 # How the bot talks: dialect, slang and politeness, written in plain words. It shapes both
