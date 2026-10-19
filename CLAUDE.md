@@ -68,7 +68,10 @@ local `.env` override can't change test results.
   - If port 8000 is busy, check for an old `uvicorn --reload` and its `spawn_main` child process.
 - `scripts/send_test_message.ps1` sends a test text from the test number.
 - **AI provider for testing: Gemini free tier** (user's choice on 2026-10-17, no DeepSeek credit yet).
-  - `.env` has `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-3.8-flash`, `GEMINI_BACKUP_MODEL=gemini-3.5-flash`
+  - **Latency fix (2026-10-20):** gemini-3.8-flash kept timing out at 30 s on the free tier (over a minute
+    per reply), so `.env` now has `GEMINI_MODEL=gemini-3.5-flash` (~3.5 s) and `GEMINI_BACKUP_MODEL=gemini-3.8-flash`.
+    Gemini providers have `timeout_s: 12`, and FallbackLLM rests a provider for 120 s after a retryable failure.
+  - `.env` has `GEMINI_API_KEY` and the two model names above
     and `LLM_CHAIN=gemini,gemini_backup`. Both models were verified with
     `python -m app.providers.llm --client truechoice --each`.
   - Gemini 3.x counts hidden thinking against `max_tokens`, so client.yaml gives it

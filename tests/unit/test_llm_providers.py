@@ -284,3 +284,32 @@ def test_gemini_thought_signature_is_echoed_back() -> None:
     llm.complete("S", [ChatMessage.user("swift?"), first.to_message(), ChatMessage.tool_result("c1", "[]")], [SEARCH])
     sent = json.loads(route.calls[1].request.content)["messages"][2]["tool_calls"][0]
     assert sent["extra_content"] == signature
+
+
+def test_failing_provider_rests_so_later_calls_skip_its_timeout() -> None:
+    now = [0.0]
+    slow = MockLLM([LLMError("slow", "timed out"), MockLLM.text("late")], name="slow")
+    fast = MockLLM([MockLLM.text("one"), MockLLM.text("two")], name="fast")
+    chain = FallbackLLM([slow, fast], cooldown_s=120, monotonic=lambda: now[0])
+    assert chain.complete("S", []).text == "one"
+    assert chain.complete("S", []).text == "two"  # slow is resting: not called again
+    assert len(slow.calls) == 1
+    now[0] = 121
+    fast.script.append(MockLLM.text("three"))
+    assert chain.complete("S", []).text == "late"  # rest is over: back to the normal order
+
+
+def test_resting_providers_are_still_tried_when_nothing_else_works() -> None:
+    a = MockLLM([LLMError("a", "down"), MockLLM.text("a is back")], name="a")
+    chain = FallbackLLM([a], cooldown_s=120, monotonic=lambda: 0.0)
+    with pytest.raises(LLMError):
+        chain.complete("S", [])
+    assert chain.complete("S", []).text == "a is back"
+
+
+def test_non_retryable_errors_do_not_rest_the_provider() -> None:
+    bad = MockLLM([LLMError("bad", "HTTP 400", retryable=False), MockLLM.text("fine")], name="bad")
+    other = MockLLM([MockLLM.text("other")], name="other")
+    chain = FallbackLLM([bad, other], cooldown_s=120, monotonic=lambda: 0.0)
+    assert chain.complete("S", []).text == "other"
+    assert chain.complete("S", []).text == "fine"

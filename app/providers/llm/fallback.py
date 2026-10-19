@@ -3,22 +3,42 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 
 from app.providers.llm.base import ChatMessage, LLMError, LLMProvider, LLMResponse, ToolSpec
 
 log = logging.getLogger(__name__)
 
+COOLDOWN_SECONDS = 120.0
+
 
 class FallbackLLM:
     """A provider made of other providers. A failure or a refusal moves on to the next
-    one; the first usable answer wins. Raises LLMError only if every provider fails."""
+    one; the first usable answer wins. Raises LLMError only if every provider fails.
+
+    A provider that just failed with a retryable error (timeout, overload, rate limit) is
+    skipped for COOLDOWN_SECONDS. One reply takes 2–4 calls; without this, a slow model
+    made the customer wait for its timeout on every call (over a minute, live 2026-10-20).
+    If every provider is cooling down, they are all tried anyway rather than giving up.
+    """
 
     name = "fallback"
 
-    def __init__(self, providers: list[LLMProvider]) -> None:
+    def __init__(self, providers: list[LLMProvider], *, cooldown_s: float = COOLDOWN_SECONDS,
+                 monotonic: Callable[[], float] = time.monotonic) -> None:
         if not providers:
             raise ValueError("FallbackLLM needs at least one provider")
         self.providers = providers
+        self._cooldown_s = cooldown_s
+        self._monotonic = monotonic
+        self._resting_until: dict[str, float] = {}
+
+    def _order(self) -> list[LLMProvider]:
+        now = self._monotonic()
+        ready = [p for p in self.providers if self._resting_until.get(p.name, 0) <= now]
+        resting = [p for p in self.providers if p not in ready]
+        return ready + resting  # resting ones only get a turn if every ready one fails
 
     def complete(
         self,
@@ -29,13 +49,16 @@ class FallbackLLM:
     ) -> LLMResponse:
         failures: list[str] = []
         refusal: LLMResponse | None = None
-        for provider in self.providers:
+        for provider in self._order():
             try:
                 response = provider.complete(system, messages, tools, max_tokens)
             except LLMError as exc:
                 log.warning("LLM provider failed, trying next: %s", exc)
                 failures.append(str(exc))
+                if exc.retryable:
+                    self._resting_until[provider.name] = self._monotonic() + self._cooldown_s
                 continue
+            self._resting_until.pop(provider.name, None)
             if response.stop_reason == "refusal":
                 log.warning("LLM provider %s refused, trying next", provider.name)
                 failures.append(f"[{provider.name}] refused")
