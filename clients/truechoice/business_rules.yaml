@@ -35,6 +35,16 @@ retention_days: 90           # messages/audio metadata older than this are delet
 # Added to the built-in stop / venda / not interested lists.
 opt_out_extra_phrases: []
 
+# Facts about True Choice the bot may tell customers, in plain words, one per line.
+# Anything NOT listed here (or in the stock sheet) the bot answers with "the team will confirm".
+# (placeholder) items need checking by True Choice before go-live.
+dealer_facts:
+  - "Showroom: True Choice, Makkaraparamba, Malappuram, Kerala (exact address / Google Maps link: the team shares it)."
+  - "All listed cars are at the showroom; the registration city in the stock list is only where the car is registered."
+  - "Test drives are at the showroom; book a day and time and the team confirms."
+  - "(placeholder) We accept exchange of your old car; valuation only after the team inspects it."
+  - "(placeholder) Loans can be arranged through partner banks/NBFCs; approval and rate depend on the bank."
+
 # How the bot talks: dialect, slang and politeness, written in plain words. It shapes both
 # the text replies and the voice notes. Edit freely, then restart the bot.
 speaking_style: >

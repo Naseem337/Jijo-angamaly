@@ -139,6 +139,13 @@ local `.env` override can't change test results.
     speaking_style says Malappuram showroom, with a light Malabar flavour.
   - `speaking_style` in business_rules.yaml (dialect and tone, plain words) feeds both the text prompt and
     the voice-script prompt.
+- **Robustness (user, 2026-10-20: "handle any message a Malayali customer asks, not one-off fixes"):**
+  - The prompt has HOW TO THINK (general rules), a COMMON SITUATIONS playbook (~30 intents) and DEALER FACTS
+    (`dealer_facts` in business_rules.yaml; '(placeholder)' marks facts True Choice still has to confirm,
+    and that mark is stripped from the prompt).
+  - Exam: `scripts/live_eval.py` runs tests/eval/customer_scenarios.yaml (46 scenarios) against the real AI
+    with automatic checks, and saves results to data/eval/. A full run needs ~150 AI calls, which means a
+    paid key. Process: run it, fix the prompt with general rules (not per-message hacks), run again.
 - Hosting is still the AWS plan. The user once pasted a Hetzner link, but that was a mistake.
 - `purge_old_data` deletes old `pending_actions` (the interface docstring wins). The test was fixed
   to match.

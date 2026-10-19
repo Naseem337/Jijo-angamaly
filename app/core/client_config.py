@@ -91,6 +91,9 @@ class BusinessRules(BaseModel):
     opt_out_extra_phrases: list[str] = []
     # How the bot talks (dialect, slang, politeness), in plain words. Used for text and voice.
     speaking_style: str = "Friendly, respectful, everyday Kerala Malayalam."
+    # Facts about the dealership the bot may state (address, exchange, finance, …), one per
+    # line in plain words. Anything not listed here or in the stock data: "team will confirm".
+    dealer_facts: list[str] = []
     # canonical model name -> spellings customers use ("xuv 7oo", "crysta", …)
     model_aliases: dict[str, list[str]] = {}
 
