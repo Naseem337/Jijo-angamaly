@@ -44,6 +44,7 @@ BANNED_PHRASES = r"(certainly!|absolutely!|i'd be happy to assist|great question
                  r"is there anything else i can help|here are some options:|i apologize for the inconvenience)"
 NAMES_AI = r"\b(gemini|google ai|openai|chatgpt|gpt-?\d|deepseek|claude|anthropic|large language model|llm)\b"
 ASKS_PHONE = r"(phone number|mobile number|contact number|number tharamo|നമ്പർ തരാമോ)"
+FAMILIAR_ADDRESS = r"(chetta|chettan|chechi|bro|macha|ikka)|ചേട്ട|ചേച്ചി"
 MAX_LINES = 9
 
 
@@ -73,6 +74,8 @@ def check(scenario: dict, reply, seconds: float) -> Result:
         problems.append("named the AI behind the bot")
     if re.search(ASKS_PHONE, text, re.I):
         problems.append("asked for the phone number")
+    if re.search(FAMILIAR_ADDRESS, text, re.I):
+        problems.append("called the customer chetta/chechi/bro (only sir/madam allowed)")
     if len([line for line in text.splitlines() if line.strip()]) > MAX_LINES:
         problems.append(f"too long ({len(text.splitlines())} lines)")
     if (lang := scenario.get("lang")) and reply.guardrail != "llm_error":

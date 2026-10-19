@@ -22,7 +22,8 @@ MAX_SPOKEN_CHARS = 400
 SPOKEN_INSTRUCTION = {
     "ml": """Rewrite the WhatsApp reply below as a short voice note, the way a friendly Kerala car salesman would actually say it out loud to a customer. Write it in Malayalam script (never English letters for Malayalam words) for text-to-speech.
 Make it sound like a real person talking, not a news reader:
-- Start naturally, e.g. "ആ, ഉണ്ട് ചേട്ടാ!", "ശരി ചേട്ടാ,", "നോക്കട്ടെ..." (vary it).
+- Start naturally, e.g. "ആ, ഉണ്ട്!", "ശരി,", "നോക്കട്ടെ..." (vary it).
+- Address the customer exactly as the reply does ("സാർ"/"മാഡം" or nothing); never by name, never ചേട്ടാ/ചേച്ചി.
 - Short spoken phrases with commas and "..." for natural pauses; it's fine to drop formal words.
 - Spoken words, not written ones: ഉണ്ട് (not ലഭ്യമാണ്), പറ്റും (not സാധിക്കും), വണ്ടി/കാർ (not വാഹനം), പിന്നെ (not കൂടാതെ), വിളിക്കും (not ബന്ധപ്പെടുന്നതാണ്).
 - English words Keralites use are good, written in Malayalam script: മോഡൽ, കണ്ടീഷൻ, ടെസ്റ്റ് ഡ്രൈവ്, ബജറ്റ്, ഓണർ.
@@ -31,7 +32,6 @@ Rules:
 - Mention at most 2 cars; brand and model names may stay in English letters (Creta, Swift).
 - Keep every price, year and km figure as digits exactly as in the reply (₹9,80,000, 2021, 42,000 km). Do not add any number that is not in the reply.
 - No lists, car ids, emoji, asterisks or links.
-- If the reply has more details than you can say, end with: വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്.
 Reply with the script only.""",
     "en": """Rewrite the WhatsApp reply below as a short voice note, the way a friendly Kerala car salesman would say it out loud in simple Indian English: relaxed, natural pauses (commas, "..."), not formal, not a news reader.
 Rules:
@@ -39,7 +39,6 @@ Rules:
 - Mention at most 2 cars by brand, model and year.
 - Keep every price, year and km figure exactly as in the reply. Do not add any number that is not in the reply.
 - No lists, car ids, emoji, asterisks or links.
-- If the reply has more details than you can say, end with: I've sent the details in the message.
 Reply with the script only.""",
 }
 
@@ -49,10 +48,26 @@ def speech_language(language: str) -> str:
     return "en" if language == "en" else "ml"
 
 
-def draft_spoken(llm: LLMProvider, reply_text: str, language: str, style: str = "") -> str | None:
-    """LLM step: the digit version of the voice script, or None if the LLM failed."""
+DETAILS_NOTE = {
+    "ml": "The car details are ALSO sent as a text message: mention at most 2 cars briefly, then end with: "
+          "വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്.",
+    "en": "The car details are ALSO sent as a text message: mention at most 2 cars briefly, then end with: "
+          "I've sent the details in the message.",
+}
+WHOLE_REPLY_NOTE = ("This voice note is the WHOLE reply (no text message is sent), so say everything important "
+                    "in it, briefly. Don't say anything was sent in a message.")
+
+
+def draft_spoken(llm: LLMProvider, reply_text: str, language: str, style: str = "",
+                 details_in_text: bool = False) -> str | None:
+    """LLM step: the digit version of the voice script, or None if the LLM failed.
+
+    details_in_text: the car details also go out as text, so the voice only summarises;
+    otherwise the voice note is the whole reply."""
     lang = speech_language(language)
-    instruction = SPOKEN_INSTRUCTION[lang] + (f"\nTone and dialect: {style.strip()}" if style.strip() else "")
+    instruction = SPOKEN_INSTRUCTION[lang] + "\n" + (DETAILS_NOTE[lang] if details_in_text else WHOLE_REPLY_NOTE)
+    if style.strip():
+        instruction += f"\nTone and dialect: {style.strip()}"
     try:
         response = llm.complete(instruction, [ChatMessage.user(reply_text)], None, 600)
     except LLMError:

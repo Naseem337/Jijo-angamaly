@@ -267,16 +267,49 @@ def test_client_error_carries_graph_code_and_long_text_is_cut() -> None:
 
 
 
-def test_voice_note_gets_text_then_voice_reply(env_with_voice, stt) -> None:
-    client, llm, repo, sent, tts = env_with_voice
-    stt.script.append(Transcript("Swift undo?", "en-IN", 0.95))
-    llm.script += [MockLLM.text("Yes! Which year and budget?"), MockLLM.text("ഉണ്ട്! ഏത് വർഷവും ബജറ്റും?")]
+def test_voice_note_gets_voice_only_reply(env_with_voice, stt) -> None:
+    client, llm, _, sent, tts = env_with_voice
+    stt.script.append(Transcript("Showroom Sunday open aano?", "en-IN", 0.95))
+    llm.script += [MockLLM.text("Illa sir, Sunday closed aanu. Monday muthal varam."),
+                   MockLLM.text("ഇല്ല സാർ, ഞായറാഴ്ച അവധിയാണ്. തിങ്കളാഴ്ച മുതൽ വരാം.")]
+    post(client, payload(VOICE))
+    bodies = sent_bodies(sent)
+    assert [b.get("type", "read") for b in bodies] == ["read", "audio"]  # no duplicate text
+    assert bodies[1]["audio"] == {"id": "uploaded-voice", "voice": True}
+    assert tts.calls == [("ഇല്ല സാർ, ഞായറാഴ്ച അവധിയാണ്. തിങ്കളാഴ്ച മുതൽ വരാം.", "ml-IN")]
+    assert "WHOLE reply" in llm.calls[1].system  # the voice says everything
+
+
+def test_voice_note_with_car_details_gets_text_and_voice(env_with_voice, stt) -> None:
+    client, llm, _, sent, tts = env_with_voice
+    stt.script.append(Transcript("Swift undo 7 lakhinu thazhe?", "en-IN", 0.95))
+    llm.script += [MockLLM.tool("search_cars", model="swift", budget_max=700000),
+                   MockLLM.text("Undu sir: *2021 Maruti Suzuki Swift ZXi AMT* · ₹6,95,000 (TC-1002)"),
+                   MockLLM.text("ഉണ്ട് സാർ, 2021 Swift ₹6,95,000. വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്.")]
     post(client, payload(VOICE))
     bodies = sent_bodies(sent)
     assert [b.get("type", "read") for b in bodies] == ["read", "text", "audio"]
-    assert bodies[1]["text"]["body"] == "Yes! Which year and budget?"
-    assert bodies[2]["audio"] == {"id": "uploaded-voice", "voice": True}
-    assert tts.calls == [("ഉണ്ട്! ഏത് വർഷവും ബജറ്റും?", "ml-IN")]  # Manglish/ml customer -> Malayalam voice
+    assert "TC-1002" in bodies[1]["text"]["body"]
+    assert "ALSO sent as a text message" in llm.calls[2].system
+
+
+def test_failed_voice_note_falls_back_to_text(env_with_voice, stt) -> None:
+    client, llm, _, sent, tts = env_with_voice
+    tts.fail = __import__("app.providers.tts", fromlist=["TTSError"]).TTSError("both voices down")
+    stt.script.append(Transcript("Sunday open aano?", "en-IN", 0.95))
+    llm.script += [MockLLM.text("Sunday closed aanu sir."), MockLLM.text("ഞായറാഴ്ച അവധിയാണ് സാർ.")]
+    post(client, payload(VOICE))
+    bodies = sent_bodies(sent)
+    assert [b.get("type", "read") for b in bodies] == ["read", "text"]
+    assert bodies[1]["text"]["body"] == "Sunday closed aanu sir."
+
+
+def test_profile_name_reaches_the_ai_only_for_sir_or_madam(env, stt) -> None:
+    client, llm, _, sent = env
+    llm.script.append(MockLLM.text("Hello sir!"))
+    post(client, payload(text_msg("Hi")))
+    context = llm.calls[0].messages[-1].content
+    assert "WhatsApp profile name Arun (only to tell sir from madam; never call them by name)" in context
 
 
 def test_text_message_gets_text_only(env_with_voice) -> None:

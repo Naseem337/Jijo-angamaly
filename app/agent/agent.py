@@ -27,6 +27,7 @@ from app.storage.repository import Repository
 log = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 5
+DATA_TOOLS = frozenset({"search_cars", "get_car_details", "emi_estimate"})
 MAX_REPLY_TOKENS = 700
 
 
@@ -42,6 +43,11 @@ class AgentReply:
     saved: list[str] = field(default_factory=list)
     spoken_text: str | None = None  # set when a voice reply was requested and passed the checks
 
+    @property
+    def has_car_details(self) -> bool:
+        """The reply carries stock data (cars, prices, EMI): it must also go out as text."""
+        return bool(set(self.tools_used) & DATA_TOOLS)
+
 
 class Agent:
     def __init__(self, config: ClientConfig, llm: LLMProvider, repo: Repository,
@@ -56,7 +62,8 @@ class Agent:
     # ------------------------------------------------------------------ public
 
     def handle(self, phone: str, text: str, *, source: str = "text",
-               message_id: str | None = None, want_voice: bool = False) -> AgentReply:
+               message_id: str | None = None, want_voice: bool = False,
+               profile_name: str | None = None) -> AgentReply:
         now = self.clock.now()
         cid = self.config.client_id
         customer = self.repo.get_or_create_customer(cid, phone, now)
@@ -75,7 +82,8 @@ class Agent:
         ctx = ToolContext(self.config, self.repo, self.inventory, phone, now, language, source)
         notes = [n for n in [resolve_pending(ctx, text)] if n]
         context = prompts.turn_context(self.config, language=language, now=now,
-                                       customer_name=customer.name, source=source, notes=notes)
+                                       customer_name=customer.name, source=source, notes=notes,
+                                       profile_name=profile_name)
         history = [m for m in history if not m.meta.get("voice_note")]  # voice copies of text replies
         messages = [ChatMessage("user" if m.direction == "in" else "assistant", m.text) for m in history]
         while messages and messages[0].role == "assistant":  # e.g. an alert we sent first
@@ -104,7 +112,8 @@ class Agent:
         adds cost and nothing for the customer (user decision, 2026-10-19)."""
         if reply.guardrail in ("fallback", "llm_error"):
             return None
-        draft = draft_spoken(self.llm, reply.text, reply.language, self.config.business_rules.speaking_style)
+        draft = draft_spoken(self.llm, reply.text, reply.language, self.config.business_rules.speaking_style,
+                             details_in_text=reply.has_car_details)
         if not draft:
             return None
         problems = check_reply(draft, facts)

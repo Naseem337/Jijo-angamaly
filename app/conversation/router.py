@@ -85,15 +85,23 @@ class MessageRouter:
 
         voice_out = self._voice_out()
         want_voice = bool(voice_out and voice_out.wants_voice(source))
-        reply = self._agent().handle(phone, text, source=source, message_id=msg.id, want_voice=want_voice)
+        reply = self._agent().handle(phone, text, source=source, message_id=msg.id, want_voice=want_voice,
+                                     profile_name=msg.profile_name)
         if reply.handoff:
             log.warning("Handoff requested for %s: %s (staff notification arrives in step 9)",
                         mask_phone(phone), reply.handoff.reason)
-        if not self._send(phone, reply.text, store=False):
-            return "send_failed"
         if voice_out and reply.spoken_text:
-            voice_out.send(phone, reply.spoken_text, reply.language)  # text already sent; best effort
-        return "replied"
+            # Voice note in → voice note out, with no duplicate text (user rule, 2026-10-20)...
+            if not reply.has_car_details and voice_out.send(phone, reply.spoken_text, reply.language):
+                return "replied"
+            # ...except car details (list, prices, EMI), which also go as text to read; and if the
+            # voice note failed, the text goes instead so the customer always gets an answer.
+            if not self._send(phone, reply.text, store=False):
+                return "send_failed"
+            if reply.has_car_details:
+                voice_out.send(phone, reply.spoken_text, reply.language)
+            return "replied"
+        return "replied" if self._send(phone, reply.text, store=False) else "send_failed"
 
     def _send(self, phone: str, text: str, *, store: bool) -> bool:
         try:

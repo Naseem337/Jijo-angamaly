@@ -91,6 +91,11 @@ local `.env` override can't change test results.
     - Tried and rejected: `"<style> Say: <text>"` read the instruction aloud, and `systemInstruction`
       returns 400 "Developer instruction is not enabled for this model".
     - Verify any change by transcribing the audio with Sarvam STT and checking no instruction words appear.
+  - **Voice reply rules (user, 2026-10-20):** a voice note in gets a voice note out with **no duplicate text**.
+    When the reply has car data (search_cars / get_car_details / emi_estimate were used), the text is sent too
+    and the voice summarises. If the voice fails, the text is sent instead.
+  - **Address (user, 2026-10-20):** never the name and never chetta/chechi/bro; "sir"/"madam" only when the
+    gender is clear (the WhatsApp profile name is passed in the turn context for that), otherwise nothing.
   - **Voice rules (user, 2026-10-19, to cut cost):** voice only when the customer sent a voice note AND
     the bot has a real answer. Text only for: AI outage apologies, guardrail fallbacks, and
     "couldn't hear" / "too long".
