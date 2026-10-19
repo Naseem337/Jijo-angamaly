@@ -225,9 +225,10 @@ def test_gemini_tts_request_and_audio_formats() -> None:
     request = route.calls[0].request
     body = json.loads(request.content)
     assert request.headers["x-goog-api-key"] == "key" and "key=" not in str(request.url)
-    # the style must never be in the spoken text (it was read aloud when it was)
-    assert body["contents"][0]["parts"][0]["text"] == "നമസ്കാരം"
-    assert body["systemInstruction"]["parts"][0]["text"] == "Speak like a calm 45-year-old."
+    # director's-notes layout: the style is direction, only the TRANSCRIPT part is spoken
+    prompt = body["contents"][0]["parts"][0]["text"]
+    assert prompt.startswith("# AUDIO PROFILE: ") and "Style: Speak like a calm 45-year-old." in prompt
+    assert prompt.endswith("#### TRANSCRIPT\nനമസ്കാരം") and "systemInstruction" not in body
     assert body["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Algenib"
     route.mock(return_value=httpx.Response(429, json={"error": {"message": "quota exceeded"}}))
     with pytest.raises(TTSError, match="429: quota exceeded"):
@@ -252,4 +253,5 @@ def test_truechoice_voice_order(clients_dir) -> None:
         def get(self, name: str) -> str:
             return "k"
     voices = build_tts(load_client_config("truechoice", clients_dir), Keys())
-    assert [(type(v), v.speaker) for v in voices] == [(SarvamTTS, "anand")]  # Gemini off until verified
+    assert [(type(v), v.speaker) for v in voices] == [(GeminiTTS, "Algenib"), (SarvamTTS, "anand")]
+    assert voices[0].profile.startswith("Anees, ") and "mature" in voices[0].style

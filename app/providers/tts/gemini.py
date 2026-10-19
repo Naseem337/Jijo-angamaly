@@ -10,10 +10,10 @@ Gemini follows the style instruction, which Sarvam can't.
     complete WAV file when tested; raw 16-bit PCM (audio/L16;rate=…) is wrapped as WAV.
   - A ~18 s Malayalam line took 6–11 s. The free tier has small rate limits, which is
     why VoiceOut falls back to the backup voice.
-  - The style must NOT be put in front of the text: tested on 2026-10-19, "<style> Say:
-    <text>" made the voice read the whole instruction aloud. It goes in systemInstruction
-    instead. That form is NOT yet verified live (the free quota ran out), so the voice
-    stays disabled in client.yaml until a listen + transcript check shows no leak.
+  - How to give it a style (tested 2026-10-19/20, each result transcribed with Sarvam STT):
+      "<style> Say: <text>"        -> it READ THE INSTRUCTION ALOUD (22 s note).
+      systemInstruction            -> HTTP 400 "Developer instruction is not enabled for this model".
+      director's-notes format below -> only the transcript is spoken (8 s), and the user approved it.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ from app.providers.tts.base import TTSError
 BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 MAX_CHARS = 2500
 
-DEFAULT_STYLE = ("Speak as a calm, warm, experienced Malayali car salesman in his late 40s, with a slightly "
-                 "deep, mature voice, chatting casually on a voice note. Natural pauses, relaxed, not formal.")
+DEFAULT_PROFILE = "an experienced Malayali car salesman in his late 40s"
+DEFAULT_STYLE = "calm, warm, slightly deep and mature, relaxed and casual, natural pauses."
 
 
 def _as_wav(data: bytes, mime_type: str) -> bytes:
@@ -50,11 +50,12 @@ def _as_wav(data: bytes, mime_type: str) -> bytes:
 
 class GeminiTTS:
     def __init__(self, api_key: str, *, model: str, speaker: str = "Algenib", style: str = DEFAULT_STYLE,
-                 timeout_s: float = 30.0, http: httpx.Client | None = None) -> None:
+                 profile: str = DEFAULT_PROFILE, timeout_s: float = 30.0, http: httpx.Client | None = None) -> None:
         self._headers = {"x-goog-api-key": api_key}
         self.model = model
         self.speaker = speaker
         self.style = style.strip()
+        self.profile = profile.strip()
         self._http = http or httpx.Client(timeout=timeout_s)
 
     def synthesize(self, text: str, language_code: str) -> bytes:
@@ -64,8 +65,10 @@ class GeminiTTS:
         if len(text) > MAX_CHARS:
             raise TTSError(f"text too long for TTS ({len(text)} > {MAX_CHARS} chars)")
         body = {
-            "systemInstruction": {"parts": [{"text": self.style}]},  # never spoken; see module note
-            "contents": [{"parts": [{"text": text}]}],
+            # Exactly the tested layout: the model treats the notes as direction, not script.
+            "contents": [{"parts": [{"text": (f"# AUDIO PROFILE: {self.profile}\n"
+                                              f"### DIRECTOR'S NOTES\nStyle: {self.style}\n"
+                                              f"#### TRANSCRIPT\n{text}")}]}],
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
                 "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": self.speaker}}},

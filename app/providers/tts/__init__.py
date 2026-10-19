@@ -6,7 +6,7 @@ import logging
 
 from app.core.client_config import ClientConfig, SpeechProviderConfig
 from app.providers.tts.base import TTSError, TTSProvider
-from app.providers.tts.gemini import DEFAULT_STYLE, GeminiTTS
+from app.providers.tts.gemini import DEFAULT_PROFILE, DEFAULT_STYLE, GeminiTTS
 from app.providers.tts.mock import MockTTS
 from app.providers.tts.sarvam import SarvamTTS
 from app.settings import SecretNotFound, SecretResolver
@@ -26,7 +26,8 @@ def _build_one(cfg: SpeechProviderConfig, config: ClientConfig, secrets: SecretR
         if not cfg.model:
             raise SecretNotFound("gemini TTS has no model name (GEMINI_TTS_MODEL)")
         return GeminiTTS(key, model=cfg.model, speaker=cfg.speaker or "Algenib",
-                         style=cfg.style or DEFAULT_STYLE, timeout_s=timeout)
+                         style=cfg.style or DEFAULT_STYLE,
+                         profile=f"{config.bot_name}, {DEFAULT_PROFILE}", timeout_s=timeout)
     return SarvamTTS(key, model=cfg.model or "bulbul:v3", speaker=cfg.speaker or "anand", pace=cfg.pace,
                      temperature=cfg.temperature, timeout_s=timeout)
 

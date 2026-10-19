@@ -85,17 +85,16 @@ providers:
                Creta, Venue, Verna, i20, i10, Innova, Innova Crysta, Fortuner, Glanza, City,
                Amaze, XUV700, XUV300, Scorpio, Thar, Nexon, Punch, Tiago, Seltos, Sonet, EMI,
                SUV, sedan, hatchback, automatic, diesel, petrol, CNG, True Choice]
-  # Gemini voice "Algenib" (the user's pick) is OFF for now: the first way of sending its
-  # style made it READ THE INSTRUCTION ALOUD, and the fixed way (systemInstruction) isn't
-  # verified yet (free quota ran out 2026-10-19). To try it later, move this block to `tts:`
-  # and Sarvam to `tts_backup:`:
-  #   kind: gemini
-  #   api_key_secret: gemini_api_key
-  #   model: "${GEMINI_TTS_MODEL:-gemini-3.8-flash-tts}"
-  #   speaker: "${GEMINI_TTS_VOICE:-Algenib}"
-  #   style: Speak as a calm, warm, experienced Malayali car salesman in his late 40s, with a
-  #     slightly deep, mature voice, chatting casually on a voice note. Natural pauses, relaxed.
+  # Main voice: Gemini "Algenib", a mature male voice the user approved by ear (sample:
+  # data/voice_samples/algenib_B_director.wav; transcript-checked: no instruction spoken).
+  # When Gemini fails (free-tier quota), tts_backup (Sarvam anand) speaks instead.
   tts:
+    kind: gemini
+    api_key_secret: gemini_api_key
+    model: "${GEMINI_TTS_MODEL:-gemini-3.8-flash-tts}"
+    speaker: "${GEMINI_TTS_VOICE:-Algenib}"
+    style: calm, warm, slightly deep and mature, relaxed and casual, natural pauses.
+  tts_backup:
     kind: sarvam
     api_key_secret: sarvam_api_key
     # Only bulbul:v3 speaks Malayalam (checked 2026-10-19). Voices to try (samples in

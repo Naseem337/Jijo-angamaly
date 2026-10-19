@@ -82,11 +82,12 @@ local `.env` override can't change test results.
   - **Hard 30 s limit per request**, so longer notes are cut into 28 s WAV pieces with ffmpeg.
   - OGG/Opus is accepted, but only with MIME `audio/ogg` (`; codecs=opus` gets a 400).
   - `keyterms` (≤50) is set in client.yaml.
-  - **Voice now = Sarvam `anand` only.** The user picked Gemini TTS voice `Algenib` by ear, but the way
-    its style was sent ("<style> Say: <text>") made it **read the instruction aloud** (confirmed by an STT
-    transcript on 2026-10-19). GeminiTTS now sends the style as `systemInstruction`, which is **unverified**
-    because the free quota ran out. The Gemini block is commented out in client.yaml. Re-enable it only
-    after a transcript check shows no leak.
+  - **Voice = Gemini TTS `gemini-3.8-flash-tts`, voice `Algenib` (user-approved, 2026-10-20), with Sarvam `anand`
+    as backup** (VoiceOut tries them in order).
+    - Style goes in a **director's-notes prompt** (`# AUDIO PROFILE … ### DIRECTOR'S NOTES … #### TRANSCRIPT`).
+    - Tried and rejected: `"<style> Say: <text>"` read the instruction aloud, and `systemInstruction`
+      returns 400 "Developer instruction is not enabled for this model".
+    - Verify any change by transcribing the audio with Sarvam STT and checking no instruction words appear.
   - **Voice rules (user, 2026-10-19, to cut cost):** voice only when the customer sent a voice note AND
     the bot has a real answer. Text only for: AI outage apologies, guardrail fallbacks, and
     "couldn't hear" / "too long".
