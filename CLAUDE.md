@@ -108,6 +108,10 @@ local `.env` override can't change test results.
   - **Voice rules v2 (user, 2026-10-20):** text in → text out. Voice in → voice out with **no repeated words
     as text**. When there's car data, only the lines with a ₹ price or a car id follow as text
     (`car_details_text` in router.py), sent after the voice. If the voice fails, the full text is sent.
+  - **Car names stay English in voice and text (user, 2026-10-20):** to_speech keeps numbers glued to letters
+    or right after an English word (i20, XUV700, 4X4, Alto 800). Verified by verbatim STT (saaras:v3
+    mode=verbatim): the voice says "ഐ ട്വന്റി" and "ആൾട്ടോ എയ്റ്റ് ഹൺഡ്രഡ്". Both prompts say car names
+    are never translated or transliterated.
   - **One voice only, so the tone never changes:** Gemini Algenib with a "pleasant, gentle, medium pitch,
     never harsh or squeaky" style (transcript-verified). There's no tts_backup; Sarvam is documented as
     `tts_sarvam_option` (temperature 0.4, steady). Samples are in data/voice_samples/pleasant.

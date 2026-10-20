@@ -29,7 +29,7 @@ Make it sound like a real person talking, not a news reader:
 - English words Keralites use are good, written in Malayalam script: മോഡൽ, കണ്ടീഷൻ, ടെസ്റ്റ് ഡ്രൈവ്, ബജറ്റ്, ഓണർ.
 Rules:
 - At most 3 short sentences, under 300 characters.
-- Mention at most 2 cars; brand and model names may stay in English letters (Creta, Swift).
+- Mention at most 2 cars. Car brand and model names ALWAYS stay exactly in English letters as written (i20, XUV700, Creta, Alto 800): never translate them, never write them in Malayalam script, never turn their numbers into Malayalam words.
 - Keep every price, year and km figure as digits exactly as in the reply (₹9,80,000, 2021, 42,000 km). Do not add any number that is not in the reply.
 - No lists, car ids, emoji, asterisks or links.
 Reply with the script only.""",
@@ -148,5 +148,20 @@ def to_speech(text: str, language: str) -> str:
     out = _MONEY.sub(lambda m: price_as_spoken(_value(m["a"] or m["b"], m["u"] or m["v"])), out)
     out = _KM.sub(lambda m: km_as_spoken(_value(m["n"], None)), out)
     out = _YEAR.sub(lambda m: year_as_spoken(int(m.group(1))), out)
-    out = _ANY.sub(lambda m: _words(_value(m.group(0), None)), out)
+    out = _ANY.sub(_number_or_car_name, out)
     return re.sub(r"\s+", " ", out).strip()[:MAX_SPOKEN_CHARS]
+
+
+_LATIN_WORD_BEFORE = re.compile(r"([A-Za-z][A-Za-z\-]*)\s+$")
+
+
+def _number_or_car_name(m: re.Match[str]) -> str:
+    """Numbers become Malayalam words, except inside car names: 'i20', 'XUV700', '4X4' and
+    'Alto 800' stay as written, so the voice says them in English ("i twenty", not "i ഇരുപത്")."""
+    text, start, end = m.string, m.start(), m.end()
+    before, after = text[:start], text[end:end + 1]
+    if (before[-1:].isascii() and before[-1:].isalpha()) or (after.isascii() and after.isalpha()):
+        return m.group(0)  # glued to letters: part of a model name
+    if _LATIN_WORD_BEFORE.search(before):
+        return m.group(0)  # right after an English word: "Alto 800", "Series 3"
+    return _words(_value(m.group(0), None))

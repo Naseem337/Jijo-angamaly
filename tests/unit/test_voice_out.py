@@ -256,3 +256,12 @@ def test_truechoice_voice_order(clients_dir) -> None:
     # one voice only, so the tone never changes (a failure sends the text instead)
     assert [(type(v), v.speaker) for v in voices] == [(GeminiTTS, "Algenib")]
     assert voices[0].profile.startswith("Anees, ") and "never harsh" in voices[0].style
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("Hyundai i20 Asta ഉണ്ട്", "Hyundai i20 Asta ഉണ്ട്"),          # not "i ഇരുപത്"
+    ("Alto 800, XUV700, Thar 4X4, Audi Q3", "Alto 800, XUV700, Thar 4X4, Audi Q3"),
+    ("2 ഉടമകൾ, 3 കാറുകൾ", "രണ്ട് ഉടമകൾ, മൂന്ന് കാറുകൾ"),         # counts still in Malayalam
+])
+def test_car_names_keep_their_numbers_in_voice(text: str, expected: str) -> None:
+    assert to_speech(text, "ml") == expected
