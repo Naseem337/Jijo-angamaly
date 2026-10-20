@@ -122,30 +122,30 @@ def test_requirement_needs_explicit_consent(make_agent, repo) -> None:
 
 def test_voice_lead_waits_for_read_back_confirmation(make_agent, repo) -> None:
     agent, llm = make_agent(
-        MockLLM.tool("save_lead", name="Arun", interest="test drive TC-1002", budget=700000),
+        MockLLM.tool("save_enquiry", name="Arun", interest="test drive TC-1002", budget=700000),
         MockLLM.text("Arun, TC-1002 test drive, budget ₹7 lakh. Sheri aano?"),
     )
     agent.handle(PHONE, "ente peru Arun, TC-1002 test drive venam, budget 7 lakh", source="voice")
     assert tool_result(llm)["status"] == "needs_confirmation"
-    assert repo.list_leads("truechoice") == []
-    assert repo.get_pending_action("truechoice", PHONE).tool == "save_lead"
+    assert repo.list_enquiries("truechoice") == []
+    assert repo.get_pending_action("truechoice", PHONE).tool == "save_enquiry"
 
     agent, llm = make_agent(MockLLM.text("Nanni Arun! Team udane vilikkum."))
     reply = agent.handle(PHONE, "sheri", source="voice")
-    [lead] = repo.list_leads("truechoice")
-    assert (lead.name, lead.budget, lead.source) == ("Arun", 700_000, "voice")
+    [enquiry] = repo.list_enquiries("truechoice")
+    assert (enquiry.name, enquiry.budget, enquiry.source) == ("Arun", 700_000, "voice")
     assert "was saved" in llm.calls[0].messages[-1].content
     assert repo.get_pending_action("truechoice", PHONE) is None
     assert repo.get_customer("truechoice", PHONE).name == "Arun"
-    assert reply.saved == [f"lead:{lead.id}"]
+    assert reply.saved == [f"enquiry:{enquiry.id}"]
 
 
 def test_voice_read_back_rejected_saves_nothing(make_agent, repo) -> None:
-    agent, _ = make_agent(MockLLM.tool("save_lead", interest="test drive"), MockLLM.text("Sheri aano?"))
+    agent, _ = make_agent(MockLLM.tool("save_enquiry", interest="test drive"), MockLLM.text("Sheri aano?"))
     agent.handle(PHONE, "test drive venam", source="voice")
     agent, llm = make_agent(MockLLM.text("Enthanu maattendath?"))
     agent.handle(PHONE, "alla", source="voice")
-    assert repo.list_leads("truechoice") == []
+    assert repo.list_enquiries("truechoice") == []
     assert "Nothing was saved" in llm.calls[0].messages[-1].content
 
 

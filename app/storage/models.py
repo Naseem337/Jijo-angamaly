@@ -17,12 +17,12 @@ from typing import Any, Literal
 Direction = Literal["in", "out"]
 MessageSource = Literal["text", "voice", "template", "staff", "system"]
 ConsentSource = Literal["chat", "voice", "dashboard", "staff_command"]
-LeadStatus = Literal["new", "contacted", "closed"]
+EnquiryStatus = Literal["new", "contacted", "closed"]
 RequirementStatus = Literal["active", "fulfilled", "expired", "deleted"]
 AlertKind = Literal["match", "near", "still_looking"]
 AlertStatus = Literal["pending", "sent", "failed", "dry_run", "skipped"]
 
-LEAD_STATUSES: tuple[LeadStatus, ...] = ("new", "contacted", "closed")
+ENQUIRY_STATUSES: tuple[EnquiryStatus, ...] = ("new", "contacted", "closed")
 # Alert rows in these states may be claimed again by a later run.
 RECLAIMABLE_ALERT_STATUSES: frozenset[str] = frozenset({"failed", "dry_run"})
 
@@ -74,7 +74,7 @@ class Message:
 
 @dataclass
 class PendingAction:
-    """A save_lead / save_requirement held until the customer confirms a voice read-back."""
+    """A save_enquiry / save_requirement held until the customer confirms a voice read-back."""
 
     client_id: str
     phone: str
@@ -84,7 +84,7 @@ class PendingAction:
 
 
 @dataclass
-class Lead:
+class Enquiry:
     client_id: str
     phone: str
     created_at: datetime
@@ -93,8 +93,90 @@ class Lead:
     interest: str | None = None
     budget: int | None = None
     notes: str | None = None
-    status: LeadStatus = "new"
+    status: EnquiryStatus = "new"
     source: str = "chat"  # chat | voice | handoff | dashboard
+    updated_at: datetime | None = None
+
+
+LeadStatus = Literal["pending_consent", "active", "notified", "expired", "opted_out"]
+LeadStage = Literal["new", "interested", "visit_booked", "sold", "lost"]
+LEAD_STATUSES: tuple[LeadStatus, ...] = ("pending_consent", "active", "notified", "expired", "opted_out")
+LEAD_STAGES: tuple[LeadStage, ...] = ("new", "interested", "visit_booked", "sold", "lost")
+OPEN_LEAD_STATUSES: tuple[LeadStatus, ...] = ("pending_consent", "active")
+
+
+@dataclass
+class LeadRequirement:
+    """What a yard visitor is looking for. Every field is optional; at least one must be set."""
+
+    budget_min: int | None = None
+    budget_max: int | None = None
+    makes: list[str] = field(default_factory=list)
+    models: list[str] = field(default_factory=list)  # canonical names from business_rules model_aliases
+    body_type: str | None = None  # hatchback | sedan | suv | muv | pickup
+    fuel: str | None = None  # petrol | diesel | cng | electric | hybrid
+    gearbox: str | None = None  # manual | automatic
+    max_km: int | None = None
+    max_owners: int | None = None
+    min_year: int | None = None
+    notes: str | None = None
+
+    def is_empty(self) -> bool:
+        """True if there is nothing an alert could match on (notes alone don't count)."""
+        return not any([self.budget_min, self.budget_max, self.makes, self.models, self.body_type,
+                        self.fuel, self.gearbox, self.max_km, self.max_owners, self.min_year])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {k: v for k, v in self.__dict__.items() if v not in (None, [], "")}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LeadRequirement":
+        known = {k: v for k, v in (data or {}).items() if k in cls.__dataclass_fields__}
+        return cls(**known)
+
+    def summary(self) -> str:
+        """One line for staff: 'Swift · petrol · manual · ≤ ₹6 lakh · ≤ 60,000 km · 2018+'."""
+        from app.core.money import format_lakh
+
+        parts = [" / ".join(self.models or self.makes)] if (self.models or self.makes) else []
+        parts += [p for p in (self.body_type, self.fuel, self.gearbox) if p]
+        if self.budget_min and self.budget_max:
+            parts.append(f"{format_lakh(self.budget_min)}–{format_lakh(self.budget_max)}")
+        elif self.budget_max:
+            parts.append(f"≤ {format_lakh(self.budget_max)}")
+        elif self.budget_min:
+            parts.append(f"≥ {format_lakh(self.budget_min)}")
+        if self.max_km:
+            parts.append(f"≤ {self.max_km:,} km")
+        if self.min_year:
+            parts.append(f"{self.min_year}+")
+        if self.max_owners:
+            parts.append(f"≤ {self.max_owners} owner{'s' if self.max_owners > 1 else ''}")
+        if self.notes:
+            parts.append(self.notes)
+        return " · ".join(parts) or "(no details)"
+
+
+@dataclass
+class Lead:
+    """A yard visitor who didn't find their car and wants a WhatsApp alert when one arrives.
+
+    Created by staff with `LEAD <phone> <free text>`; it only becomes `active` (and alertable,
+    step 10) after the customer replies YES to the confirmation message.
+    """
+
+    client_id: str
+    phone: str
+    created_at: datetime
+    expires_at: datetime
+    created_by: str  # staff phone
+    requirement: LeadRequirement
+    id: str = field(default_factory=new_id)
+    name: str | None = None
+    source: str = "staff"
+    consent_at: datetime | None = None
+    status: LeadStatus = "pending_consent"
+    stage: LeadStage = "new"
     updated_at: datetime | None = None
 
 

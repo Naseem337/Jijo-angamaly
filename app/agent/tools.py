@@ -2,7 +2,7 @@
 
 Every tool returns JSON text. Bad arguments come back as {"error": ...} with is_error set,
 so the model can correct itself instead of the turn crashing. When the customer spoke a
-voice note, save_lead / save_requirement don't write: they store a PendingAction and ask
+voice note, save_enquiry / save_requirement don't write: they store a PendingAction and ask
 the model to read the details back (see confirmation.py).
 """
 
@@ -18,7 +18,7 @@ from app.core.client_config import ClientConfig
 from app.core.money import format_inr, format_lakh, parse_budget
 from app.inventory import CarQuery, InventoryAdapter, InventoryError
 from app.providers.llm import ToolCall, ToolSpec
-from app.storage.models import Lead, PendingAction, Requirement
+from app.storage.models import Enquiry, PendingAction, Requirement
 from app.storage.repository import Repository
 
 SEARCH_LIMIT = 5
@@ -40,7 +40,7 @@ class ToolContext:
     language: str = "en"
     source: str = "text"  # "voice" holds save_* for confirmation
     handoff: HandoffRequest | None = None
-    saved: list[str] = field(default_factory=list)  # e.g. ["lead:<id>"], for logs/tests
+    saved: list[str] = field(default_factory=list)  # e.g. ["enquiry:<id>"], for logs/tests
 
 
 @dataclass(frozen=True)
@@ -91,7 +91,7 @@ TOOL_SPECS: list[ToolSpec] = [
         }},
     ),
     ToolSpec(
-        "save_lead",
+        "save_enquiry",
         "Record that the customer wants a visit, test drive, call back or booking.",
         {"type": "object", "properties": {
             "name": {**_STR, "description": "Customer's name if they gave it"},
@@ -240,22 +240,22 @@ def _hold_for_voice(ctx: ToolContext, tool: str, args: dict[str, Any]) -> ToolRe
     }))
 
 
-def save_lead(ctx: ToolContext, args: dict[str, Any], *, confirmed: bool = False) -> ToolResult:
+def save_enquiry(ctx: ToolContext, args: dict[str, Any], *, confirmed: bool = False) -> ToolResult:
     interest = _text(args, "interest")
     if not interest:
         raise ToolArgError("interest is required")
     budget = _money(args, "budget")
     if ctx.source == "voice" and not confirmed:
-        return _hold_for_voice(ctx, "save_lead", args)
+        return _hold_for_voice(ctx, "save_enquiry", args)
     name = _text(args, "name")
     if name:
         customer = ctx.repo.get_or_create_customer(ctx.config.client_id, ctx.phone, ctx.now)
         customer.name = name
         ctx.repo.save_customer(customer)
-    lead = Lead(ctx.config.client_id, ctx.phone, ctx.now, name=name, interest=interest,
+    enquiry = Enquiry(ctx.config.client_id, ctx.phone, ctx.now, name=name, interest=interest,
                 budget=budget, notes=_text(args, "notes"), source=ctx.source)
-    ctx.repo.create_lead(lead)
-    ctx.saved.append(f"lead:{lead.id}")
+    ctx.repo.create_enquiry(enquiry)
+    ctx.saved.append(f"enquiry:{enquiry.id}")
     return ToolResult(_dump({"status": "saved", "message": "The sales team will contact the customer."}))
 
 
@@ -307,7 +307,7 @@ _TOOLS = {
     "search_cars": search_cars,
     "get_car_details": get_car_details,
     "emi_estimate": emi_estimate,
-    "save_lead": save_lead,
+    "save_enquiry": save_enquiry,
     "save_requirement": save_requirement,
     "handoff_to_human": handoff_to_human,
 }
@@ -331,7 +331,8 @@ def run_tool(ctx: ToolContext, call: ToolCall) -> ToolResult:
 
 def commit_pending(ctx: ToolContext, action: PendingAction) -> ToolResult:
     """The customer confirmed a voice read-back: really save it now."""
-    tool = {"save_lead": save_lead, "save_requirement": save_requirement}[action.tool]
+    tool = {"save_enquiry": save_enquiry, "save_lead": save_enquiry,  # pre-2026-10-20 name
+            "save_requirement": save_requirement}[action.tool]
     try:
         return tool(ctx, action.args, confirmed=True)
     except ToolArgError as exc:

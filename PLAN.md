@@ -15,7 +15,7 @@ WhatsApp Cloud API ──webhook──► FastAPI /webhook/{client_id}
           ┌──────────────┬─────────┴──────────┬──────────────────┐
      staff number?   opt-out word?        bot_paused?        normal customer
      StaffCommands   mark opted-out       store only         (voice → STT first)
-     (RESUME, WISH)  + confirm once       (staff sees it)          │
+     (RESUME, LEAD)  + confirm once       (staff sees it)          │
                                                                    ▼
                                                      Agent (LLM + tools + guardrails)
                                                      tools: search_cars, save_lead,
@@ -84,9 +84,13 @@ Every interface has a Mock implementation, so the full test suite runs offline w
 │   │   ├── router.py              # the MessageRouter above
 │   │   ├── voice_in.py            # download → duration check → STT → delete audio
 │   │   └── voice_out.py           # mirror policy, phrase cache, char cap, 8 s timeout
+│   ├── leads/
+│   │   ├── parse.py               # LEAD <phone> <text> → phone + structured requirement (LLM + rules)
+│   │   ├── service.py             # create/update, consent YES, opt-out/in across a customer's leads
+│   │   └── __main__.py            # python -m app.leads --client truechoice (masked list)
 │   ├── handoff/
 │   │   ├── handoff.py             # pause bot, staff summary, customer notice
-│   │   └── staff_commands.py      # RESUME +91…, WISH <phone> <budget> <year+> <model>
+│   │   └── staff_commands.py      # RESUME +91…, LEAD <phone> <free text>
 │   ├── alerts/
 │   │   ├── matcher.py             # pure functions: exact / near match + scoring
 │   │   ├── engine.py              # the daily run (all rules in §5)
@@ -179,7 +183,7 @@ Any inbound customer message resets `unanswered_alerts`. If it came within 72 h 
 
 7. Voice in: verify Sarvam's real API limits and response fields first; then STT, media download, 60 s limit, low-confidence handling, read-back confirmation.
 8. Voice out: spoken_text, Sarvam TTS, ffmpeg OGG/Opus, mirror policy, cache, cap, 8 s fallback.
-9. Handoff and staff commands (RESUME / WISH), opt-out detection and confirmation, auto-resume after 24 h.
+9. Handoff and staff commands (RESUME / LEAD), opt-out detection and confirmation, auto-resume after 24 h, yard-visitor leads with customer consent.
 10. Alert engine plus the dry-run CLI.
 11. (evening) DynamoDB: write the access-pattern table first, then `dynamo_repo.py`, tested with **moto** against the same repository test suite as SQLite.
 
@@ -204,7 +208,7 @@ Any inbound customer message resets `unanswered_alerts`. If it came within 72 h 
 
 ## 8. Open questions (my default in **bold**; reply "defaults OK" or change any)
 
-1. **Consent:** how does a chat customer give consent for alerts? **The agent asks explicitly when saving a requirement ("Shall we WhatsApp you when a matching car arrives?"), and the yes is stored with a timestamp.** For staff `WISH` commands: **the staff member's command counts as recorded verbal consent (source = `staff:<number>`).** OK?
+1. **Consent:** how does a chat customer give consent for alerts? **The agent asks explicitly when saving a requirement ("Shall we WhatsApp you when a matching car arrives?"), and the yes is stored with a timestamp.** For staff `LEAD` commands (formerly `WISH`): ~~the staff member's command counts as recorded verbal consent~~ **superseded on 2026-10-20: the customer must reply YES to a confirmation message (see §9).**
 2. **Staff notifications outside 24 h:** WhatsApp only allows free-form messages to staff numbers that messaged the bot in the last 24 h. **Use a `staff_lead_alert` template for handoff summaries.** OK?
 3. **Bot pause:** does a paused bot auto-resume? **Auto-resume after 48 h of no staff activity, plus manual resume.**
 4. **Business hours for handoff wording:** **9:30–19:00 Mon–Sat; outside those hours the customer is told "tomorrow morning".** Real hours?
@@ -236,3 +240,8 @@ Any inbound customer message resets `unanswered_alerts`. If it came within 72 h 
 - **Retention:** `retention_days` (default 90) in business rules, plus a `delete_customer_data(phone)` function.
 - **Phones:** Indian numbers → `+91…`. Valid foreign numbers (Gulf NRIs are common in Kerala) are kept in E.164 with their own country code, not rejected.
 - **Templates:** near matches are labelled inside the car line, so no separate near-match template. Because parameters can't contain newlines, there is one alert template per match count (1/2/3 cars). Drafts are in `docs/whatsapp_templates.md`.
+- **Staff command `WISH` is renamed `LEAD` (2026-10-20).** Staff commands are `RESUME` and `LEAD`.
+- **A "lead" is a customer who visited the yard, didn't find the car they wanted, and wants a WhatsApp alert when a matching car arrives (2026-10-20).** Staff create it with `LEAD <phone> <free text>`. It is stored as `pending_consent` and only becomes `active` after the customer replies YES to one confirmation message; STOP opts them out of all their leads.
+  - Lead status (system): `pending_consent`, `active`, `notified`, `expired`, `opted_out`. Stage (staff pipeline): `new`, `interested`, `visit_booked`, `sold`, `lost`. Default expiry is 90 days (`leads.expiry_days` in client.yaml).
+  - The chat customer's visit / test-drive request, previously also called a "lead", is now an **enquiry** (`Enquiry`, table `enquiries`, bot tool `save_enquiry`).
+

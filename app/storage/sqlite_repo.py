@@ -14,7 +14,10 @@ from app.storage.models import (
     ConsentSource,
     Customer,
     DeletionReport,
+    Enquiry,
+    EnquiryStatus,
     Lead,
+    LeadRequirement,
     LeadStatus,
     Message,
     PendingAction,
@@ -65,7 +68,7 @@ CREATE TABLE IF NOT EXISTS pending_actions (
     created_at TEXT NOT NULL,
     PRIMARY KEY (client_id, phone)
 );
-CREATE TABLE IF NOT EXISTS leads (
+CREATE TABLE IF NOT EXISTS enquiries (
     client_id TEXT NOT NULL,
     id TEXT NOT NULL,
     phone TEXT NOT NULL,
@@ -79,7 +82,24 @@ CREATE TABLE IF NOT EXISTS leads (
     updated_at TEXT,
     PRIMARY KEY (client_id, id)
 );
-CREATE INDEX IF NOT EXISTS leads_by_client_date ON leads (client_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS enquiries_by_client_date ON enquiries (client_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS leads (
+    client_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    name TEXT,
+    source TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    consent_at TEXT,
+    status TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    requirement TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    PRIMARY KEY (client_id, id)
+);
+CREATE INDEX IF NOT EXISTS leads_by_phone ON leads (client_id, phone, created_at DESC);
 CREATE TABLE IF NOT EXISTS requirements (
     client_id TEXT NOT NULL,
     id TEXT NOT NULL,
@@ -169,8 +189,20 @@ class SQLiteRepository:
         self._connection = sqlite3.connect(self._database, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA foreign_keys = ON")
+        self._migrate_old_leads_table()
         self._connection.executescript(_SCHEMA)
         self._connection.commit()
+
+    def _migrate_old_leads_table(self) -> None:
+        """Before 2026-10-20 the chat visit/test-drive requests lived in a `leads` table. They are
+        enquiries now, and `leads` holds yard-visitor alert leads (staff LEAD command)."""
+        columns = {row[1] for row in self._connection.execute("PRAGMA table_info(leads)")}
+        exists = self._connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='enquiries'").fetchone()
+        if "interest" in columns and not exists:
+            self._connection.execute("ALTER TABLE leads RENAME TO enquiries")
+            self._connection.execute("DROP INDEX IF EXISTS leads_by_client_date")
+            self._connection.commit()
 
     def close(self) -> None:
         with self._lock:
@@ -207,8 +239,8 @@ class SQLiteRepository:
         )
 
     @staticmethod
-    def _lead(row: sqlite3.Row) -> Lead:
-        return Lead(
+    def _enquiry(row: sqlite3.Row) -> Enquiry:
+        return Enquiry(
             client_id=row["client_id"], phone=row["phone"], created_at=_read_dt(row["created_at"]),
             id=row["id"], name=row["name"], interest=row["interest"], budget=row["budget"],
             notes=row["notes"], status=row["status"], source=row["source"],
@@ -358,29 +390,29 @@ class SQLiteRepository:
     def clear_pending_action(self, client_id: str, phone: str) -> None:
         self._execute("DELETE FROM pending_actions WHERE client_id=? AND phone=?", (client_id, phone))
 
-    def create_lead(self, lead: Lead) -> None:
+    def create_enquiry(self, enquiry: Enquiry) -> None:
         self._execute(
-            "INSERT INTO leads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (lead.client_id, lead.id, lead.phone, _dt(lead.created_at), lead.name, lead.interest,
-             lead.budget, lead.notes, lead.status, lead.source, _dt(lead.updated_at)),
+            "INSERT INTO enquiries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (enquiry.client_id, enquiry.id, enquiry.phone, _dt(enquiry.created_at), enquiry.name, enquiry.interest,
+             enquiry.budget, enquiry.notes, enquiry.status, enquiry.source, _dt(enquiry.updated_at)),
         )
 
-    def get_lead(self, client_id: str, lead_id: str) -> Lead | None:
-        row = self._one("SELECT * FROM leads WHERE client_id=? AND id=?", (client_id, lead_id))
-        return self._lead(row) if row else None
+    def get_enquiry(self, client_id: str, enquiry_id: str) -> Enquiry | None:
+        row = self._one("SELECT * FROM enquiries WHERE client_id=? AND id=?", (client_id, enquiry_id))
+        return self._enquiry(row) if row else None
 
-    def update_lead_status(self, client_id: str, lead_id: str, status: LeadStatus,
+    def update_enquiry_status(self, client_id: str, enquiry_id: str, status: EnquiryStatus,
                            at: datetime) -> None:
         cursor = self._execute(
-            "UPDATE leads SET status=?, updated_at=? WHERE client_id=? AND id=?",
-            (status, _dt(at), client_id, lead_id),
+            "UPDATE enquiries SET status=?, updated_at=? WHERE client_id=? AND id=?",
+            (status, _dt(at), client_id, enquiry_id),
         )
         if cursor.rowcount == 0:
-            raise NotFound(lead_id)
+            raise NotFound(enquiry_id)
 
-    def list_leads(self, client_id: str, status: LeadStatus | None = None,
-                   limit: int = 200) -> list[Lead]:
-        sql = "SELECT * FROM leads WHERE client_id=?"
+    def list_enquiries(self, client_id: str, status: EnquiryStatus | None = None,
+                   limit: int = 200) -> list[Enquiry]:
+        sql = "SELECT * FROM enquiries WHERE client_id=?"
         values: tuple = (client_id,)
         if status is not None:
             sql += " AND status=?"
@@ -388,7 +420,78 @@ class SQLiteRepository:
         sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
         with self._lock:
             rows = self._connection.execute(sql, values + (limit,)).fetchall()
-        return [self._lead(row) for row in rows]
+        return [self._enquiry(row) for row in rows]
+
+    # ------------------------------------------------------------------ yard-visitor leads
+
+    @staticmethod
+    def _yard_lead(row: sqlite3.Row) -> Lead:
+        return Lead(
+            client_id=row["client_id"], phone=row["phone"], created_at=_read_dt(row["created_at"]),
+            expires_at=_read_dt(row["expires_at"]), created_by=row["created_by"],
+            requirement=LeadRequirement.from_dict(json.loads(row["requirement"])), id=row["id"],
+            name=row["name"], source=row["source"], consent_at=_read_dt(row["consent_at"]),
+            status=row["status"], stage=row["stage"], updated_at=_read_dt(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _lead_values(lead: Lead) -> tuple:
+        return (lead.client_id, lead.id, lead.phone, lead.name, lead.source, lead.created_by,
+                _dt(lead.consent_at), lead.status, lead.stage,
+                json.dumps(lead.requirement.to_dict(), ensure_ascii=False),
+                _dt(lead.expires_at), _dt(lead.created_at), _dt(lead.updated_at))
+
+    def create_lead(self, lead: Lead) -> None:
+        self._execute("INSERT INTO leads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", self._lead_values(lead))
+
+    def get_lead(self, client_id: str, lead_id: str) -> Lead | None:
+        row = self._one("SELECT * FROM leads WHERE client_id=? AND id=?", (client_id, lead_id))
+        return self._yard_lead(row) if row else None
+
+    def update_lead(self, lead: Lead) -> None:
+        values = self._lead_values(lead)
+        cursor = self._execute(
+            """UPDATE leads SET phone=?, name=?, source=?, created_by=?, consent_at=?, status=?, stage=?,
+            requirement=?, expires_at=?, created_at=?, updated_at=? WHERE client_id=? AND id=?""",
+            values[2:] + values[:2],
+        )
+        if cursor.rowcount == 0:
+            raise NotFound(lead.id)
+
+    def list_leads(self, client_id: str, status: LeadStatus | None = None, phone: str | None = None,
+                   limit: int = 200) -> list[Lead]:
+        sql, values = "SELECT * FROM leads WHERE client_id=?", [client_id]
+        if status is not None:
+            sql += " AND status=?"
+            values.append(status)
+        if phone is not None:
+            sql += " AND phone=?"
+            values.append(phone)
+        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        with self._lock:
+            rows = self._connection.execute(sql, (*values, limit)).fetchall()
+        return [self._yard_lead(row) for row in rows]
+
+    def find_open_lead(self, client_id: str, phone: str) -> Lead | None:
+        row = self._one(
+            """SELECT * FROM leads WHERE client_id=? AND phone=? AND status IN ('pending_consent', 'active')
+            ORDER BY created_at DESC, rowid DESC LIMIT 1""", (client_id, phone))
+        return self._yard_lead(row) if row else None
+
+    def set_leads_status(self, client_id: str, phone: str, from_statuses: tuple[LeadStatus, ...],
+                         to_status: LeadStatus, at: datetime, consent_at: datetime | None = None) -> int:
+        if not from_statuses:
+            return 0
+        marks = ", ".join("?" for _ in from_statuses)
+        sql = f"UPDATE leads SET status=?, updated_at=?{', consent_at=?' if consent_at else ''} " \
+              f"WHERE client_id=? AND phone=? AND status IN ({marks})"
+        values = (to_status, _dt(at), *((_dt(consent_at),) if consent_at else ()), client_id, phone, *from_statuses)
+        return self._execute(sql, values).rowcount
+
+    def expire_leads(self, client_id: str, now: datetime) -> int:
+        return self._execute(
+            """UPDATE leads SET status='expired', updated_at=? WHERE client_id=? AND expires_at<=?
+            AND status IN ('pending_consent', 'active')""", (_dt(now), client_id, _dt(now))).rowcount
 
     def create_requirement(self, req: Requirement) -> None:
         self._execute(
@@ -547,7 +650,7 @@ class SQLiteRepository:
         return cursor.rowcount == 1
 
     def delete_customer_data(self, client_id: str, phone: str) -> DeletionReport:
-        tables = ("messages", "pending_actions", "leads", "requirements", "alerts", "customers")
+        tables = ("messages", "pending_actions", "enquiries", "leads", "requirements", "alerts", "customers")
         counts: dict[str, int] = {}
         with self._lock:
             for table in tables:

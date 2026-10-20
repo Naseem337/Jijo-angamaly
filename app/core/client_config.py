@@ -186,6 +186,12 @@ class DashboardConfig(BaseModel):
     password_secret: str
 
 
+class LeadsConfig(BaseModel):
+    """Yard-visitor leads created with the staff LEAD command."""
+
+    expiry_days: int = Field(90, ge=1, le=730)
+
+
 class ClientConfig(BaseModel):
     client_id: str = Field(pattern=r"^[a-z0-9_]{2,32}$")
     display_name: str
@@ -199,6 +205,7 @@ class ClientConfig(BaseModel):
     providers: ProvidersConfig
     voice: VoiceConfig = VoiceConfig()
     dashboard: DashboardConfig
+    leads: LeadsConfig = LeadsConfig()
     business_rules: BusinessRules
     config_dir: Path
 

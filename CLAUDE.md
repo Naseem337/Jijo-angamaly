@@ -31,10 +31,24 @@ everything above it. Build order is PLAN.md §6.
 | 6 WhatsApp: client, webhook, signature check, dedupe, router (text only) | **Done and live-tested on 2026-10-18**: the user chatted with the bot from their phone. Run it with `.venv\Scripts\python.exe scripts\dev_whatsapp.py`, which starts uvicorn plus a cloudflared quick tunnel and re-points Meta's webhook through the Graph API (app id from debug_token, app token = id\|secret). |
 | 7 Voice in: download, length check, Sarvam STT, unclear check, read-back | Done; live-tested with Sarvam |
 | 8 Voice out: spoken_text (LLM, digits checked by guardrails, then words), Sarvam bulbul:v3, ffmpeg OGG/Opus, upload, `voice: true`, daily char cap, media-id cache | Done; live chain tested |
-| **9 Handoff, staff commands (RESUME / WISH), opt-out + confirmation, 24 h auto-resume** | **NEXT** |
-| 10–14 | Not started |
+| 9 Handoff (pause + staff summary), staff commands RESUME / LEAD / HELP, STOP/START with one confirmation, 24 h auto-resume, yard-visitor leads with YES consent | Done (`python -m app.leads --client truechoice` lists leads) |
+| **10 Alert engine: match new cars to active leads + chat requirements, alert templates, dry-run CLI** | **NEXT** |
+| 11–14 | Not started |
 
-Steps 1–6 are done; the bot answers on WhatsApp through the test number.
+Steps 1–9 are done; the bot answers on WhatsApp through the test number.
+
+Step 9 notes:
+- Router order: dedupe → staff command → keywords (STOP / START / YES to a lead) → paused (auto-resume
+  24 h) → voice → keywords again on the transcript → agent → handoff.
+- `HandoffService`: tool handoffs pause the chat; system ones (`llm_unavailable`, `guardrail`) only
+  notify. Staff numbers are never paused, because they double as test customers. The staff summary goes
+  as text if the staff member messaged in the last 24 h, otherwise as the `staff_lead_alert` template
+  (fails until Meta approves it; the failure is logged).
+- `LeadService`: LEAD parsing = LLM JSON + rule-based gap filling. It still works when the AI is down
+  (free-tier quota). The consent request is sent only inside the customer's 24 h window; otherwise staff
+  are told "template needed".
+- Step 10 hooks: read `repo.list_leads(status="active")` + `lead.requirement`; set status `notified`;
+  respect `customer.opted_out`.
 
 Agent design notes (app/agent/):
 - `Agent.handle()` owns a whole customer turn: it stores the inbound and outbound messages, and the
@@ -116,6 +130,12 @@ local `.env` override can't change test results.
   needed for alerts (Step 10).
 
 ## Decisions made in chat (not yet in PLAN.md)
+
+- **WISH → LEAD, and what a lead is (2026-10-20, now also in PLAN.md §9):** staff commands are `RESUME` and `LEAD`.
+  A lead is a yard visitor who didn't find their car and wants an alert. It needs the customer's YES, and
+  STOP opts out all of their leads. The chat visit/test-drive record is now an **Enquiry** (`enquiries`
+  table, `save_enquiry` tool). SQLiteRepository renames an old `leads` table (the one with an `interest`
+  column) to `enquiries` on start.
 
 - **Database:** SQLite locally, DynamoDB on AWS (Step 11). The user asked about Supabase. The reasons
   to keep DynamoDB: one AWS account, no server, near-zero cost, and Supabase free projects pause when

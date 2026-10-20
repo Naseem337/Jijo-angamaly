@@ -377,8 +377,8 @@ def extract_numbers(text: str) -> list[ParsedNumber]:
             elif tok in _CONNECTORS and last_mult is not None and _word_value(nxt) is not None:
                 pass  # "five lakh and fifty thousand"
             elif current is not None and (mult := _multiplier(tok)) is not None:
-                if tok in ("l", "lk") and nxt in _ENGINE_WORDS:
-                    break  # "1.2 L petrol"
+                if tok in ("l", "lk") and nxt in _ENGINE_WORDS and (not current.is_integer() or current < 4):
+                    break  # "1.2 L petrol" is an engine; "6L petrol" is a ₹6 lakh budget
                 if last_mult is not None and mult >= last_mult:
                     break
                 total += current * mult

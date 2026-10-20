@@ -15,6 +15,9 @@ from app.agent import Agent
 from app.conversation.router import MessageRouter
 from app.conversation.voice_in import VoiceIn
 from app.conversation.voice_out import VoiceOut
+from app.handoff.handoff import HandoffService
+from app.handoff.staff_commands import StaffCommands
+from app.leads.service import LeadService
 from app.core.client_config import ClientConfig, load_all_clients
 from app.core.clock import Clock, SystemClock
 from app.inventory import InventoryAdapter, build_inventory_adapter
@@ -61,9 +64,25 @@ class ClientRuntime:
         return build_inventory_adapter(self.config)
 
     @cached_property
+    def llm(self) -> LLMProvider:
+        return self._llm or build_llm(self.config, self.secrets)
+
+    @cached_property
     def agent(self) -> Agent:
-        llm = self._llm or build_llm(self.config, self.secrets)
-        return Agent(self.config, llm, self.repo, self.inventory, self.clock)
+        return Agent(self.config, self.llm, self.repo, self.inventory, self.clock)
+
+    @cached_property
+    def leads(self) -> LeadService:
+        return LeadService(self.config, self.repo, self.whatsapp, self.clock, llm=lambda: self.llm,
+                           known_models=lambda: sorted({c.model for c in self.inventory.list_all_cars()}))
+
+    @cached_property
+    def handoff(self) -> HandoffService:
+        return HandoffService(self.config, self.repo, self.whatsapp, self.clock)
+
+    @cached_property
+    def staff_commands(self) -> StaffCommands:
+        return StaffCommands(self.config, self.repo, self.clock, self.leads)
 
     @cached_property
     def whatsapp(self) -> WhatsAppClient:
@@ -98,7 +117,8 @@ class ClientRuntime:
     @cached_property
     def router(self) -> MessageRouter:
         return MessageRouter(self.config, self.repo, lambda: self.agent, self.whatsapp, self.clock,
-                             lambda: self.voice_in, lambda: self.voice_out)
+                             lambda: self.voice_in, lambda: self.voice_out, staff=self.staff_commands,
+                             leads=self.leads, handoff=self.handoff)
 
 
 class Runtime:

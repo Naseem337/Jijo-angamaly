@@ -10,7 +10,7 @@ import yaml
 
 
 SCENARIOS = Path(__file__).resolve().parents[1] / "eval" / "customer_scenarios.yaml"
-TOOLS = {"search_cars", "get_car_details", "emi_estimate", "save_lead", "save_requirement", "handoff_to_human"}
+TOOLS = {"search_cars", "get_car_details", "emi_estimate", "save_enquiry", "save_requirement", "handoff_to_human"}
 KEYS = {"id", "say", "source", "lang", "tools", "no_tools", "handoff", "mention", "avoid"}
 
 

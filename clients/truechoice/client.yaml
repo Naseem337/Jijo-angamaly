@@ -9,7 +9,7 @@ bot_name: Anees          # the name the bot uses in chat
 city: Makkaraparamba, Malappuram, Kerala
 languages: [ml, manglish, en]
 
-# Staff WhatsApp numbers allowed to send RESUME / WISH and receive lead summaries.
+# Staff WhatsApp numbers allowed to send RESUME / LEAD and receive handoff summaries.
 # Comma-separated in .env: TRUECHOICE_STAFF_NUMBERS=+9198xxxxxxxx,+9194xxxxxxxx
 staff_numbers: "${TRUECHOICE_STAFF_NUMBERS}"
 
@@ -112,6 +112,10 @@ voice:
   max_audio_seconds: 60
   tts_timeout_s: 25        # Gemini took 6–11 s, Sarvam ~5 s; the text is sent first anyway
   daily_char_cap: 20000
+
+# Yard-visitor leads (staff command: LEAD <phone> <what they want>).
+leads:
+  expiry_days: 90          # stop alerting after this many days
 
 dashboard:
   password_secret: truechoice/dashboard_password

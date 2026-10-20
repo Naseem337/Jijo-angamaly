@@ -18,6 +18,8 @@ from app.storage.models import (
     ConsentSource,
     Customer,
     DeletionReport,
+    Enquiry,
+    EnquiryStatus,
     Lead,
     LeadStatus,
     Message,
@@ -80,19 +82,47 @@ class Repository(Protocol):
 
     def clear_pending_action(self, client_id: str, phone: str) -> None: ...
 
-    # ------------------------------------------------------------------ leads
-    def create_lead(self, lead: Lead) -> None: ...
+    # ------------------------------------------------------------------ enquiries
+    def create_enquiry(self, enquiry: Enquiry) -> None: ...
 
-    def get_lead(self, client_id: str, lead_id: str) -> Lead | None: ...
+    def get_enquiry(self, client_id: str, enquiry_id: str) -> Enquiry | None: ...
 
-    def update_lead_status(self, client_id: str, lead_id: str, status: LeadStatus,
+    def update_enquiry_status(self, client_id: str, enquiry_id: str, status: EnquiryStatus,
                            at: datetime) -> None:
         """Raises NotFound."""
         ...
 
-    def list_leads(self, client_id: str, status: LeadStatus | None = None,
+    def list_enquiries(self, client_id: str, status: EnquiryStatus | None = None,
+                   limit: int = 200) -> list[Enquiry]:
+        """Newest first."""
+        ...
+
+    # ------------------------------------------------------------------ yard-visitor leads (staff LEAD)
+    def create_lead(self, lead: Lead) -> None: ...
+
+    def get_lead(self, client_id: str, lead_id: str) -> Lead | None: ...
+
+    def update_lead(self, lead: Lead) -> None:
+        """Fully replace an existing lead. Raises NotFound."""
+        ...
+
+    def list_leads(self, client_id: str, status: LeadStatus | None = None, phone: str | None = None,
                    limit: int = 200) -> list[Lead]:
         """Newest first."""
+        ...
+
+    def find_open_lead(self, client_id: str, phone: str) -> Lead | None:
+        """The newest `pending_consent` or `active` lead for this phone, if any."""
+        ...
+
+    def set_leads_status(self, client_id: str, phone: str, from_statuses: tuple[LeadStatus, ...],
+                         to_status: LeadStatus, at: datetime, consent_at: datetime | None = None) -> int:
+        """Move all of a customer's leads in `from_statuses` to `to_status` (consent YES,
+        opt-out, START). Sets consent_at too when given. Returns how many changed."""
+        ...
+
+    def expire_leads(self, client_id: str, now: datetime) -> int:
+        """Mark open leads past expires_at as `expired`. Returns how many changed."""
         ...
 
     # ------------------------------------------------------------------ requirements

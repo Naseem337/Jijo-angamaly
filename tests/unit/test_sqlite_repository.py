@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.storage.models import AlertLog, Customer, Lead, Message, PendingAction, Requirement
+from app.storage.models import AlertLog, Customer, Enquiry, Message, PendingAction, Requirement
 from app.storage.repository import NotFound
 from app.storage.sqlite_repo import SQLiteRepository
 
@@ -46,7 +46,7 @@ def test_messages_are_scoped_and_return_newest_limit_oldest_first(repository):
 
 
 def test_pending_action_is_replaced_and_cleared(repository):
-    first = PendingAction("one", PHONE, "save_lead", {"budget": 100}, NOW)
+    first = PendingAction("one", PHONE, "save_enquiry", {"budget": 100}, NOW)
     second = PendingAction("one", PHONE, "save_requirement", {"budget_max": 200}, NOW)
     repository.set_pending_action(first)
     repository.set_pending_action(second)
@@ -57,21 +57,21 @@ def test_pending_action_is_replaced_and_cleared(repository):
 
 
 def test_leads_and_requirements_round_trip_and_update(repository):
-    lead = Lead("one", PHONE, NOW, name="Asha", budget=800000)
+    enquiry = Enquiry("one", PHONE, NOW, name="Asha", budget=800000)
     requirement = Requirement("one", PHONE, NOW, NOW + timedelta(days=60), budget_max=800000)
-    repository.create_lead(lead)
+    repository.create_enquiry(enquiry)
     repository.create_requirement(requirement)
 
-    repository.update_lead_status("one", lead.id, "contacted", NOW)
+    repository.update_enquiry_status("one", enquiry.id, "contacted", NOW)
     requirement.unanswered_alerts = 2
     repository.save_requirement(requirement)
 
-    assert repository.get_lead("one", lead.id).status == "contacted"
+    assert repository.get_enquiry("one", enquiry.id).status == "contacted"
     assert repository.get_requirement("one", requirement.id).unanswered_alerts == 2
     assert repository.reset_unanswered("one", PHONE, NOW) == 1
     assert repository.list_requirements("one", status="active", phone=PHONE)[0].unanswered_alerts == 0
     with pytest.raises(NotFound):
-        repository.update_lead_status("one", "missing", "closed", NOW)
+        repository.update_enquiry_status("one", "missing", "closed", NOW)
 
 
 def test_seen_cars_and_alert_claims_are_idempotent(repository):
@@ -107,8 +107,8 @@ def test_counters_cache_and_event_dedupe(repository):
 def test_delete_customer_data_and_purge_old_data(repository):
     repository.add_message(Message("one", PHONE, "in", "old", NOW - timedelta(days=10)))
     repository.add_message(Message("one", PHONE, "in", "new", NOW))
-    repository.create_lead(Lead("one", PHONE, NOW))
-    repository.set_pending_action(PendingAction("one", PHONE, "save_lead", {}, NOW - timedelta(days=10)))
+    repository.create_enquiry(Enquiry("one", PHONE, NOW))
+    repository.set_pending_action(PendingAction("one", PHONE, "save_enquiry", {}, NOW - timedelta(days=10)))
     repository.put_cached_media("one", "expired", "media", NOW - timedelta(days=5))
     repository.mark_event_processed("one", "old-event", NOW - timedelta(days=10), ttl_days=1)
     repository.create_requirement(Requirement("one", PHONE, NOW, NOW + timedelta(days=60)))
@@ -117,13 +117,13 @@ def test_delete_customer_data_and_purge_old_data(repository):
     assert purged.counts == {
         "messages": 1, "pending_actions": 1, "cached_media": 1, "processed_events": 1,
     }
-    assert len(repository.list_leads("one")) == 1
+    assert len(repository.list_enquiries("one")) == 1
     assert repository.get_pending_action("one", PHONE) is None
 
     deleted = repository.delete_customer_data("one", PHONE)
-    assert deleted.total == 4  # 1 message, 1 lead, 1 requirement, 1 customer
+    assert deleted.total == 4  # 1 message, 1 enquiry, 1 requirement, 1 customer
     assert repository.get_customer("one", PHONE) is None
-    assert repository.list_leads("one") == []
+    assert repository.list_enquiries("one") == []
     assert repository.list_requirements("one") == []
 
 def test_messages_with_equal_timestamps_keep_insertion_order(repository):
