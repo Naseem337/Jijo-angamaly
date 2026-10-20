@@ -134,6 +134,53 @@ class LeadRequirement:
         known = {k: v for k, v in (data or {}).items() if k in cls.__dataclass_fields__}
         return cls(**known)
 
+    def describe(self, language: str = "en") -> str:
+        """For the customer, in plain words: 'a Swift, petrol, up to ₹6 lakh, under 10,000 km'."""
+        from app.core.money import format_lakh
+
+        def car_name(name: str) -> str:  # 'swift' -> 'Swift', 'xuv700' -> 'XUV700', 'i20' stays
+            return " ".join(w.upper() if any(c.isdigit() for c in w) and len(w) > 3 else
+                            (w if w[:1].isdigit() or w[:1] == "i" and w[1:].isdigit() else w.capitalize())
+                            for w in name.split())
+
+        cars = [car_name(m) for m in self.models] or list(self.makes)
+        ml = language in ("ml", "manglish")
+        words = {
+            "or": " / " if not ml else " അല്ലെങ്കിൽ " if language == "ml" else " allenkil ",
+            "fuel": {"petrol": "പെട്രോൾ", "diesel": "ഡീസൽ", "cng": "CNG", "electric": "ഇലക്ട്രിക്",
+                     "hybrid": "ഹൈബ്രിഡ്"} if language == "ml" else {},
+            "gearbox": {"automatic": "ഓട്ടോമാറ്റിക്", "manual": "മാനുവൽ"} if language == "ml" else {},
+        }
+        parts: list[str] = []
+        if cars:
+            parts.append(words["or"].join(cars))
+        elif self.body_type:
+            parts.append(self.body_type.upper() if self.body_type in ("suv", "muv") else self.body_type)
+        if self.fuel:
+            parts.append(words["fuel"].get(self.fuel, self.fuel))
+        if self.gearbox:
+            parts.append(words["gearbox"].get(self.gearbox, self.gearbox))
+        low, high = self.budget_min, self.budget_max
+        if language == "ml":
+            if low and high:
+                parts.append(f"{format_lakh(low)} മുതൽ {format_lakh(high)} വരെ")
+            elif high:
+                parts.append(f"{format_lakh(high)} വരെ")
+            if self.max_km:
+                parts.append(f"{self.max_km:,} km-ൽ താഴെ")
+            if self.min_year:
+                parts.append(f"{self.min_year}-നു ശേഷമുള്ള മോഡൽ")
+        else:
+            if low and high:
+                parts.append(f"{format_lakh(low)} to {format_lakh(high)}")
+            elif high:
+                parts.append(f"up to {format_lakh(high)}" if language == "en" else f"{format_lakh(high)} vare")
+            if self.max_km:
+                parts.append(f"under {self.max_km:,} km" if language == "en" else f"{self.max_km:,} km-il thazhe")
+            if self.min_year:
+                parts.append(f"{self.min_year} or newer" if language == "en" else f"{self.min_year}-nu shesham ulla model")
+        return ", ".join(parts)
+
     def summary(self) -> str:
         """One line for staff: 'Swift · petrol · manual · ≤ ₹6 lakh · ≤ 60,000 km · 2018+'."""
         from app.core.money import format_lakh

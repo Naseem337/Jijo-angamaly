@@ -70,7 +70,8 @@ def test_lead_for_customer_in_24h_window_asks_for_consent(env, clock) -> None:
     assert staff_reply.startswith("✅ Saved new lead for +919847012345: swift · petrol · ≤ ₹6 lakh · ≤ 60,000 km.")
     assert "Asked the customer to reply YES" in staff_reply
     consent = texts_to(sent, CUSTOMER)[-1]
-    assert "YES" in consent and "STOP" in consent and "swift" in consent
+    assert "YES" in consent and "STOP" in consent and "Swift, petrol, up to ₹6 lakh, under 60,000 km" in consent
+    assert "≤" not in consent and "·" not in consent  # plain words for customers, not staff shorthand
 
     say(CUSTOMER, "yes")
     lead = repo.get_lead("truechoice", lead.id)

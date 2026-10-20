@@ -179,7 +179,8 @@ def rule_based(text: str, aliases: Mapping[str, list[str]], known_models: Iterab
     if m := re.search(r"(1st|first|single|one|2nd|second|two|3rd|third|three)[\s-]*owner", low):
         owners = {"1st": 1, "first": 1, "single": 1, "one": 1, "2nd": 2, "second": 2, "two": 2}.get(m.group(1), 3)
     names = [*aliases.keys(), *(s for spellings in aliases.values() for s in spellings), *known_models]
-    models = [n for n in sorted(set(names), key=len, reverse=True) if len(compact(n)) >= 3 and _has(low, n.lower())]
+    found = [n for n in set(names) if len(compact(n)) >= 3 and _has(low, n.lower())]
+    models = sorted(found, key=lambda n: (low.find(n.lower()), -len(n)))  # in the order staff typed them
     return LeadRequirement(
         budget_min=amounts[0] if len(amounts) >= 2 else None,
         budget_max=amounts[-1] if amounts else None,

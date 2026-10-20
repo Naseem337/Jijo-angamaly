@@ -18,7 +18,7 @@ from app.core.clock import Clock
 from app.core.phone import mask_phone
 from app.leads.parse import extract_requirement, is_lead_command, split_lead_command
 from app.providers.llm import LLMProvider
-from app.storage.models import OPEN_LEAD_STATUSES, Customer, Lead, Message
+from app.storage.models import OPEN_LEAD_STATUSES, Customer, Lead, LeadRequirement, Message
 from app.storage.repository import Repository
 from app.whatsapp.client import WhatsAppClient, WhatsAppError
 
@@ -36,15 +36,21 @@ def _short_place(config: ClientConfig) -> str:
     return config.city.split(",")[0].strip()
 
 
-def consent_request(config: ClientConfig, summary: str) -> str:
-    """The ONE message asking the customer to opt in (Malayalam + English: language unknown)."""
-    place = _short_place(config)
-    return (
-        f"നമസ്കാരം! {config.display_name}, {place}-ൽ നിന്നാണ്. നിങ്ങൾ അന്വേഷിക്കുന്ന കാർ: {summary}. "
-        "ഇതുപോലൊരു കാർ വരുമ്പോൾ WhatsApp-ൽ അറിയിക്കട്ടെ? വേണമെങ്കിൽ YES, വേണ്ടെങ്കിൽ STOP എന്ന് മറുപടി അയയ്ക്കൂ.\n\n"
-        f"Hi! This is {config.display_name}, {place}. You're looking for: {summary}. "
-        "Shall we WhatsApp you when a matching car arrives? Reply YES for alerts, or STOP if you don't want them."
-    )
+def consent_request(config: ClientConfig, requirement: LeadRequirement, language: str | None) -> str:
+    """The ONE message asking the customer to opt in: plain words, in their language.
+    language=None (never chatted with us) → Malayalam and English together."""
+    place, name = _short_place(config), config.display_name
+    texts = {
+        "ml": (f"നമസ്കാരം, {place} {name}-ൽ നിന്നാണ്. നിങ്ങൾ നോക്കുന്ന {requirement.describe('ml')} "
+               "വണ്ടി വന്നാൽ WhatsApp-ൽ അറിയിക്കട്ടെ? വേണമെങ്കിൽ YES, വേണ്ടെങ്കിൽ STOP എന്ന് മറുപടി തന്നാൽ മതി."),
+        "manglish": (f"Hi, {place} {name}-il ninnu aanu. Ningal nokkunna {requirement.describe('manglish')} "
+                     "vandi vannal WhatsApp-il ariyikkatte? Venel YES, venda enkil STOP ennu reply cheythal mathi."),
+        "en": (f"Hi, this is {name}, {place}. You're looking for: {requirement.describe('en')}. Shall we "
+               "WhatsApp you when one comes in? Just reply YES, or STOP if you'd rather not."),
+    }
+    if language in texts:
+        return texts[language]
+    return f"{texts['ml']}\n\n{texts['en']}"
 
 
 CONSENT_THANKS = {
@@ -121,7 +127,7 @@ class LeadService:
             return ("Confirmation NOT sent: the customer hasn't messaged us in the last 24 h, so WhatsApp only "
                     "allows an approved template (template needed; that comes in step 10). Tip: ask them to "
                     "send 'Hi' to our number, then send LEAD again.")
-        text = consent_request(self.config, summary)
+        text = consent_request(self.config, lead.requirement, customer.language if customer else None)
         try:
             self.whatsapp.send_text(lead.phone, text)
         except WhatsAppError as exc:
