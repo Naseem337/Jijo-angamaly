@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 
 from app.agent.tools import HandoffRequest
 from app.core.client_config import ClientConfig
-from app.core.clock import Clock
+from app.core.clock import Clock, ist_today
 from app.core.phone import mask_phone, to_wa_id
 from app.leads.service import in_service_window
 from app.storage.models import Customer
@@ -41,10 +41,14 @@ class HandoffService:
     def handle(self, customer: Customer, request: HandoffRequest, profile_name: str | None = None) -> bool:
         """Pause (unless system/staff) and notify staff. Returns True if the chat was paused."""
         now, cid = self.clock.now(), self.config.client_id
-        pause = request.reason not in SYSTEM_REASONS and not self.config.is_staff(customer.phone)
+        system = request.reason in SYSTEM_REASONS
+        pause = not system and not self.config.is_staff(customer.phone)
         if pause:
             self.repo.set_bot_paused(cid, customer.phone, True, at=now, reason=request.reason)
-        self.notify_staff(customer, request, profile_name, paused=pause)
+        # An outage would otherwise alert staff on every message: one notice per customer per day.
+        if not system or self.repo.increment_counter(cid, f"system_notice:{request.reason}:{customer.phone}",
+                                                     ist_today(self.clock).isoformat(), cap=1):
+            self.notify_staff(customer, request, profile_name, paused=pause)
         log.info("Handoff for %s (%s); paused=%s", mask_phone(customer.phone), request.reason, pause)
         return pause
 

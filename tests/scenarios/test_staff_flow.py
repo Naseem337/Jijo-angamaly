@@ -212,11 +212,17 @@ def test_paused_chat_resumes_by_itself_after_24_hours(env, clock) -> None:
     assert texts_to(sent, CUSTOMER)[-1] == "Sorry for the wait! How can I help?"
 
 
-def test_system_handoff_notifies_without_pausing(env) -> None:
+def test_system_handoff_notifies_once_a_day_without_pausing(env) -> None:
     say, llm, repo, sent = env
-    llm.script.append(LLMError("fallback", "all providers failed"))
-    say(CUSTOMER, "Swift undo?")
+    llm.script.append(MockLLM.text("Hi"))
+    say(STAFF, "hi")  # staff inside the 24 h window → notices go as text
+    llm.script += [LLMError("fallback", "all providers failed")] * 3
+    for question in ("Swift undo?", "hello?", "anyone?"):
+        say(CUSTOMER, question)
     assert not repo.get_customer("truechoice", CUSTOMER).bot_paused
+    notices = [t for t in texts_to(sent, STAFF) if "llm_unavailable" in t]
+    assert len(notices) == 1  # an outage doesn't spam staff on every message
+    assert len([t for t in texts_to(sent, CUSTOMER) if "technical problem" in t]) == 3
 
 
 def test_staff_help(env) -> None:
