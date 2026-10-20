@@ -22,6 +22,9 @@ from app.inventory.aliases import compact
 from app.providers.llm import ChatMessage, LLMError, LLMProvider
 from app.storage.models import LeadRequirement
 
+# Staff notes up to this many words are read by the rules alone when they find something;
+# longer or unusual notes (names, colours, timings) also go to the AI.
+RULES_ONLY_MAX_WORDS = 8
 COMMAND_RE = re.compile(r"^\s*leads?\s*:?(?=\s|$)", re.IGNORECASE)
 _PHONE_TOKEN = re.compile(r"^[+\d()\-.]+$")
 
@@ -207,6 +210,8 @@ def extract_requirement(llm: LLMProvider | None, text: str, aliases: Mapping[str
     """(requirement, customer name, whether the LLM was used)."""
     known_models = list(known_models)
     fallback = rule_based(text, aliases, known_models)
+    if not fallback.is_empty() and len(text.split()) <= RULES_ONLY_MAX_WORDS:
+        return fallback, None, False  # short note fully understood by the rules: no AI tokens spent
     if llm is not None:
         try:
             response = llm.complete(EXTRACT_INSTRUCTION, [ChatMessage.user(text)], None, 500)

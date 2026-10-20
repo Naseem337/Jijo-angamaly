@@ -21,7 +21,7 @@ from app.providers.llm import ToolCall, ToolSpec
 from app.storage.models import Enquiry, PendingAction, Requirement
 from app.storage.repository import Repository
 
-SEARCH_LIMIT = 5
+SEARCH_LIMIT = 3  # the reply shows at most 3 cars; fewer rows = fewer tokens
 
 
 @dataclass
@@ -61,52 +61,45 @@ _STR = {"type": "string"}
 TOOL_SPECS: list[ToolSpec] = [
     ToolSpec(
         "search_cars",
-        "Search the dealer's available cars. All filters are optional. Money is in rupees "
-        "(6 lakh = 600000). Returns at most 5 cars, best match first.",
+        "Available cars, best 3 first. Filters optional; money in rupees.",
         {"type": "object", "properties": {
-            "budget_max": {**_INT, "description": "Highest price in rupees"},
-            "budget_min": {**_INT, "description": "Lowest price in rupees"},
-            "make": {**_STR, "description": "Brand, e.g. Maruti, Hyundai"},
-            "model": {**_STR, "description": "Model as the customer said it, e.g. swift, crysta"},
+            "budget_max": _INT, "budget_min": _INT, "make": _STR, "model": _STR,
             "min_year": _INT, "max_year": _INT,
             "fuel": {"type": "string", "enum": ["petrol", "diesel", "cng", "electric", "hybrid"]},
             "transmission": {"type": "string", "enum": ["manual", "automatic"]},
             "body_type": {"type": "string", "enum": ["hatchback", "sedan", "suv", "muv"]},
-            "max_km": {**_INT, "description": "Highest odometer reading in km"},
+            "max_km": _INT,
         }},
     ),
     ToolSpec(
         "get_car_details",
-        "Full details and current availability of one car by its id (e.g. TC-1001).",
+        "One car's details and availability, by id.",
         {"type": "object", "properties": {"car_id": _STR}, "required": ["car_id"]},
     ),
     ToolSpec(
         "emi_estimate",
-        "Indicative monthly EMI range for a car (by car_id) or a price. Not a loan offer.",
+        "Indicative EMI range for a car_id or a price (rupees). Not a loan offer.",
         {"type": "object", "properties": {
-            "car_id": _STR,
-            "price": {**_INT, "description": "Rupees, if there is no car_id"},
-            "down_payment": {**_INT, "description": "Rupees; default is the dealer's usual share"},
-            "tenure_months": {**_INT, "description": "12-84; omit to get several tenures"},
+            "car_id": _STR, "price": _INT, "down_payment": _INT,
+            "tenure_months": {**_INT, "description": "omit for several tenures"},
         }},
     ),
     ToolSpec(
         "save_enquiry",
-        "Record that the customer wants a visit, test drive, call back or booking.",
+        "Record a visit, test drive, call back or booking request.",
         {"type": "object", "properties": {
-            "name": {**_STR, "description": "Customer's name if they gave it"},
-            "interest": {**_STR, "description": "What they want, e.g. 'test drive TC-1002 Swift ZXi AMT'"},
-            "budget": {**_INT, "description": "Rupees"},
-            "notes": {**_STR, "description": "Preferred time, exchange car, etc."},
+            "name": _STR,
+            "interest": {**_STR, "description": "e.g. 'test drive TC-1002 Swift'"},
+            "budget": _INT,
+            "notes": {**_STR, "description": "time, exchange car, …"},
         }, "required": ["interest"]},
     ),
     ToolSpec(
         "save_requirement",
-        "Save what the customer is looking for so we can WhatsApp them when a matching car "
-        "arrives. Only with consent=true after the customer explicitly agreed.",
+        "Save a wish for an alert when a matching car arrives. consent=true only after a clear yes.",
         {"type": "object", "properties": {
-            "consent": {"type": "boolean", "description": "Customer explicitly agreed to alerts"},
-            "budget_max": {**_INT, "description": "Rupees"},
+            "consent": {"type": "boolean"},
+            "budget_max": _INT,
             "min_year": _INT,
             "make": _STR,
             "model": _STR,
@@ -117,11 +110,10 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "handoff_to_human",
-        "Pass the chat to the sales team. Use for price negotiation, exchange, loans, booking, "
-        "complaints, a request for a person, or anything you can't answer.",
+        "Pass the chat to the sales team.",
         {"type": "object", "properties": {
-            "reason": {**_STR, "description": "Short reason, e.g. 'wants price negotiation'"},
-            "summary": {**_STR, "description": "One-line summary of what the customer wants"},
+            "reason": {**_STR, "description": "short, e.g. 'wants discount'"},
+            "summary": {**_STR, "description": "one line: what they want"},
         }, "required": ["reason", "summary"]},
     ),
 ]
@@ -186,7 +178,8 @@ def search_cars(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         limit=SEARCH_LIMIT,
     )
     cars = ctx.inventory.search_cars(query)
-    return ToolResult(_dump({"count": len(cars), "cars": [c.to_summary() for c in cars]}))
+    # One line per car instead of a JSON object each: same facts, about a third of the tokens.
+    return ToolResult(_dump({"count": len(cars), "cars": [c.to_line() for c in cars]}))
 
 
 def get_car_details(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:

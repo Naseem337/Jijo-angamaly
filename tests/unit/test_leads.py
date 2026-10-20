@@ -163,3 +163,12 @@ def test_old_leads_table_becomes_enquiries(tmp_path: Path) -> None:
     assert [e.interest for e in repo.list_enquiries("truechoice")] == ["test drive"]
     assert repo.list_leads("truechoice") == []  # the new leads table starts empty
     repo.close()
+
+
+def test_short_notes_skip_the_ai_and_long_ones_use_it() -> None:
+    llm = MockLLM([MockLLM.text('{"models": ["Swift"], "budget_max": "6L", "notes": "red, sunroof"}')])
+    req, _, used = extract_requirement(llm, "Swift 6L petrol under 60000km", ALIASES)
+    assert not used and llm.calls == [] and req.budget_max == 600_000  # no tokens spent
+    req, _, used = extract_requirement(llm, "Swift around 6L, red colour if possible, sunroof would be nice",
+                                       ALIASES)
+    assert used and req.notes == "red, sunroof"

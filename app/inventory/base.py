@@ -72,6 +72,22 @@ class Car(BaseModel):
     def is_available(self) -> bool:
         return self.status == "available"
 
+    def to_line(self) -> str:
+        """Compact form for search results (the LLM reads it; guardrails find every number in it):
+        'TC-1002 | 2021 Maruti Suzuki Swift ZXi AMT | ₹6,95,000 (₹6.95 lakh) | 28,500 km | petrol |
+        automatic | 1 owner | White | reg Delhi | tyres 80% | 18.9 km/l'"""
+        parts = [self.id, self.title, f"{format_inr(self.price)} ({format_lakh(self.price)})", f"{self.km:,} km",
+                 self.fuel, self.transmission or "gearbox not listed", f"{self.owners} owner"]
+        parts += [p for p in (self.color, self.body_type if self.body_type != "other" else "") if p]
+        if self.registration:
+            parts.append(f"reg {self.registration}")
+        if self.tyre_condition_pct is not None:
+            parts.append(f"tyres {self.tyre_condition_pct}%")
+        if self.mileage_kmpl is not None:
+            parts.append(f"{self.mileage_kmpl:g} km/l")
+        parts += list(self.highlights)
+        return " | ".join(parts)
+
     def to_summary(self) -> dict[str, Any]:
         """What the LLM sees in a search_cars result. The guardrails later check that any
         price, year or km the agent states appears here, so keep the formatted forms."""

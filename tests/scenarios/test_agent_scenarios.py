@@ -50,7 +50,7 @@ def test_search_then_quote_real_prices(make_agent, repo) -> None:
 
     assert reply.guardrail == "ok" and reply.language == "manglish"
     assert reply.tools_used == ["search_cars"]
-    assert [c["id"] for c in tool_result(llm)["cars"]] == ["TC-1002", "TC-1001"]
+    assert [c.split(" | ")[0] for c in tool_result(llm)["cars"]] == ["TC-1002", "TC-1001"]  # one line per car
     first = llm.calls[0]
     assert "Reply language: Manglish" in first.messages[-1].content
     assert first.messages[-1].content.endswith("Swift undo 7 lakhinu thazhe?")
@@ -193,3 +193,24 @@ def test_off_topic_question_gets_plain_text(make_agent) -> None:
     reply = agent.handle(PHONE, "Who will win the election?")
     assert reply.guardrail == "ok" and reply.handoff is None
     assert "bring it back to True Choice's cars" in llm.calls[0].system
+
+
+def test_token_use_is_counted_per_reply_and_per_day(make_agent, repo) -> None:
+    from app.providers.llm import Usage
+    first = MockLLM.tool("search_cars", model="swift")
+    first.usage = Usage(2500, 40, 2000)
+    second = MockLLM.text("Swift und.")
+    second.usage = Usage(2700, 25, 2400)
+    agent, _ = make_agent(first, second)
+    reply = agent.handle(PHONE, "Swift undo?")
+    assert reply.usage == {"calls": 2, "tokens_in": 5200, "tokens_out": 65, "tokens_cached": 4400}
+    assert repo.get_counter("truechoice", "llm_tokens_in", "2026-10-16") == 5200
+    assert repo.get_counter("truechoice", "llm_calls", "2026-10-16") == 2
+    assert repo.list_messages("truechoice", PHONE)[-1].meta["usage"]["tokens_out"] == 65
+
+
+def test_search_results_are_compact_lines(make_agent) -> None:
+    agent, llm = make_agent(MockLLM.tool("search_cars", budget_max=1500000), MockLLM.text("ok"))
+    agent.handle(PHONE, "15 lakhinu thazhe?")
+    cars = tool_result(llm)["cars"]
+    assert len(cars) == 3 and all(isinstance(c, str) and " | ₹" in c and " km | " in c for c in cars)

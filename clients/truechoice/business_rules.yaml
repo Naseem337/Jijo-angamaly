@@ -28,7 +28,7 @@ alerts:
 
 bot:
   auto_resume_hours: 24      # paused (handed-off) chats resume after this
-  history_messages: 20       # messages of history sent to the LLM
+  history_messages: 10       # messages of history sent to the LLM (fewer = fewer tokens)
 
 retention_days: 90           # messages/audio metadata older than this are deleted
 

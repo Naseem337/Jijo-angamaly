@@ -79,7 +79,7 @@ class AlertRules(BaseModel):
 
 class BotRules(BaseModel):
     auto_resume_hours: int = 24
-    history_messages: int = 20
+    history_messages: int = 10
 
 
 class BusinessRules(BaseModel):

@@ -171,6 +171,17 @@ local `.env` override can't change test results.
   - Exam: `scripts/live_eval.py` runs tests/eval/customer_scenarios.yaml (46 scenarios) against the real AI
     with automatic checks, and saves results to data/eval/. A full run needs ~150 AI calls, which means a
     paid key. Process: run it, fix the prompt with general rules (not per-message hacks), run again.
+- **Token budget (user, 2026-10-20: "design for less token burning"):** measured on a live turn, a message
+  went from ~6,900 to ~3,300 input tokens per AI call.
+  - System prompt rewritten compact (16.6k → 8.8k chars, same rules). Tool specs trimmed (821 → ~600 tokens).
+  - search_cars returns 3 cars as one `Car.to_line()` string each (430 → ~116 tokens; the guardrails still
+    read every number).
+  - History is 10 messages, with old ones cut to 300 chars.
+  - LEAD notes of ≤8 words that the rules understand skip the AI (`RULES_ONLY_MAX_WORDS`).
+  - Every turn's AI calls and tokens are in the outbound message meta `usage` and in daily counters
+    `llm_*`; see them with `python -m app.usage --client truechoice`.
+  - Step 10 matching must stay pure code (zero tokens). Keep new prompt text short; check the size with
+    `len(build_system_prompt(cfg))`.
 - Hosting is still the AWS plan. The user once pasted a Hetzner link, but that was a mistake.
 - `purge_old_data` deletes old `pending_actions` (the interface docstring wins). The test was fixed
   to match.
