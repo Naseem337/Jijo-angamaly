@@ -140,7 +140,20 @@ local `.env` override can't change test results.
 - **Database:** SQLite locally, DynamoDB on AWS (Step 11). The user asked about Supabase. The reasons
   to keep DynamoDB: one AWS account, no server, near-zero cost, and Supabase free projects pause when
   idle. Switching would mean a Postgres repository. Undecided only if the user raises it again.
-- **Inventory = True Choice's Google Sheet** (shared on 2026-10-17; 300 cars). The sheet is
+- **Inventory = True Choice's app backend, Carlet** (`api.carlet.in`, from 2026-10-20; `.env`
+  `TRUECHOICE_INVENTORY_ADAPTER=carlet`). `app/inventory/carlet_adapter.py` reads `GET /api/car/list`
+  (public, read-only, all cars at once, cached 5 min, last copy kept 1 h).
+  - 174 cars in 4 showrooms: Makkaraparamba 113, Panangangara 24, Pattambi 23, Cochin 14. `car.location`
+    is the showroom, and the prompt says which showroom. The `showrooms` option in client.yaml filters.
+  - There's no single-car endpoint; ids are shown short (`TC-` + last 6 hex of `_id`), and the full id
+    also works in get_car. `status: showroom` = available; unknown statuses are hidden.
+  - `owners` is the ownership position (3 = "3rd owner", the user's clarification). There are new Car
+    fields `max_loan` (not an approval), `insurance_valid_till`, `image_url` (WebP on S3: convert to JPEG
+    before sending WhatsApp photos, which is a planned feature) and `source_id`.
+  - The app also has POST /api/car/test-drive and /api/enquiry; pushing bookings there is an idea. Their
+    format is unknown, so ask the app developer first.
+  - Our own data (chats, leads, alerts) stays in our own DB, by user decision.
+- **Before that, inventory was True Choice's Google Sheet** (shared on 2026-10-17; 300 cars; still supported). The sheet is
   "anyone with the link"; `app/inventory/sheet_adapter.py` reads it as CSV, refreshes every 5 minutes,
   and keeps the last good copy for up to 1 hour if Google is unreachable. Columns are matched by
   header name.

@@ -29,14 +29,19 @@ whatsapp:
   template_languages: {ml: ml, en: en, manglish: en}
 
 inventory:
-  # mock = inventory_mock.json below; google_sheet = the dealer's Google Sheet (shared as
-  # "anyone with the link can view"). Set both in .env so the sheet link stays out of git.
+  # carlet = True Choice's app backend (api.carlet.in, read-only, same stock as the app);
+  # google_sheet = their Google Sheet; mock = inventory_mock.json below (tests, offline).
+  # Chosen in .env: TRUECHOICE_INVENTORY_ADAPTER=carlet
   adapter: "${TRUECHOICE_INVENTORY_ADAPTER:-mock}"
   options:
     path: inventory_mock.json   # mock: relative to this folder
     sheet_id: "${TRUECHOICE_INVENTORY_SHEET_ID}"   # the long id in the sheet's URL
     gid: "${TRUECHOICE_INVENTORY_SHEET_GID}"       # which tab: the number after gid= in its URL; empty = first tab
-    cache_seconds: 300          # re-read the sheet at most every 5 minutes
+    cache_seconds: 300          # re-read the stock at most every 5 minutes
+    # carlet:
+    base_url: https://api.carlet.in
+    id_prefix: "TC-"            # short car ids shown to customers: TC-A72F0B
+    showrooms: []               # [] = all showrooms; or e.g. [Makkaraparamba]
     # True Choice's "Location" column is the city the car is REGISTERED in, not where it
     # is parked (all cars are at the showroom).
     columns: {registration: Location}

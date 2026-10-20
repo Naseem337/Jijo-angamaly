@@ -33,6 +33,11 @@ class InventoryError(RuntimeError):
     """The inventory source is unreachable or returned data we can't use."""
 
 
+def _ordinal(n: int) -> str:
+    """Ownership is said as a position: 1 → '1st owner', 3 → '3rd owner'."""
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
 class Car(BaseModel):
     """One car in a dealer's stock. Prices are whole rupees; km is the odometer reading."""
 
@@ -57,6 +62,10 @@ class Car(BaseModel):
     highlights: list[str] = []
     mileage_kmpl: float | None = None  # expected fuel efficiency, km per litre
     tyre_condition_pct: int | None = Field(None, ge=0, le=100)
+    max_loan: int | None = None  # the listing's maximum loan amount (not an approval)
+    insurance_valid_till: date | None = None
+    image_url: str | None = None  # main photo (Carlet: WebP on S3)
+    source_id: str = ""  # the id in the dealer's own system, if different from `id`
 
     @field_validator("fuel", "transmission", "body_type", "status", mode="before")
     @classmethod
@@ -77,14 +86,20 @@ class Car(BaseModel):
         'TC-1002 | 2021 Maruti Suzuki Swift ZXi AMT | ₹6,95,000 (₹6.95 lakh) | 28,500 km | petrol |
         automatic | 1 owner | White | reg Delhi | tyres 80% | 18.9 km/l'"""
         parts = [self.id, self.title, f"{format_inr(self.price)} ({format_lakh(self.price)})", f"{self.km:,} km",
-                 self.fuel, self.transmission or "gearbox not listed", f"{self.owners} owner"]
+                 self.fuel, self.transmission or "gearbox not listed", f"{_ordinal(self.owners)} owner"]
         parts += [p for p in (self.color, self.body_type if self.body_type != "other" else "") if p]
+        if self.location:
+            parts.append(self.location)
         if self.registration:
             parts.append(f"reg {self.registration}")
         if self.tyre_condition_pct is not None:
             parts.append(f"tyres {self.tyre_condition_pct}%")
         if self.mileage_kmpl is not None:
             parts.append(f"{self.mileage_kmpl:g} km/l")
+        if self.insurance_valid_till:
+            parts.append(f"insurance till {self.insurance_valid_till:%b %Y}")
+        if self.max_loan:
+            parts.append(f"max loan {format_inr(self.max_loan)}")
         parts += list(self.highlights)
         return " | ".join(parts)
 
@@ -107,6 +122,9 @@ class Car(BaseModel):
             "location": self.location,
             "status": self.status,
             "highlights": list(self.highlights),
+            **({"max_loan": format_inr(self.max_loan)} if self.max_loan else {}),
+            **({"insurance_valid_till": self.insurance_valid_till.isoformat()} if self.insurance_valid_till else {}),
+            **({"has_photo": True} if self.image_url else {}),
             **({"mileage_kmpl": self.mileage_kmpl} if self.mileage_kmpl is not None else {}),
             **({"tyre_condition_pct": self.tyre_condition_pct} if self.tyre_condition_pct is not None else {}),
         }

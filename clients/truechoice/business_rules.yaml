@@ -40,7 +40,7 @@ opt_out_extra_phrases: []
 # (placeholder) items need checking by True Choice before go-live.
 dealer_facts:
   - "Showroom: True Choice, Makkaraparamba, Malappuram, Kerala (exact address / Google Maps link: the team shares it)."
-  - "All listed cars are at the showroom; the registration city in the stock list is only where the car is registered."
+  - "True Choice has four showrooms: Makkaraparamba (main), Panangangara, Pattambi and Cochin. Each car's location says which showroom it's at; the customer visits that one."
   - "Open Monday to Saturday, 9:30 AM to 7:00 PM. Closed on Sunday."
   - "Test drives are only for customers who visit the yard/showroom; no home test drives or bringing cars to the customer."
   - "We accept the customer's old car in exchange; its value is decided only after the team inspects it."
