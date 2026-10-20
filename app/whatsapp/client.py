@@ -79,6 +79,14 @@ class WhatsAppClient:
         log.info("WhatsApp voice note sent to %s (%s)", mask_phone(to), message_id)
         return message_id
 
+    def send_image(self, to: str, media_id: str, caption: str = "") -> str:
+        """Send an uploaded JPEG/PNG with an optional caption (max 1024 chars)."""
+        image: dict[str, str] = {"id": media_id}
+        if caption:
+            image["caption"] = caption[:1024]
+        data = self._post({"recipient_type": "individual", "to": to_wa_id(to), "type": "image", "image": image})
+        return data["messages"][0]["id"]
+
     def send_template(self, to: str, name: str, language: str, body_params: list[str]) -> str:
         """Send an approved template (alerts, staff notices). Used from step 9/10."""
         components = [{"type": "body", "parameters": [{"type": "text", "text": p} for p in body_params]}]

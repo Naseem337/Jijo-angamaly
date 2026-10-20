@@ -150,6 +150,11 @@ local `.env` override can't change test results.
   - `owners` is the ownership position (3 = "3rd owner", the user's clarification). There are new Car
     fields `max_loan` (not an approval), `insurance_valid_till`, `image_url` (WebP on S3: convert to JPEG
     before sending WhatsApp photos, which is a planned feature) and `source_id`.
+  - **Car photos (user, 2026-10-20: only the first photo, to control cost):** the agent tool `send_car_photo`
+    only picks car ids (max 3 per turn). `app/conversation/photos.py` sends them after the reply: download
+    the WebP → ffmpeg JPEG ≤1280 px (~140 KB) → upload → `send_image` with a caption. The media id is
+    cached 25 days. More photos or video → team handoff. Live-checked: 311 KB WebP → 136 KB JPEG →
+    WhatsApp upload OK. The user confirmed: offer cars from all 4 showrooms.
   - The app also has POST /api/car/test-drive and /api/enquiry; pushing bookings there is an idea. Their
     format is unknown, so ask the app developer first.
   - Our own data (chats, leads, alerts) stays in our own DB, by user decision.

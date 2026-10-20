@@ -12,6 +12,7 @@ from functools import cached_property
 import httpx
 
 from app.agent import Agent
+from app.conversation.photos import PhotoSender
 from app.conversation.router import MessageRouter
 from app.conversation.voice_in import VoiceIn
 from app.conversation.voice_out import VoiceOut
@@ -115,10 +116,19 @@ class ClientRuntime:
         return VoiceOut(self.config, tts, self.whatsapp, self.repo, self.clock, ffmpeg)
 
     @cached_property
+    def photos(self) -> PhotoSender | None:
+        ffmpeg = self._ffmpeg or find_ffmpeg()
+        if ffmpeg is None:
+            log.warning("Car photos disabled for %s: ffmpeg not found", self.config.client_id)
+            return None
+        return PhotoSender(self.config, lambda: self.inventory, self.whatsapp, self.repo, self.clock, ffmpeg,
+                           http=self._http)
+
+    @cached_property
     def router(self) -> MessageRouter:
         return MessageRouter(self.config, self.repo, lambda: self.agent, self.whatsapp, self.clock,
                              lambda: self.voice_in, lambda: self.voice_out, staff=self.staff_commands,
-                             leads=self.leads, handoff=self.handoff)
+                             leads=self.leads, handoff=self.handoff, photos=lambda: self.photos)
 
 
 class Runtime:

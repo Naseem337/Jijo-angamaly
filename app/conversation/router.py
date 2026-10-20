@@ -15,9 +15,10 @@ import logging
 from collections.abc import Callable
 from typing import Literal
 
-from app.agent import Agent
+from app.agent import Agent, AgentReply
 from app.conversation.voice_in import VOICE_PROBLEM_REPLY, VoiceIn
 from app.conversation.optout import opt_in_confirmation, opt_out_confirmation, reply_language
+from app.conversation.photos import PhotoSender
 from app.conversation.voice_out import VoiceOut
 from app.core.client_config import ClientConfig
 from app.core.clock import Clock
@@ -49,7 +50,8 @@ class MessageRouter:
                  voice_in: Callable[[], VoiceIn | None] = lambda: None,
                  voice_out: Callable[[], VoiceOut | None] = lambda: None, *,
                  staff: StaffCommands | None = None, leads: LeadService | None = None,
-                 handoff: HandoffService | None = None) -> None:
+                 handoff: HandoffService | None = None,
+                 photos: Callable[[], PhotoSender | None] = lambda: None) -> None:
         self.config = config
         self.repo = repo
         self._agent = agent  # built lazily, so a missing LLM key doesn't break the webhook
@@ -60,6 +62,7 @@ class MessageRouter:
         self.staff = staff
         self.leads = leads
         self.handoff = handoff
+        self._photos = photos  # returns None without ffmpeg
 
     def handle(self, msg: InboundMessage) -> Outcome:
         cid, phone, now = self.config.client_id, msg.phone, self.clock.now()
@@ -115,6 +118,15 @@ class MessageRouter:
             else:
                 log.warning("Handoff requested for %s but no handoff service: %s", mask_phone(phone),
                             reply.handoff.reason)
+        outcome = self._send_reply(phone, reply, voice_out)
+        if outcome == "replied" and reply.photos:
+            sender = self._photos()
+            for car_id in reply.photos:  # after the words, like a salesman forwarding pictures
+                if not (sender and sender.send(phone, car_id)):
+                    log.warning("Photo of %s not sent to %s", car_id, mask_phone(phone))
+        return outcome
+
+    def _send_reply(self, phone: str, reply: AgentReply, voice_out: VoiceOut | None) -> Outcome:
         if voice_out and reply.spoken_text:
             # Voice note in → voice note out, with no duplicate text (user rule, 2026-10-20)...
             if not reply.has_car_details and voice_out.send(phone, reply.spoken_text, reply.language):

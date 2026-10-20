@@ -41,6 +41,7 @@ class ToolContext:
     source: str = "text"  # "voice" holds save_* for confirmation
     handoff: HandoffRequest | None = None
     saved: list[str] = field(default_factory=list)  # e.g. ["enquiry:<id>"], for logs/tests
+    photos: list[str] = field(default_factory=list)  # car ids whose main photo the router sends
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,12 @@ TOOL_SPECS: list[ToolSpec] = [
             "max_km": _INT,
             "notes": _STR,
         }, "required": ["consent"]},
+    ),
+    ToolSpec(
+        "send_car_photo",
+        "Send the main photo of up to 3 cars (by id) right after your reply.",
+        {"type": "object", "properties": {"car_ids": {"type": "array", "items": _STR}},
+         "required": ["car_ids"]},
     ),
     ToolSpec(
         "handoff_to_human",
@@ -286,6 +293,31 @@ def save_requirement(ctx: ToolContext, args: dict[str, Any], *, confirmed: bool 
     }))
 
 
+MAX_PHOTOS_PER_TURN = 3  # cost control: one main photo per car, at most 3 cars per message
+
+
+def send_car_photo(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
+    ids = args.get("car_ids")
+    ids = [ids] if isinstance(ids, str) else ids
+    if not isinstance(ids, list) or not ids:
+        raise ToolArgError("give car_ids, e.g. ['TC-A72F0B']")
+    queued, missing = [], []
+    for raw in ids:
+        car_id = str(raw).strip().upper()
+        car = ctx.inventory.get_car(car_id)
+        if car is None or not car.image_url:
+            missing.append(car_id)
+        elif car_id not in ctx.photos and len(ctx.photos) < MAX_PHOTOS_PER_TURN:
+            ctx.photos.append(car_id)
+            queued.append(car_id)
+    return ToolResult(_dump({
+        "will_send_photo_of": queued,
+        **({"no_photo_for": missing} if missing else {}),
+        "note": "One main photo per car is sent after your reply; don't describe it. More photos or a video: "
+                "the team sends them (handoff_to_human if they want them).",
+    }))
+
+
 def handoff_to_human(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
     ctx.handoff = HandoffRequest(_text(args, "reason") or "customer request",
                                  _text(args, "summary") or "")
@@ -302,6 +334,7 @@ _TOOLS = {
     "emi_estimate": emi_estimate,
     "save_enquiry": save_enquiry,
     "save_requirement": save_requirement,
+    "send_car_photo": send_car_photo,
     "handoff_to_human": handoff_to_human,
 }
 

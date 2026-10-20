@@ -44,6 +44,7 @@ class AgentReply:
     saved: list[str] = field(default_factory=list)
     spoken_text: str | None = None  # set when a voice reply was requested and passed the checks
     usage: dict[str, int] = field(default_factory=dict)  # AI calls and tokens spent on this turn
+    photos: list[str] = field(default_factory=list)  # car ids: send their main photo after the reply
 
     @property
     def has_car_details(self) -> bool:
@@ -121,6 +122,7 @@ class Agent:
         meter = _Meter(self.llm)
         reply = self._run(messages, ctx, facts, language, meter)
         reply.saved = list(ctx.saved)
+        reply.photos = list(ctx.photos) if reply.guardrail in ("ok", "rewritten") else []
         if want_voice:
             reply.spoken_text = self._spoken(reply, facts, meter)
         reply.usage = dict(meter.totals)
