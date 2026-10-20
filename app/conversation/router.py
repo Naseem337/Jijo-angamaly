@@ -12,6 +12,7 @@ the bot (on Meta's test number, only registered numbers can message it at all).
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from typing import Literal
 
@@ -42,6 +43,15 @@ UNSUPPORTED_REPLY = {
     "manglish": "Sorry, enikku text-um voice message-um mathrame manasilaakoo. Onnu type cheyyukayo parayukayo cheyyamo?",
     "en": "Sorry, I can only understand text and voice messages. Could you type or say your question?",
 }
+
+
+_DETAIL_LINE = re.compile(r"₹|\(\s*[A-Z]{2,4}-[0-9A-Z]{3,}\s*\)")  # a price or a car id: car data, not talk
+
+
+def car_details_text(text: str) -> str:
+    """Just the lines that carry car data (car lines, prices, km, EMI), for the text that goes
+    with a voice reply. The talking around them is in the voice note already."""
+    return "\n".join(line for line in text.splitlines() if _DETAIL_LINE.search(line)).strip()
 
 
 class MessageRouter:
@@ -127,16 +137,13 @@ class MessageRouter:
         return outcome
 
     def _send_reply(self, phone: str, reply: AgentReply, voice_out: VoiceOut | None) -> Outcome:
-        if voice_out and reply.spoken_text:
-            # Voice note in → voice note out, with no duplicate text (user rule, 2026-10-20)...
-            if not reply.has_car_details and voice_out.send(phone, reply.spoken_text, reply.language):
-                return "replied"
-            # ...except car details (list, prices, EMI), which also go as text to read; and if the
-            # voice note failed, the text goes instead so the customer always gets an answer.
-            if not self._send(phone, reply.text, store=False):
+        """Text in → text out. Voice in → voice out, never the same words again as text (user rule,
+        2026-10-20); only the car details (list, prices, EMI figures) follow as text to read. If the
+        voice note fails, the full text goes instead, so the customer always gets an answer."""
+        if voice_out and reply.spoken_text and voice_out.send(phone, reply.spoken_text, reply.language):
+            details = car_details_text(reply.text) if reply.has_car_details else ""
+            if details and not self._send(phone, details, store=False):
                 return "send_failed"
-            if reply.has_car_details:
-                voice_out.send(phone, reply.spoken_text, reply.language)
             return "replied"
         return "replied" if self._send(phone, reply.text, store=False) else "send_failed"
 

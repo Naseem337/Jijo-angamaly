@@ -100,8 +100,14 @@ providers:
     api_key_secret: gemini_api_key
     model: "${GEMINI_TTS_MODEL:-gemini-3.8-flash-tts}"
     speaker: "${GEMINI_TTS_VOICE:-Algenib}"
-    style: calm, warm, slightly deep and mature, relaxed and casual, natural pauses.
-  tts_backup:
+    # Pleasant and steady (user, 2026-10-20: "not too harsh, not too bird-like").
+    style: >-
+      pleasant, friendly and gentle; medium pitch, not high or squeaky; steady, even volume,
+      never harsh or shouting; relaxed, natural pace, like a kind, experienced salesman.
+  # One voice only, so the tone never changes: if Gemini can't speak (e.g. free-tier quota),
+  # the customer gets the text instead of a different voice. To use Sarvam instead, move this
+  # block up to `tts:` (voices: anand, gokul, vijay; samples in data/voice_samples/pleasant).
+  tts_sarvam_option:
     kind: sarvam
     api_key_secret: sarvam_api_key
     # Only bulbul:v3 speaks Malayalam (checked 2026-10-19). Voices to try (samples in
@@ -109,8 +115,8 @@ providers:
     model: "${SARVAM_TTS_MODEL:-bulbul:v3}"
     language_code: ml-IN
     speaker: "${SARVAM_TTS_SPEAKER:-anand}"   # male, to match bot_name Anees
-    pace: 0.95               # a touch slower sounds more relaxed and human
-    temperature: 0.9         # more expressive, less flat (Sarvam default 0.6)
+    pace: 1.0
+    temperature: 0.4         # low = the same steady tone every time
 
 voice:
   policy: mirror          # reply with voice only if the customer sent voice or asked

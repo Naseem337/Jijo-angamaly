@@ -105,7 +105,13 @@ local `.env` override can't change test results.
     - Tried and rejected: `"<style> Say: <text>"` read the instruction aloud, and `systemInstruction`
       returns 400 "Developer instruction is not enabled for this model".
     - Verify any change by transcribing the audio with Sarvam STT and checking no instruction words appear.
-  - **Voice reply rules (user, 2026-10-20):** a voice note in gets a voice note out with **no duplicate text**.
+  - **Voice rules v2 (user, 2026-10-20):** text in → text out. Voice in → voice out with **no repeated words
+    as text**. When there's car data, only the lines with a ₹ price or a car id follow as text
+    (`car_details_text` in router.py), sent after the voice. If the voice fails, the full text is sent.
+  - **One voice only, so the tone never changes:** Gemini Algenib with a "pleasant, gentle, medium pitch,
+    never harsh or squeaky" style (transcript-verified). There's no tts_backup; Sarvam is documented as
+    `tts_sarvam_option` (temperature 0.4, steady). Samples are in data/voice_samples/pleasant.
+  - **Voice reply rules (user, 2026-10-20, superseded by v2 above):** a voice note in gets a voice note out with **no duplicate text**.
     When the reply has car data (search_cars / get_car_details / emi_estimate were used), the text is sent too
     and the voice summarises. If the voice fails, the text is sent instead.
   - **Address (user, 2026-10-20):** never the name and never chetta/chechi/bro; "sir"/"madam" only when the

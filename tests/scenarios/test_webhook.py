@@ -280,16 +280,17 @@ def test_voice_note_gets_voice_only_reply(env_with_voice, stt) -> None:
     assert "WHOLE reply" in llm.calls[1].system  # the voice says everything
 
 
-def test_voice_note_with_car_details_gets_text_and_voice(env_with_voice, stt) -> None:
+def test_voice_note_with_car_details_gets_voice_then_only_the_details_as_text(env_with_voice, stt) -> None:
     client, llm, _, sent, tts = env_with_voice
     stt.script.append(Transcript("Swift undo 7 lakhinu thazhe?", "en-IN", 0.95))
     llm.script += [MockLLM.tool("search_cars", model="swift", budget_max=700000),
-                   MockLLM.text("Undu sir: *2021 Maruti Suzuki Swift ZXi AMT* · ₹6,95,000 (TC-1002)"),
+                   MockLLM.text("Undu sir, 7 lakh-inu thazhe Swift und:\n"
+                                "*2021 Maruti Suzuki Swift ZXi AMT* · ₹6,95,000 (TC-1002)\nIthil ethu venam?"),
                    MockLLM.text("ഉണ്ട് സാർ, 2021 Swift ₹6,95,000. വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്.")]
     post(client, payload(VOICE))
     bodies = sent_bodies(sent)
-    assert [b.get("type", "read") for b in bodies] == ["read", "text", "audio"]
-    assert "TC-1002" in bodies[1]["text"]["body"]
+    assert [b.get("type", "read") for b in bodies] == ["read", "audio", "text"]
+    assert bodies[2]["text"]["body"] == "*2021 Maruti Suzuki Swift ZXi AMT* · ₹6,95,000 (TC-1002)"  # no repeated talk
     assert "ALSO sent as a text message" in llm.calls[2].system
 
 

@@ -146,7 +146,8 @@ class ProvidersConfig(BaseModel):
         return v
     stt: SpeechProviderConfig
     tts: SpeechProviderConfig
-    tts_backup: SpeechProviderConfig | None = None  # used when the main voice fails (e.g. quota)
+    tts_backup: SpeechProviderConfig | None = None  # used when the main voice fails (different tone!)
+    tts_sarvam_option: SpeechProviderConfig | None = None  # documented alternative, not used
 
     @model_validator(mode="after")
     def _chain_known(self) -> "ProvidersConfig":
