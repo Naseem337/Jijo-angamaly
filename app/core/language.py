@@ -38,7 +38,56 @@ MANGLISH_MARKERS = frozenset({
     "aayi", "ayi", "tharumo", "tharam", "varum", "varumo", "pattumo", "pattum",
     "vechittundo", "edukkam", "edukkan", "athe", "aathe", "ippo", "ippol", "vere",
     "ithu", "athu", "ee", "aa", "lakhinu", "budgetil", "kalar", "vandiyude", "ayakkamo",
+    # words the bot itself tends to use in Manglish replies (so an English reply with them is caught)
+    "nokkamo", "venamo", "venel", "ariyikkam", "ariyikkatte", "aakum", "aavum", "kaananamo", "kaanam",
+    "varam", "varamo", "cheyyatte", "ningalkku", "thanne", "okke", "kure", "nammalude", "ivide", "avide",
+    "avde", "unden", "aan", "aanallo", "kaanan", "vilikkam", "parayam", "ishtam", "pinne", "allenkil",
 })
+
+# Words that say nothing about the language: greetings, car names and car terms used by
+# English and Manglish speakers alike. A message of only these keeps the previous language.
+NEUTRAL_WORDS = frozenset("""
+hi hii hai hello helo hey ok okay k kk oky thanks thank thanku thx tq ty yes yeah yep no nope pls plz please
+bro sir madam hmm hm ha haha good gud fine super nice great wow done sure
+car cars vandi budget emi km kms kmpl lakh lakhs lac lacs l k rs inr price prize rate cost loan finance
+test drive testdrive automatic auto manual amt cvt gear petrol diesel cng ev electric hybrid suv muv sedan
+hatchback hatch model models variant top base owner owners first second third insurance rc noc showroom
+colour color white black red silver grey gray blue brown year mileage photo photos pic pics video
+maruti suzuki hyundai toyota honda kia tata mahindra skoda volkswagen vw renault nissan mg ford jeep chevrolet
+mercedes benz bmw audi porsche volvo lexus jaguar land rover datsun fiat mitsubishi isuzu citroen
+swift dzire baleno alto wagon wagonr ertiga brezza celerio ciaz ignis ritz zen omni eeco xl s presso fronx
+creta venue verna i10 i20 grand nios aura santro eon elantra tucson alcazar exter
+innova crysta fortuner glanza etios liva corolla altis camry hycross urban cruiser hyryder
+city amaze jazz wrv brv elevate civic xuv xuv300 xuv500 xuv700 scorpio thar bolero marazzo kuv
+nexon punch tiago tigor harrier safari altroz hexa zest seltos sonet carens carnival
+polo vento virtus taigun kushaq rapid octavia slavia kwid duster triber kiger magnite terrano
+hector astor zs gloster ecosport figo aspire endeavour compass meridian
+true choice anees makkaraparamba makaraparamba panangangara pattambi cochin kochi malappuram kerala
+kozhikode calicut thrissur palakkad perinthalmanna manjeri tirur ernakulam
+""".split())
+
+# Common English words, so English text is recognised even when it has no car words.
+ENGLISH_WORDS = frozenset("""
+a an the i i'm im me my mine you your yours u ur he she it its we us our they them their this that these those
+is am are was were be been being do does did doing done have has had having will would shall should can could
+may might must not no yes and or but if then so because as at by for from in into of on to with without about
+above below under over after before between up down out off again more most less least very too also just only
+what which who whom whose when where why how all any both each few many much some such other another same own
+there here than now today tomorrow yesterday tonight morning evening night week month year years day days time
+want wants wanted need needs needed like looking look find found get got give send sent show see seen check
+tell know think available availability buy buying sell selling sold book booking visit come coming go going
+call contact number phone address location where's what's how's details detail information info interested
+interest please thanks okay much cheap cheaper expensive best better good new old used second hand condition
+run driven km under within around upto up range between budget price any other more options option one two
+three four five six seven eight nine ten hundred thousand per month down payment exchange trade sell accept
+open close closed timing timings hours weekend sunday monday tuesday wednesday thursday friday saturday
+let me can't cant don't dont didn't doesn't isn't wasn't won't i'll i've you're it's that's there's
+family seater seats seat colour still stock new arrived arrival arrive similar same kind type size big small
+fuel economy service history accident free original paint tyres tyre engine battery loan approval documents
+mean means sorry hello hi again wait ok sure alright right fine sounds great nice love really actually
+today's latest which one please share list send pictures photos price final negotiable discount offer
+""".split())
+
 
 # --------------------------------------------------------------------------- opt-out / opt-in
 
@@ -146,19 +195,76 @@ def detect_script(text: str) -> Literal["malayalam", "latin", "none"]:
     return "malayalam" if ml >= 3 and ml / (ml + latin) >= 0.2 else "latin"
 
 
+def _classify_latin(words: list[str]) -> tuple[int, int, int]:
+    """(English words, Manglish markers, other unknown words), ignoring neutral words
+    (greetings, car names, car terms) that both English and Manglish speakers use."""
+    english = markers = unknown = 0
+    for w in words:
+        if w.isdigit() or w in NEUTRAL_WORDS:
+            continue
+        if w in MANGLISH_MARKERS:
+            markers += 1
+        elif w in ENGLISH_WORDS or w.rstrip("s") in ENGLISH_WORDS:
+            english += 1
+        else:
+            unknown += 1
+    return english, markers, unknown
+
+
 def detect_language(text: str, default: Language = "en") -> Language:
     """Language *and script* to reply in.
 
-    Malayalam script -> "ml"; Malayalam typed in English letters -> "manglish"; otherwise "en".
-    Text with no letters (emoji, numbers) returns `default` (the customer's last language).
+    Malayalam script -> "ml". English letters: mostly real English words -> "en"; otherwise
+    Malayalam typed in English letters -> "manglish" (spellings vary endlessly: "unden",
+    "avde", "ullath", so anything that isn't English counts). Messages with only neutral
+    words ("Hi", "ok", "crysta", "2019", emoji) keep `default`, the customer's last language.
     """
     script = detect_script(text)
     if script == "none":
         return default
     if script == "malayalam":
         return "ml"
-    words = [w for w in _words(text) if not w.isdigit()]
-    markers = sum(1 for w in words if w in MANGLISH_MARKERS)
-    if markers >= 2 or (markers == 1 and len(words) <= 4):
+    english, markers, unknown = _classify_latin(_words(text))
+    if english == markers == unknown == 0:
+        return default
+    if markers and english < 3 * markers:
         return "manglish"
-    return "en"
+    return "manglish" if unknown > english else "en"
+
+
+def is_language_neutral(text: str) -> bool:
+    """True if the message says nothing about the language ("Hi", "ok", "crysta", emoji)."""
+    script = detect_script(text)
+    if script != "latin":
+        return script == "none"
+    return _classify_latin(_words(text)) == (0, 0, 0)
+
+
+LANGUAGE_NAMES = {"ml": "Malayalam script", "manglish": "Manglish (English letters)", "en": "English"}
+_LATIN_WORD = re.compile(r"[a-z']+")
+_CAR_ID = re.compile(r"\b[A-Z]{2,4}-[0-9A-Z]{3,}\b")
+
+
+def reply_language_problem(reply: str, language: str) -> str | None:
+    """Is a bot reply in the one language it should be? None if fine, else what's wrong
+    (fed to one rewrite). Car names, car terms, ids and numbers are allowed in any reply."""
+    text = _CAR_ID.sub(" ", reply)
+    ml_letters = len(_MALAYALAM_CHAR.findall(text))
+    latin = [w for w in _LATIN_WORD.findall(normalize_text(text)) if w.strip("'")]
+    english, markers, unknown = _classify_latin(latin)
+    want = LANGUAGE_NAMES.get(language, "English")
+    if language in ("en", "manglish") and ml_letters:
+        return f"The whole reply must be in {want}; it contains Malayalam script."
+    if language == "ml":
+        if not ml_letters:
+            return "The whole reply must be in Malayalam script; it has none."
+        if markers + unknown >= 2:
+            return ("The whole reply must be in Malayalam script; it mixes in Manglish words. Only car "
+                    "names, prices, car ids and common English car words may stay in English letters.")
+        if english >= 8:
+            return "The whole reply must be in Malayalam script; it contains English sentences."
+    if language == "en" and markers >= 1:
+        return "The whole reply must be in simple English; it contains Manglish words."
+    if language == "manglish" and english >= 6 and markers == 0 and unknown == 0:
+        return "The customer writes Manglish: reply in Manglish (Malayalam in English letters), not English."
+    return None

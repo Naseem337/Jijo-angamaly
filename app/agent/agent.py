@@ -19,7 +19,7 @@ from app.agent.spoken import draft_spoken, to_speech
 from app.agent.tools import TOOL_SPECS, HandoffRequest, ToolContext, run_tool
 from app.core.client_config import ClientConfig
 from app.core.clock import Clock, ist_today
-from app.core.language import detect_language
+from app.core.language import detect_language, is_language_neutral, reply_language_problem
 from app.inventory import InventoryAdapter
 from app.providers.llm import ChatMessage, LLMError, LLMProvider, LLMResponse
 from app.storage.models import Message
@@ -142,6 +142,9 @@ class Agent:
         self.repo.reset_unanswered(cid, phone, now)
 
         ctx = ToolContext(self.config, self.repo, self.inventory, phone, now, language, source)
+        # A new customer's "Hi" doesn't show their language yet, so the reply language is only
+        # enforced once this message or an earlier one does.
+        ctx.enforce_language = not is_language_neutral(text) or any(m.direction == "in" for m in history)
         notes = [n for n in [resolve_pending(ctx, text)] if n]
         context = prompts.turn_context(self.config, language=language, now=now,
                                        customer_name=customer.name, source=source, notes=notes)
@@ -228,8 +231,19 @@ class Agent:
             return self._fallback(ctx, language, tools_used, [f"no usable reply ({reason})"], response.provider)
 
         problems = check_reply(text, facts)
-        if not problems:
+        wrong_language = reply_language_problem(text, language) if ctx.enforce_language else None
+        if not problems and not wrong_language:
             return AgentReply(text, language, ctx.handoff, tools_used, "ok", provider=response.provider)
+        if not problems:  # only the language is off: one rewrite, else send it as it is (never a fallback)
+            log.info("Language rewrite for %s: %s", ctx.phone, wrong_language)
+            rewritten = self._rewrite(messages, response, [wrong_language], llm)
+            if (rewritten and not check_reply(rewritten.text, facts)
+                    and not reply_language_problem(rewritten.text, language)):
+                return AgentReply(plain_dashes(rewritten.text.strip()), language, ctx.handoff, tools_used,
+                                  "rewritten", [wrong_language], rewritten.provider)
+            return AgentReply(text, language, ctx.handoff, tools_used, "ok", [wrong_language], response.provider)
+        if wrong_language:
+            problems = [*problems, wrong_language]
 
         log.warning("Guardrail rewrite for %s: %s", ctx.phone, problems)
         rewritten = self._rewrite(messages, response, problems, llm)

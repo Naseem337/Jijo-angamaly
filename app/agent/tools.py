@@ -42,6 +42,7 @@ class ToolContext:
     handoff: HandoffRequest | None = None
     saved: list[str] = field(default_factory=list)  # e.g. ["enquiry:<id>"], for logs/tests
     photos: list[str] = field(default_factory=list)  # car ids whose main photo the router sends
+    enforce_language: bool = True  # check the reply is in `language` (off for a new customer's "Hi")
 
 
 @dataclass(frozen=True)

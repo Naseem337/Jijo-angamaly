@@ -48,11 +48,15 @@ def speech_language(language: str) -> str:
     return "en" if language == "en" else "ml"
 
 
+# The car lines (price, km, id) go as text, so the voice must NOT read them out again (user,
+# 2026-10-21): it gives a salesman's spoken take on them instead.
+_DETAILS_TAKE = ("The car list with prices, km and ids is ALSO sent as a text message, so do NOT read it out "
+                 "or repeat its prices and km. Instead give a short spoken take, like a salesman: what stands "
+                 "out (newest, automatic, low km, single owner, which is the better buy), a quick comparison, "
+                 "or which suits what they asked; then ask what they'd like, and end with: ")
 DETAILS_NOTE = {
-    "ml": "The car details are ALSO sent as a text message: mention at most 2 cars briefly, then end with: "
-          "വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്.",
-    "en": "The car details are ALSO sent as a text message: mention at most 2 cars briefly, then end with: "
-          "I've sent the details in the message.",
+    "ml": _DETAILS_TAKE + "വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്.",
+    "en": _DETAILS_TAKE + "I've sent the details in the message.",
 }
 WHOLE_REPLY_NOTE = ("This voice note is the WHOLE reply (no text message is sent), so say everything important "
                     "in it, briefly. Don't say anything was sent in a message.")

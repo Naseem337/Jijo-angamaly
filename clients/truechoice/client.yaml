@@ -113,29 +113,28 @@ providers:
                SUV, sedan, hatchback, automatic, diesel, petrol, CNG, True Choice]
   # Main voice: Gemini "Algenib", a mature male voice the user approved by ear (sample:
   # data/voice_samples/algenib_B_director.wav; transcript-checked: no instruction spoken).
-  # When Gemini fails (free-tier quota), tts_backup (Sarvam anand) speaks instead.
+  # Sarvam anand (male, matches Anees) since 2026-10-21: Google blocked the Gemini account, so
+  # the Algenib voice is gone for now. One voice only, so the tone never changes; if it fails,
+  # the customer gets the text instead.
   tts:
+    kind: sarvam
+    api_key_secret: sarvam_api_key
+    # Only bulbul:v3 speaks Malayalam (checked 2026-10-19). Male voices: anand, gokul, vijay
+    # (samples in data/voice_samples and data/voice_samples/pleasant).
+    model: "${SARVAM_TTS_MODEL:-bulbul:v3}"
+    language_code: ml-IN
+    speaker: "${SARVAM_TTS_SPEAKER:-anand}"
+    pace: 1.0
+    temperature: 0.4         # low = the same steady tone every time
+  # The Gemini voice the user picked (2026-10-20). To use it again, move this block up to `tts:`.
+  tts_gemini_option:
     kind: gemini
     api_key_secret: gemini_api_key
     model: "${GEMINI_TTS_MODEL:-gemini-3.8-flash-tts}"
     speaker: "${GEMINI_TTS_VOICE:-Algenib}"
-    # Pleasant and steady (user, 2026-10-20: "not too harsh, not too bird-like").
     style: >-
       pleasant, friendly and gentle; medium pitch, not high or squeaky; steady, even volume,
       never harsh or shouting; relaxed, natural pace, like a kind, experienced salesman.
-  # One voice only, so the tone never changes: if Gemini can't speak (e.g. free-tier quota),
-  # the customer gets the text instead of a different voice. To use Sarvam instead, move this
-  # block up to `tts:` (voices: anand, gokul, vijay; samples in data/voice_samples/pleasant).
-  tts_sarvam_option:
-    kind: sarvam
-    api_key_secret: sarvam_api_key
-    # Only bulbul:v3 speaks Malayalam (checked 2026-10-19). Voices to try (samples in
-    # data/voice_samples): kavya, priya, shreya, kavitha (female); anand, gokul (male).
-    model: "${SARVAM_TTS_MODEL:-bulbul:v3}"
-    language_code: ml-IN
-    speaker: "${SARVAM_TTS_SPEAKER:-anand}"   # male, to match bot_name Anees
-    pace: 1.0
-    temperature: 0.4         # low = the same steady tone every time
 
 voice:
   policy: mirror          # reply with voice only if the customer sent voice or asked

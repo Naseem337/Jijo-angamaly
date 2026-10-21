@@ -104,7 +104,15 @@ local `.env` override can't change test results.
     `GROQ_BACKUP_MODEL=openai/gpt-oss-20b`. Both write good Malayalam; `qwen/qwen3.8-27b` wrote gibberish Malayalam.
   - Groq free = **8,000 tokens/min per model** (~2 calls/min each; one customer turn is 2–3 calls of ~3.3k).
     On a 429 that says "try again in Xs" (≤15 s), FallbackLLM waits once and retries instead of apologising.
-  - Voice replies are off until a TTS is chosen (Sarvam anand is ready via `tts_sarvam_option`).
+  - **Voice = Sarvam bulbul:v3 `anand` since 2026-10-21** (Gemini Algenib kept as `tts_gemini_option`).
+    For car replies the voice no longer reads the list; it gives a spoken take (what stands out, a quick
+    comparison, which suits them) and the car lines go as text (user, 2026-10-21).
+- **Reply language is structured (user, 2026-10-21):** one language per reply, the customer's: English → English,
+  Malayalam script → Malayalam script, Manglish → Manglish.
+  - `detect_language`: text that is mostly English words is "en", other Latin text is "manglish" (any spelling),
+    and neutral messages ("Hi", "ok", car names) keep the previous language.
+  - `reply_language_problem` checks every reply; a wrong or mixed one gets ONE rewrite and is never a fallback.
+    It's skipped for a new customer's neutral first message.
   - The user plans a paid key later (Groq pay-as-you-go = same models, or DeepSeek).
 - **Before that: Gemini free tier** (user's choice on 2026-10-17, no DeepSeek credit yet).
   - **Latency fix (2026-10-20):** gemini-3.8-flash kept timing out at 30 s on the free tier (over a minute

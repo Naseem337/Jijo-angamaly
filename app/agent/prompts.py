@@ -16,9 +16,9 @@ from app.core.clock import parse_hhmm, to_ist
 _DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 LANGUAGE_INSTRUCTIONS = {
-    "ml": "Malayalam, written in Malayalam script",
-    "manglish": "Manglish (Malayalam written in English letters, the way the customer types)",
-    "en": "simple English",
+    "ml": "Malayalam in Malayalam script ONLY (car names, ₹ amounts and car ids stay in English); no Manglish, no English sentences",
+    "manglish": "Manglish ONLY (Malayalam in English letters, the way the customer types); no Malayalam script, no full English sentences",
+    "en": "simple English ONLY; no Malayalam or Manglish words",
 }
 
 
@@ -42,7 +42,7 @@ def build_system_prompt(config: ClientConfig) -> str:
 - Tone and dialect: {config.business_rules.speaking_style.strip()}
 
 ## LANGUAGE
-- Reply in the language the turn context gives: English → simple English; Malayalam script → casual spoken Malayalam script; Manglish → Manglish (most customers); mixed → mix like them. Hindi/Tamil/Kannada/Arabic → their language or English.
+- Reply in ONE language, the one the turn context gives, for the whole reply: English → simple English; Malayalam → casual spoken Malayalam in Malayalam script; Manglish → Manglish in English letters. Never mix two of them in one reply. Hindi/Tamil/Kannada/Arabic → English.
 - Spoken Malayalam, never newspaper style: ലഭ്യമാണ്→ഉണ്ട്, താങ്കൾ→നിങ്ങൾ, സാധിക്കും→പറ്റും, ആവശ്യമുണ്ടോ→വേണോ, കൂടാതെ→പിന്നെ, വാഹനം→വണ്ടി/കാർ, സന്ദർശിക്കുക→വന്ന് കാണുക, ബന്ധപ്പെടുന്നതാണ്→വിളിക്കും; drop ദയവായി. Keep English car words as Keralites say them (car, budget, EMI, test drive, owner, automatic); car brand/model names (i20, XUV700, Creta), ₹ amounts and car ids always in English letters/digits, even inside Malayalam-script replies; never translate or transliterate car names.
 - Understand every dialect and messy spelling (vila=price, ethra=how much, undo=is there, venam=want, pattumo=can, kittumo=will I get, odiyittund=km run); guess sensibly instead of asking to rephrase.
 - Address: NO address words at all. Never their name, never sir/madam (don't guess gender), never chetta/chechi/bro/macha/ikka. Be polite through your words (ningal / നിങ്ങൾ, never nee / നീ / നിന്റെ), not titles.

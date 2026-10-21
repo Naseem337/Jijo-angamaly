@@ -82,3 +82,38 @@ def test_opt_in(text: str, expected: bool) -> None:
 ])
 def test_classify_confirmation(text: str, expected: str | None) -> None:
     assert classify_confirmation(text) == expected
+
+
+# --------------------------------------------------------------------------- structured reply language (2026-10-21)
+
+@pytest.mark.parametrize("text, expected", [
+    ("Nee parnjath avde unden aan", "manglish"),   # spellings no word list knows
+    ("ullath vid", "manglish"),
+    ("Porche undo", "manglish"),
+    ("Swift nte price ethra", "manglish"),
+    ("Is the Creta automatic available in white?", "en"),
+    ("wat is d prize of swift", "en"),             # English with typos stays English
+    ("Zest available", "en"),
+])
+def test_detect_language_manglish_spellings_and_english_typos(text: str, expected: str) -> None:
+    assert detect_language(text, default="ml") == expected
+
+
+@pytest.mark.parametrize("text", ["Hi", "ok thanks", "crysta", "innova crysta", "Pattambi"])
+def test_neutral_messages_keep_the_customers_language(text: str) -> None:
+    assert detect_language(text, default="ml") == "ml"
+    assert detect_language(text, default="en") == "en"
+
+
+@pytest.mark.parametrize("reply, language, wrong", [
+    ("Cresta venamo? ഏത് മോഡല്‍, ബജറ്റ് പറയാമോ.", "ml", True),      # Manglish mixed into Malayalam
+    ("ഇന്നോവ Crysta ഇപ്പോൾ stock-ൽ ഇല്ല. Budget എത്രയാണ്?", "ml", False),  # car words may stay English
+    ("Got no Innova Crysta in stock. Similar SUVs nokkamo?", "en", True),
+    ("Yes, the 2019 Swift VXi is available for ₹5.5 lakh (TC-1E6434).", "en", False),
+    ("Swift undu, 2019 model, ₹5.5 lakh (TC-1E6434). Kaananamo?", "manglish", False),
+    ("Swift undu. ഏത് വേണം?", "manglish", True),                    # Malayalam script in Manglish
+    ("We have 2 Swift cars under 6 lakh. Which one would you like to see?", "manglish", True),
+])
+def test_reply_language_problem(reply: str, language: str, wrong: bool) -> None:
+    from app.core.language import reply_language_problem
+    assert (reply_language_problem(reply, language) is not None) == wrong

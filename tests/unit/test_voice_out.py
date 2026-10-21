@@ -247,15 +247,15 @@ def test_backup_voice_speaks_when_main_voice_fails(voice_out) -> None:
 
 
 def test_truechoice_voice_order(clients_dir) -> None:
-    from app.providers.tts import GeminiTTS, build_tts
+    from app.providers.tts import SarvamTTS, build_tts
 
     class Keys:
         def get(self, name: str) -> str:
             return "k"
     voices = build_tts(load_client_config("truechoice", clients_dir), Keys())
-    # one voice only, so the tone never changes (a failure sends the text instead)
-    assert [(type(v), v.speaker) for v in voices] == [(GeminiTTS, "Algenib")]
-    assert voices[0].profile.startswith("Anees, ") and "never harsh" in voices[0].style
+    # one voice only, so the tone never changes (a failure sends the text instead).
+    # Sarvam anand since 2026-10-21 (the Gemini account was blocked; Algenib kept as tts_gemini_option).
+    assert [(type(v), v.speaker) for v in voices] == [(SarvamTTS, "anand")]
 
 
 @pytest.mark.parametrize(("text", "expected"), [
