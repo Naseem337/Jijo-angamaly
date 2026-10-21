@@ -12,6 +12,7 @@ from functools import cached_property
 import httpx
 
 from app.agent import Agent
+from app.alerts.engine import AlertEngine
 from app.conversation.photos import PhotoSender
 from app.conversation.router import MessageRouter
 from app.conversation.voice_in import VoiceIn
@@ -76,6 +77,11 @@ class ClientRuntime:
     def leads(self) -> LeadService:
         return LeadService(self.config, self.repo, self.whatsapp, self.clock, llm=lambda: self.llm,
                            known_models=lambda: sorted({c.model for c in self.inventory.list_all_cars()}))
+
+    @cached_property
+    def alerts(self) -> AlertEngine:
+        return AlertEngine(self.config, self.repo, lambda: self.inventory, self.whatsapp, self.clock,
+                           photos=lambda: self.photos)
 
     @cached_property
     def handoff(self) -> HandoffService:

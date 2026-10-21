@@ -548,6 +548,13 @@ class SQLiteRepository:
             ).fetchall()
         return {row["car_id"] for row in rows}
 
+    def get_seen_cars(self, client_id: str) -> dict[str, datetime]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT car_id, first_seen_at FROM seen_cars WHERE client_id=?", (client_id,)
+            ).fetchall()
+        return {row["car_id"]: _read_dt(row["first_seen_at"]) for row in rows}
+
     def mark_cars_seen(self, client_id: str, car_ids: list[str], at: datetime) -> None:
         with self._lock:
             self._connection.executemany(

@@ -59,6 +59,20 @@ class PhotoSender:
         if car is None or not car.image_url:
             log.warning("No photo for car %s", car_id)
             return False
+        try:
+            self.whatsapp.send_image(phone, self.media_id(car), caption(car))
+        except (ImageError, WhatsAppError, httpx.HTTPError) as exc:
+            log.error("Photo of %s to %s failed: %s", car_id, mask_phone(phone), exc)
+            return False
+        self.repo.add_message(Message(self.config.client_id, phone, "out", f"[photo] {caption(car)}",
+                                      self.clock.now(), source="system", meta={"photo": car.id}))
+        return True
+
+    def media_id(self, car: Car) -> str:
+        """WhatsApp media id of the car's main photo as JPEG (uploaded once, cached 25 days).
+        Also used for the photo header of a one-car alert. Raises ImageError / WhatsAppError."""
+        if not car.image_url:
+            raise ImageError(f"car {car.id} has no photo")
         cid, now = self.config.client_id, self.clock.now()
         key = "photo:" + hashlib.sha256(car.image_url.encode()).hexdigest()
         try:
@@ -66,13 +80,9 @@ class PhotoSender:
             if media_id is None:
                 media_id = self.whatsapp.upload_media(self._jpeg(car.image_url), "image/jpeg", "car.jpg")
                 self.repo.put_cached_media(cid, key, media_id, now + timedelta(days=CACHE_DAYS))
-            self.whatsapp.send_image(phone, media_id, caption(car))
-        except (ImageError, WhatsAppError, httpx.HTTPError) as exc:
-            log.error("Photo of %s to %s failed: %s", car_id, mask_phone(phone), exc)
-            return False
-        self.repo.add_message(Message(cid, phone, "out", f"[photo] {caption(car)}", self.clock.now(),
-                                      source="system", meta={"photo": car.id}))
-        return True
+        except httpx.HTTPError as exc:
+            raise ImageError(f"photo download failed: {exc!r}") from exc
+        return media_id
 
     def _jpeg(self, url: str) -> bytes:
         resp = self._http.get(url)

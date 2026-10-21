@@ -149,6 +149,10 @@ class Repository(Protocol):
     # ------------------------------------------------------------------ seen cars
     def get_seen_car_ids(self, client_id: str) -> set[str]: ...
 
+    def get_seen_cars(self, client_id: str) -> dict[str, datetime]:
+        """car_id -> when the alert engine first saw it in stock."""
+        ...
+
     def mark_cars_seen(self, client_id: str, car_ids: list[str], at: datetime) -> None:
         """Idempotent; keeps the original first-seen time."""
         ...

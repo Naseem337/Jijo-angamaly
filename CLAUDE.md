@@ -32,10 +32,27 @@ everything above it. Build order is PLAN.md §6.
 | 7 Voice in: download, length check, Sarvam STT, unclear check, read-back | Done; live-tested with Sarvam |
 | 8 Voice out: spoken_text (LLM, digits checked by guardrails, then words), Sarvam bulbul:v3, ffmpeg OGG/Opus, upload, `voice: true`, daily char cap, media-id cache | Done; live chain tested |
 | 9 Handoff (pause + staff summary), staff commands RESUME / LEAD / HELP, STOP/START with one confirmation, 24 h auto-resume, yard-visitor leads with YES consent | Done (`python -m app.leads --client truechoice` lists leads) |
-| **10 Alert engine: match new cars to active leads + chat requirements, alert templates, dry-run CLI** | **NEXT** |
-| 11–14 | Not started |
+| 10 Alert engine: match new cars to active leads + chat requirements, alert templates, dry-run CLI | Done (`python -m app.alerts --client truechoice --dry-run`); live send waits for Meta's template approval |
+| **11 DynamoDB repository** | **NEXT** |
+| 12–14 | Not started |
 
-Steps 1–9 are done; the bot answers on WhatsApp through the test number.
+Steps 1–10 are done; the bot answers on WhatsApp through the test number.
+
+Step 10 notes (app/alerts/):
+- `AlertEngine.run(dry_run, pretend_new)`: pure code, zero AI tokens. Wishes = leads with status active/notified
+  + chat requirements (customer.consent needed). A car counts if first seen after the wish was made and within
+  `new_car_days` (7), so a run outside 09:00–20:00 IST or over a cap just defers. The first run seeds all stock
+  with first-seen 2000-01-01 (never alerted).
+- One template per customer per run: tc_car_alert_1 (photo header via `PhotoSender.media_id`) / _2 / _3; ranked
+  exact first, then price closest to budget, then newest. At most one near match per 7 days. 1 message per
+  customer per day (`per_customer_daily`). 3 alerts with no reply → paused until they write (derived from the
+  alert log + `last_inbound_at`; there's no "still looking?" template any more).
+- Alert rows are claimed `pending` before sending (never sent twice); failed / dry_run rows are retried.
+  The sent alert is stored as an outbound message (source `template`), so the agent sees the offered cars
+  when the customer replies. A lead becomes `notified` after its first alert and keeps getting alerts.
+- Live test: give your own phone an active lead (LEAD + YES), then
+  `python -m app.alerts --client truechoice --pretend-new TC-xxxxxx` sends that stock car as if it just arrived.
+- Not scheduled yet: on AWS it's a daily EventBridge job (Step 13). Locally, run the CLI by hand.
 
 Step 9 notes:
 - Router order: dedupe → staff command → keywords (STOP / START / YES to a lead) → paused (auto-resume
@@ -136,8 +153,13 @@ local `.env` override can't change test results.
     rejected on v3/v4-flash, so WAV must be converted to OGG/Opus with ffmpeg. Max 2500 chars.
 - ffmpeg 9.0.2 is a plain exe at `%USERPROFILE%\tools\ffmpeg.exe` (found by `app.providers.audio.find_ffmpeg`,
   or `FFMPEG_PATH`). On Lambda it comes from a layer at /opt/bin.
-- WhatsApp templates (docs/whatsapp_templates.md) have **not** been submitted yet. They're only
-  needed for alerts (Step 10).
+- **WhatsApp templates submitted on the TEST account on 2026-10-21** (WABA id in `.env`
+  `TRUECHOICE_WHATSAPP_WABA_ID`; the token can list and create templates via
+  `GET/POST /{waba}/message_templates`): `tc_car_alert_1` (image header), `_2`, `_3`, `tc_staff_lead_alert`.
+  - All are **Utility, English (`en`)**, with no buttons (user's low-cost plan; see docs/whatsapp_templates.md).
+  - Dropped: the consent template (staff get the customer to send "Hi" at the yard, so the YES question is
+    free) and `tc_still_looking`.
+  - They must be submitted again in True Choice's own account at go-live.
 
 ## Decisions made in chat (not yet in PLAN.md)
 

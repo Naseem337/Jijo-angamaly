@@ -1,79 +1,79 @@
 # WhatsApp templates to submit to Meta (True Choice)
 
 Submit these in **WhatsApp Manager → Message templates → Create template**. Approval can take
-from minutes to a day, so submit now. Names must match `clients/truechoice/client.yaml → whatsapp.templates`.
+from minutes to a day. Names must match `clients/truechoice/client.yaml → whatsapp.templates`.
 
-Rules that shaped these drafts:
-- Template **parameters can't contain newlines** and can't be a whole message. So each car is one
-  parameter, and there is one template per number of cars (1, 2 or 3).
-- A near match is labelled inside its car line, e.g. `Baleno Zeta 2020 · 42,000 km · Petrol · ₹7.2 lakh (slightly above your budget)`,
-  so no separate near-match template is needed.
-- Customer alerts are submitted as **Marketing** (Meta would re-categorise them anyway). Each one has a
-  **"Stop alerts"** quick-reply button; the bot treats that tap as an opt-out.
-- Submit each customer template in **two languages under the same name**: `ml` and `en`.
-  Manglish customers get `en`.
+Templates belong to the WhatsApp Business Account, not the phone number, and can't be copied:
+submit them on the **test account** now for testing, and again in **True Choice's own account** at go-live.
 
-Sample values for Meta's review form are given under each template.
+## Low-cost plan (user, 2026-10-21)
+
+Rough India prices: Marketing ~₹0.80, Utility ~₹0.12, a reply within 24 h of the customer's last
+message is free.
+- **All templates are Utility.** Alerts are ones the customer asked for (a yard visitor's lead), so
+  they're worded as plain notifications: no "good news", no emoji, no sales push. Meta may still
+  re-categorise one as Marketing; then reword it more plainly and resubmit.
+- **No consent template.** At the yard, staff ask the customer to send "Hi" to the bot (QR code at the
+  counter), so the YES question is a free reply inside the 24 h window.
+- **No "still looking?" template.** A lead simply expires after 90 days.
+- Up to 3 cars per alert, at most 1 alert per customer per day (enforced in Step 10).
+- **Never the customer's name** in customer templates (user rule, 2026-10-20).
+- **English only for now** (user, 2026-10-21). Malayalam can be added later under the same names.
+- Template parameters can't contain newlines, so each car is one parameter, and there is one
+  template per number of cars. A near match is labelled inside its car line, e.g.
+  `… · ₹7.2 lakh (slightly above your budget)`.
 
 ---
 
-## 1. `tc_car_alert_1`: Marketing, en + ml
+## 1. `tc_car_alert_1`: Utility, English, **image header**
 
-**en (English) body**
+Header: Media → Image (submitted with a sample car photo, 2026-10-21). At send time the bot puts the
+car's own main photo in the header (same price as text). No buttons, no footer.
 ```
-Hi {{1}}, good news from True Choice! A car matching your requirement has just arrived:
+Hello, this is the stock alert you requested from True Choice. A car matching your saved requirement is now available:
 
-🚗 {{2}}
+{{1}}
 
-Reply here to know more or to book a test drive.
+Reply to this message for details. Reply STOP to stop these alerts.
 ```
-**ml (Malayalam) body**
-```
-നമസ്കാരം {{1}}, True Choice-ൽ നിന്ന് ഒരു സന്തോഷവാർത്ത! നിങ്ങൾ അന്വേഷിച്ചതുപോലെയുള്ള ഒരു കാർ ഇപ്പോൾ എത്തിയിട്ടുണ്ട്:
+Sample: {{1}} = `Maruti Swift VXI 2019, 38,000 km, Petrol, Rs 5.5 lakh`
 
-🚗 {{2}}
+## 2. `tc_car_alert_2`: Utility, English
 
-കൂടുതൽ വിവരങ്ങൾക്കോ ടെസ്റ്റ് ഡ്രൈവ് ബുക്ക് ചെയ്യാനോ ഇവിടെ മറുപടി അയയ്ക്കൂ.
 ```
-- Footer: en `Reply STOP to stop alerts` / ml `അലേർട്ടുകൾ വേണ്ടെങ്കിൽ STOP എന്ന് മറുപടി അയയ്ക്കുക`
-- Buttons (quick reply): `Tell me more` / `കൂടുതൽ അറിയണം`, `Stop alerts` / `അലേർട്ട് വേണ്ട`
-- Samples: {{1}} = `Arun`, {{2}} = `Maruti Swift VXI 2019 · 38,000 km · Petrol · ₹5.5 lakh`
+Hello, this is the stock alert you requested from True Choice. 2 cars matching your saved requirement are now available:
 
-## 2. `tc_car_alert_2`: Marketing, en + ml
-Same as above, but the line before the list reads "**2 cars** matching your requirement have just arrived" (ml: `നിങ്ങൾ അന്വേഷിച്ചതുപോലെയുള്ള 2 കാറുകൾ ഇപ്പോൾ എത്തിയിട്ടുണ്ട്:`), with two car lines:
-```
-🚗 {{2}}
-🚗 {{3}}
-```
-Samples: {{3}} = `Maruti Baleno Delta 2020 · 42,000 km · Petrol · ₹6.8 lakh`
+1. {{1}}
+2. {{2}}
 
-## 3. `tc_car_alert_3`: Marketing, en + ml
-The same again with "**3 cars**" (ml `3 കാറുകൾ`) and three car lines `{{2}}`, `{{3}}`, `{{4}}`.
-Samples: {{4}} = `Hyundai i20 Asta 2019 · 51,000 km · Petrol · ₹6.9 lakh (slightly above your budget)`
-
-## 4. `tc_still_looking`: Marketing, en + ml
-
-**en**
+Reply to this message for details. Reply STOP to stop these alerts.
 ```
-Hi {{1}}, are you still looking for a {{2}}? Reply YES and we'll keep sending you matching cars from True Choice. Reply STOP to end these alerts.
-```
-**ml**
-```
-നമസ്കാരം {{1}}, നിങ്ങൾ ഇപ്പോഴും {{2}} അന്വേഷിക്കുന്നുണ്ടോ? അനുയോജ്യമായ കാറുകളുടെ വിവരങ്ങൾ True Choice-ൽ നിന്ന് തുടർന്നും ലഭിക്കാൻ YES എന്നും, അലേർട്ടുകൾ നിർത്താൻ STOP എന്നും മറുപടി അയയ്ക്കൂ.
-```
-- Buttons (quick reply): `Yes, still looking` / `അതെ, ഇപ്പോഴും വേണം`, `Stop alerts` / `അലേർട്ട് വേണ്ട`
-- Samples: {{1}} = `Arun`, {{2}} = `Swift under ₹6 lakh, 2018 or newer`
+Samples: {{1}} as above, {{2}} = `Maruti Baleno Delta 2020, 42,000 km, Petrol, Rs 6.8 lakh`
 
-## 5. `tc_staff_lead_alert`: Utility, en only (sent to staff numbers)
+## 3. `tc_car_alert_3`: Utility, English
 
+```
+Hello, this is the stock alert you requested from True Choice. 3 cars matching your saved requirement are now available:
+
+1. {{1}}
+2. {{2}}
+3. {{3}}
+
+Reply to this message for details. Reply STOP to stop these alerts.
+```
+Samples: {{1}}, {{2}} as above, {{3}} = `Hyundai i20 Asta 2019, 51,000 km, Petrol, Rs 6.9 lakh (slightly above your budget)`
+
+## 4. `tc_staff_lead_alert`: Utility, English (sent to staff numbers)
+
+Staff are not customers, so the customer's name may appear here.
 ```
 New lead for True Choice: {{1}} ({{2}}).
 Interest: {{3}}
 Budget: {{4}}
 Reason for handoff: {{5}}
-The bot is paused for this customer. Please contact them and open the dashboard to see the full chat.
+Please contact them; the full chat is in the dashboard.
 ```
-Samples: {{1}} = `Arun`, {{2}} = `+91 98470 12345`, {{3}} = `Swift / Baleno, petrol`, {{4}} = `₹6 lakh`, {{5}} = `Wants loan details`
+Samples: {{1}} = `Arun`, {{2}} = `+91 98470 12345`, {{3}} = `Swift / Baleno, petrol`, {{4}} = `Rs 6 lakh`, {{5}} = `Wants loan details`
 
-> If Meta re-categorises this as Marketing, that's fine, it will still deliver. Staff who have messaged
-> the bot in the last 24 h get a free-form summary instead (handled in step 9).
+> Staff who have messaged the bot in the last 24 h get a free-form summary instead (Step 9), so this
+> template is only a fallback.

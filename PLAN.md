@@ -244,4 +244,11 @@ Any inbound customer message resets `unanswered_alerts`. If it came within 72 h 
 - **A "lead" is a customer who visited the yard, didn't find the car they wanted, and wants a WhatsApp alert when a matching car arrives (2026-10-20).** Staff create it with `LEAD <phone> <free text>`. It is stored as `pending_consent` and only becomes `active` after the customer replies YES to one confirmation message; STOP opts them out of all their leads.
   - Lead status (system): `pending_consent`, `active`, `notified`, `expired`, `opted_out`. Stage (staff pipeline): `new`, `interested`, `visit_booked`, `sold`, `lost`. Default expiry is 90 days (`leads.expiry_days` in client.yaml).
   - The chat customer's visit / test-drive request, previously also called a "lead", is now an **enquiry** (`Enquiry`, table `enquiries`, bot tool `save_enquiry`).
+- **Alerts, low-cost plan (2026-10-21):** the templates are Utility and English only (`tc_car_alert_1` with a photo
+  header, `_2`, `_3`, `tc_staff_lead_alert`). There's no consent template (staff have the customer send "Hi" at the
+  yard, so the YES question is free) and no "still looking?" template: after `max_unanswered` (3) alerts with no
+  reply, alerts pause until the customer writes. Max 1 alert message per customer per day.
+- **New-car window:** a car is "new" for `new_car_days` (7) after it is first seen, and only for wishes made before
+  it arrived. So a run outside the send window or over a cap defers instead of losing cars. The first run seeds the
+  current stock as "always there".
 

@@ -71,7 +71,9 @@ class AlertRules(BaseModel):
     send_window: SendWindow = SendWindow()
     global_daily_cap: int = 200
     max_cars_per_message: int = Field(3, ge=1, le=3)
-    max_unanswered: int = 3
+    per_customer_daily: int = Field(1, ge=1)  # alert messages per customer per day (cost)
+    new_car_days: int = Field(7, ge=1)  # a car counts as a new arrival for this many days
+    max_unanswered: int = 3  # alerts with no reply in between; then alerts pause until they write
     requirement_ttl_days: int = 60
     reply_context_hours: int = 72
     near_match: NearMatchRules = NearMatchRules()

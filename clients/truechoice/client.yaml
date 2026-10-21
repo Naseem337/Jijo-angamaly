@@ -20,13 +20,14 @@ whatsapp:
   app_secret_secret: truechoice/whatsapp_app_secret
   verify_token_secret: truechoice/whatsapp_verify_token
   # Names must match the templates approved in Meta (see docs/whatsapp_templates.md).
+  # All Utility; car_alert_1 has a photo header (the car's main photo).
   templates:
     car_alert_1: tc_car_alert_1
     car_alert_2: tc_car_alert_2
     car_alert_3: tc_car_alert_3
-    still_looking: tc_still_looking
     staff_lead_alert: tc_staff_lead_alert
-  template_languages: {ml: ml, en: en, manglish: en}
+  # English only for now (user, 2026-10-21); add ml when Malayalam versions are approved.
+  template_languages: {ml: en, en: en, manglish: en}
 
 inventory:
   # carlet = True Choice's app backend (api.carlet.in, read-only, same stock as the app);
