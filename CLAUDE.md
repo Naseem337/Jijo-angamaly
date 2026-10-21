@@ -4,6 +4,8 @@ Multi-client WhatsApp AI agent for pre-owned car dealers. First client: **True C
 in Malayalam, Manglish and English. **PLAN.md is the spec.** PLAN.md §9 "Decisions" overrides
 everything above it. Build order is PLAN.md §6.
 
+**Voice, language and reply-style rules the user gave are all in [docs/VOICE_AND_REPLY_RULES.md](docs/VOICE_AND_REPLY_RULES.md). Read it first.**
+
 ## How the user wants to work
 
 - Build **one PLAN.md step at a time**. Commit each step as `Step N: ...`. End every step with
