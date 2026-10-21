@@ -119,7 +119,7 @@ class MessageRouter:
             self.whatsapp.mark_read(msg.id, typing=True)
 
         voice_out = self._voice_out()
-        want_voice = bool(voice_out and voice_out.wants_voice(source))
+        want_voice = bool(voice_out and voice_out.wants_voice(source, text))
         reply = self._agent().handle(phone, text, source=source, message_id=msg.id, want_voice=want_voice,
                                      profile_name=msg.profile_name)
         if reply.handoff:

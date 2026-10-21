@@ -331,3 +331,13 @@ def test_voice_problems_and_ai_outage_get_text_only(env_with_voice, stt) -> None
     post(client, payload({**VOICE, "id": "wamid.v2"}))
     assert [b.get("type", "read") for b in sent_bodies(sent)][2:] == ["read", "text"]
     assert tts.calls == []
+
+
+def test_typed_request_for_voice_gets_a_voice_note(env_with_voice) -> None:
+    client, llm, _, sent, tts = env_with_voice
+    llm.script += [MockLLM.text("Brezza diesel automatic aanu, city-il nalla economy. Ertiga family-kku nallathu."),
+                   MockLLM.text("Brezza ഡീസൽ ഓട്ടോമാറ്റിക് ആണ്, സിറ്റിയിൽ നല്ല ഇക്കോണമി. Ertiga ഫാമിലിക്ക് നല്ലതാണ്.")]
+    post(client, payload(text_msg("voice itt paray")))
+    assert [b.get("type", "read") for b in sent_bodies(sent)] == ["read", "audio"]  # spoken, no duplicate text
+    assert "asked for a voice reply" in llm.calls[0].messages[-1].content
+    assert len(tts.calls) == 1

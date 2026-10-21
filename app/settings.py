@@ -22,12 +22,14 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=PROJECT_ROOT / ".env", extra="ignore")
 
-    app_env: Literal["local", "test", "aws"] = "local"
+    app_env: Literal["local", "test", "aws", "railway"] = "local"
     log_level: str = "INFO"
     clients_dir: Path = PROJECT_ROOT / "clients"
     storage_backend: Literal["sqlite", "dynamodb"] = "sqlite"
     sqlite_path: Path = PROJECT_ROOT / "data" / "app.sqlite3"
     session_secret: str = "change-me"
+    # Alert runs + auto-resume sweep inside the web process (Railway). 0 = off (local: run by hand).
+    alerts_every_minutes: int = 0
     aws_region: str = "ap-south-1"
 
 

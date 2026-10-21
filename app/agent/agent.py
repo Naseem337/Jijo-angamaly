@@ -19,7 +19,7 @@ from app.agent.spoken import draft_spoken, to_speech
 from app.agent.tools import TOOL_SPECS, HandoffRequest, ToolContext, run_tool
 from app.core.client_config import ClientConfig
 from app.core.clock import Clock, ist_today
-from app.core.language import detect_language, is_language_neutral, reply_language_problem
+from app.core.language import asks_for_voice, detect_language, is_language_neutral, reply_language_problem
 from app.inventory import InventoryAdapter
 from app.providers.llm import ChatMessage, LLMError, LLMProvider, LLMResponse
 from app.storage.models import Message
@@ -146,6 +146,10 @@ class Agent:
         # enforced once this message or an earlier one does.
         ctx.enforce_language = not is_language_neutral(text) or any(m.direction == "in" for m in history)
         notes = [n for n in [resolve_pending(ctx, text)] if n]
+        if want_voice and source != "voice" and asks_for_voice(text):
+            notes.append("The customer asked for a voice reply: your reply WILL be sent as a voice note. Give "
+                         "the answer they were waiting for (e.g. explain or compare the cars just discussed) "
+                         "in the reply; don't ask what they mean and don't mention voice or audio.")
         context = prompts.turn_context(self.config, language=language, now=now,
                                        customer_name=customer.name, source=source, notes=notes)
         history = [m for m in history if not m.meta.get("voice_note")]  # voice copies of text replies

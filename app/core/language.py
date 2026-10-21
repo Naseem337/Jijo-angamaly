@@ -240,6 +240,18 @@ def is_language_neutral(text: str) -> bool:
     return _classify_latin(_words(text)) == (0, 0, 0)
 
 
+_VOICE_WORD = re.compile(r"\b(?:voice|voic|vois|voise|audio|audeo|vn)\b|വോയ്\u200c?സ്|വോയിസ്|വോയ്സ്|ഓഡിയോ|ശബ്ദ",
+                         re.IGNORECASE)
+_NO_VOICE = re.compile(r"\b(?:venda|vendaa|vendathilla|dont|don't|do not|no|not|text|type)\b|വേണ്ട|ടൈപ്പ്",
+                       re.IGNORECASE)
+
+
+def asks_for_voice(text: str) -> bool:
+    """'voice itt paray', 'voice note ayakko', 'audio venam', 'വോയ്‌സ് ആയി പറയൂ' -> True;
+    'voice venda', 'no voice, text please' -> False."""
+    return bool(_VOICE_WORD.search(text)) and not _NO_VOICE.search(text)
+
+
 LANGUAGE_NAMES = {"ml": "Malayalam script", "manglish": "Manglish (English letters)", "en": "English"}
 _LATIN_WORD = re.compile(r"[a-z']+")
 _CAR_ID = re.compile(r"\b[A-Z]{2,4}-[0-9A-Z]{3,}\b")

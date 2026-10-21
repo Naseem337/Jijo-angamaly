@@ -19,6 +19,7 @@ import logging
 from datetime import timedelta
 
 from app.core.client_config import ClientConfig
+from app.core.language import asks_for_voice
 from app.core.clock import Clock, ist_today
 from app.core.phone import mask_phone
 from app.providers.audio import AudioError, wav_to_ogg_opus
@@ -43,9 +44,11 @@ class VoiceOut:
         self.clock = clock
         self.ffmpeg = ffmpeg
 
-    def wants_voice(self, source: str) -> bool:
+    def wants_voice(self, source: str, text: str = "") -> bool:
+        """mirror: a voice note gets a voice note, and so does a typed request for one
+        ("voice itt paray"; user, 2026-10-21)."""
         policy = self.config.voice.policy
-        return policy == "always" or (policy == "mirror" and source == "voice")
+        return policy == "always" or (policy == "mirror" and (source == "voice" or asks_for_voice(text)))
 
     @staticmethod
     def _cache_key(tts: TTSProvider, text: str, language_code: str) -> str:
