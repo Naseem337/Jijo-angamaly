@@ -20,14 +20,18 @@ from app.providers.llm import ChatMessage, LLMError, LLMProvider
 MAX_SPOKEN_CHARS = 400
 
 SPOKEN_INSTRUCTION = {
-    "ml": """Rewrite the WhatsApp reply below as a short voice note, the way a friendly Kerala car salesman would actually say it out loud to a customer. Write it in Malayalam script (never English letters for Malayalam words) for text-to-speech.
-Make it sound like a real person talking, not a news reader:
-- Start naturally, e.g. "ആ, ഉണ്ട്!", "ശരി,", "നോക്കട്ടെ..." (vary it).
-- No address words: never a name, never സാർ/മാഡം, never ചേട്ടാ/ചേച്ചി. Polite words (നിങ്ങൾ), never നീ.
-- Short spoken phrases with commas and "..." for natural pauses; it's fine to drop formal words.
-- Spoken words, not written ones: ഉണ്ട് (not ലഭ്യമാണ്), പറ്റും (not സാധിക്കും), വണ്ടി/കാർ (not വാഹനം), പിന്നെ (not കൂടാതെ), വിളിക്കും (not ബന്ധപ്പെടുന്നതാണ്).
-- English words Keralites use are good, written in Malayalam script: മോഡൽ, കണ്ടീഷൻ, ടെസ്റ്റ് ഡ്രൈവ്, ബജറ്റ്, ഓണർ.
+    "ml": """Rewrite the WhatsApp reply below as a short voice note, the way a friendly Kerala car salesman would actually talk to a customer on a call. Write it in Malayalam script (never English letters for Malayalam words) for text-to-speech.
+It must sound like a real person chatting, NOT reading a notice:
+- Start with a natural opener, varied: "ആ,", "ശരി,", "ഉണ്ട്,", "നോക്കട്ടെ...", "ഓ, അത്...".
+- Casual spoken endings: "-ആ", "-ണ്", "ഉണ്ടേ", "നല്ലതാ", "കുറവാ", "ആണേ" (not "-ആണ്" stiffly; not "-ആകുന്നു", "-ലഭ്യമാണ്").
+- Short phrases, commas and "..." for small pauses; one thought at a time; contractions like "അതാ", "ഇതാ", "പോകാം".
+- Spoken words, never written ones: ഉണ്ട് (not ലഭ്യമാണ്), പറ്റും (not സാധിക്കും), വണ്ടി/കാർ (not വാഹനം), പിന്നെ (not കൂടാതെ), വിളിക്കും (not ബന്ധപ്പെടുന്നതാണ്), മൈലേജ് (not ഇന്ധനക്ഷമത), സർവീസ് ചെലവ് (not പരിപാലനച്ചെലവ്).
+- English words Keralites use, written in Malayalam script: മോഡൽ, കണ്ടീഷൻ, ടെസ്റ്റ് ഡ്രൈവ്, ബജറ്റ്, ഓണർ, ഓട്ടോമാറ്റിക്.
+- No address words: never a name, never സാർ/മാഡം, never ചേട്ടാ/ചേച്ചി. Use നിങ്ങൾ, never നീ.
+- Keep the question the reply asks, if it asks one; never add a question of your own.
+Bad (stiff): "ഇന്ധന ഉപയോഗം കുറവാണ്, സർവീസ് ചെലവ് കുറവാണ്." Good (spoken): "മൈലേജ് നല്ലതാ... സർവീസ് ചെലവും കുറവാ."
 Rules:
+- Say ONLY what the reply says. Never add a car, fact, price or question that is not in the reply (a greeting stays a greeting).
 - At most 3 short sentences, under 300 characters.
 - Mention at most 2 cars. Car brand and model names ALWAYS stay exactly in English letters as written (i20, XUV700, Creta, Alto 800): never translate them, never write them in Malayalam script, never turn their numbers into Malayalam words.
 - Keep every price, year and km figure as digits exactly as in the reply (₹9,80,000, 2021, 42,000 km). Do not add any number that is not in the reply.
@@ -60,6 +64,24 @@ DETAILS_NOTE = {
 }
 WHOLE_REPLY_NOTE = ("This voice note is the WHOLE reply (no text message is sent), so say everything important "
                     "in it, briefly. Don't say anything was sent in a message.")
+
+
+_LATIN = re.compile(r"[A-Za-z][A-Za-z0-9']{2,}")
+# Everyday words a salesman may add when talking about the cars the reply already named.
+_EVERYDAY = frozenset("""city highway drive drives driving long trip trips comfort comfortable space features feature
+safety safe boot legroom power pickup average mileage economy service maintenance resale value family seven five
+spacious smooth good better best great nice vibe style looks look stylish""".split())
+
+
+def invented_words(spoken: str, reply_text: str) -> list[str]:
+    """English-letter words in the voice script that are neither in the reply nor everyday words:
+    the script made up a car or fact (live 2026-10-21: a greeting 'spoke' about an i20 and a Creta)."""
+    from app.core.language import ENGLISH_WORDS, GENERIC_NEUTRAL_WORDS
+
+    allowed = {w.lower() for w in _LATIN.findall(reply_text)}
+    return sorted({w for w in _LATIN.findall(spoken)
+                   if w.lower() not in allowed and w.lower() not in GENERIC_NEUTRAL_WORDS and w.lower() not in _EVERYDAY and w.lower() not in ENGLISH_WORDS
+                   and w.lower().rstrip("s") not in ENGLISH_WORDS})
 
 
 def draft_spoken(llm: LLMProvider, reply_text: str, language: str, style: str = "",

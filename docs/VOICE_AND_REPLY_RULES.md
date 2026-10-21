@@ -78,6 +78,13 @@ Pattambi, Cochin). The bot is True Choice's virtual assistant and never names th
 - **Human, not slow or robotic** (user, 2026-10-21): faster, more expressive, casual spoken words.
   Samples to choose from are in `data/voice_samples/human/` (anand, gokul, vijay at pace 1.15, temperature 0.8).
   **Open decision: the user has not yet said which voice and settings they prefer.**
+- **Applied 2026-10-21:** the voice order is Gemini **Algenib first** (the user's chosen voice, now with a brisk, expressive
+  style), then Sarvam **anand** (pace 1.15, temperature 0.8) while Google blocks the Gemini account; Algenib takes over by
+  itself once Gemini answers again. Algenib costs about ₹0.25 per voice note (Sarvam about ₹0.60); Gemini TTS doubles after 2026-12-31.
+  DeepSeek/Groq are the text brain and cannot speak; the voice is always Gemini TTS or Sarvam TTS.
+- **Voice script must not invent** (live bug 2026-10-21: a greeting "spoke" about an i20 and a Creta, and a bracketed
+  "[insert address]" reached the text reply). Code: `invented_words` in `spoken.py` (one retry, then text only) and
+  `placeholder_problem` in `agent.py` (one rewrite). The prompt says "say ONLY what the reply says".
 - Voice history: Sarvam `kavya`/`priya` (female, rejected) → Gemini TTS `Algenib` (user's choice, 2026-10-20) →
   Google blocked the Gemini account on 2026-10-21, so the bot now speaks with **Sarvam `bulbul:v3` `anand`**.
   Gemini Algenib stays in `client.yaml` as `tts_gemini_option` and returns when a working Google account exists.

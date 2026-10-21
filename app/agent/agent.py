@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from app.agent import prompts
 from app.agent.confirmation import resolve_pending
 from app.agent.guardrails import SourcedFacts, Violation, check_reply, facts_from
-from app.agent.spoken import draft_spoken, to_speech
+from app.agent.spoken import invented_words, draft_spoken, to_speech
 from app.agent.tools import TOOL_SPECS, HandoffRequest, ToolContext, run_tool
 from app.core.client_config import ClientConfig
 from app.core.clock import Clock, ist_today
@@ -58,6 +58,17 @@ def without_titles(text: str) -> str:
     out = re.sub(r"(?m)^([ \t]*)[,!][ \t]*", r"\1", out)  # a line that started with the title
     out = re.sub(r",[ \t]*([,.!?])", r"\1", out)
     return out
+
+
+_PLACEHOLDER = re.compile(r"\[[^\]\n]{2,40}\]|\{\{?[^}\n]+\}\}?|<[A-Za-z ]{3,30}>")
+
+
+def placeholder_problem(text: str) -> str | None:
+    """'[insert address]', '{name}', '<link>': a template slot the AI left unfilled."""
+    if _PLACEHOLDER.search(text):
+        return ("The reply contains a placeholder like [insert address]. Never write placeholders: "
+                "if you don't have the fact, say the team will share it.")
+    return None
 
 
 def plain_dashes(text: str) -> str:
@@ -194,8 +205,17 @@ class Agent:
         adds cost and nothing for the customer (user decision, 2026-10-19)."""
         if reply.guardrail in ("fallback", "llm_error"):
             return None
-        draft = draft_spoken(llm, reply.text, reply.language, self.config.business_rules.speaking_style,
-                             details_in_text=reply.has_car_details)
+        draft = None
+        for _ in range(2):  # a script that invents a car or fact gets one more try
+            draft = draft_spoken(llm, reply.text, reply.language, self.config.business_rules.speaking_style,
+                                 details_in_text=reply.has_car_details)
+            if not draft:
+                return None
+            invented = invented_words(draft, reply.text)
+            if not invented:
+                break
+            log.warning("Voice script invented words %s; %s", invented, "retrying" if _ == 0 else "text only")
+            draft = None
         if not draft:
             return None
         problems = check_reply(draft, facts)
@@ -235,7 +255,7 @@ class Agent:
             return self._fallback(ctx, language, tools_used, [f"no usable reply ({reason})"], response.provider)
 
         problems = check_reply(text, facts)
-        wrong_language = reply_language_problem(text, language) if ctx.enforce_language else None
+        wrong_language = (reply_language_problem(text, language) if ctx.enforce_language else None)             or placeholder_problem(text)
         if not problems and not wrong_language:
             return AgentReply(text, language, ctx.handoff, tools_used, "ok", provider=response.provider)
         if not problems:  # only the language is off: one rewrite, else send it as it is (never a fallback)

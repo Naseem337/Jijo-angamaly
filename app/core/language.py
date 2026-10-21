@@ -46,13 +46,18 @@ MANGLISH_MARKERS = frozenset({
 
 # Words that say nothing about the language: greetings, car names and car terms used by
 # English and Manglish speakers alike. A message of only these keeps the previous language.
-NEUTRAL_WORDS = frozenset("""
+GENERIC_NEUTRAL_WORDS = frozenset("""
 hi hii hai hello helo hey ok okay k kk oky thanks thank thanku thx tq ty yes yeah yep no nope pls plz please
 bro sir madam hmm hm ha haha good gud fine super nice great wow done sure
 car cars vandi budget emi km kms kmpl lakh lakhs lac lacs l k rs inr price prize rate cost loan finance
 test drive testdrive automatic auto manual amt cvt gear petrol diesel cng ev electric hybrid suv muv sedan
 hatchback hatch model models variant top base owner owners first second third insurance rc noc showroom
 colour color white black red silver grey gray blue brown year mileage photo photos pic pics video
+""".split())
+
+# Brand and model names: neutral for language detection, but NOT everyday words (a voice script
+# that mentions a car the reply never named has invented it).
+CAR_NAME_WORDS = frozenset("""
 maruti suzuki hyundai toyota honda kia tata mahindra skoda volkswagen vw renault nissan mg ford jeep chevrolet
 mercedes benz bmw audi porsche volvo lexus jaguar land rover datsun fiat mitsubishi isuzu citroen
 swift dzire baleno alto wagon wagonr ertiga brezza celerio ciaz ignis ritz zen omni eeco xl s presso fronx
@@ -65,6 +70,7 @@ hector astor zs gloster ecosport figo aspire endeavour compass meridian
 true choice anees makkaraparamba makaraparamba panangangara pattambi cochin kochi malappuram kerala
 kozhikode calicut thrissur palakkad perinthalmanna manjeri tirur ernakulam
 """.split())
+NEUTRAL_WORDS = GENERIC_NEUTRAL_WORDS | CAR_NAME_WORDS
 
 # Common English words, so English text is recognised even when it has no car words.
 ENGLISH_WORDS = frozenset("""

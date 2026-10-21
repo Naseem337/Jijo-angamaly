@@ -247,15 +247,22 @@ def test_backup_voice_speaks_when_main_voice_fails(voice_out) -> None:
 
 
 def test_truechoice_voice_order(clients_dir) -> None:
-    from app.providers.tts import SarvamTTS, build_tts
+    from app.providers.tts import GeminiTTS, SarvamTTS, build_tts
 
     class Keys:
         def get(self, name: str) -> str:
             return "k"
     voices = build_tts(load_client_config("truechoice", clients_dir), Keys())
-    # one voice only, so the tone never changes (a failure sends the text instead).
-    # Sarvam anand since 2026-10-21 (the Gemini account was blocked; Algenib kept as tts_gemini_option).
-    assert [(type(v), v.speaker) for v in voices] == [(SarvamTTS, "anand")]
+    # Algenib is the user's chosen voice; Sarvam anand (male) speaks while Google blocks the Gemini
+    # account (2026-10-21), and Algenib takes over again by itself once it answers.
+    assert [(type(v), v.speaker) for v in voices] == [(GeminiTTS, "Algenib"), (SarvamTTS, "anand")]
+    assert "never slow or flat" in voices[0].style and voices[0].profile.startswith("Anees, ")
+
+
+def test_human_voice_script_instruction_has_spoken_style_and_no_address_words() -> None:
+    from app.agent.spoken import SPOKEN_INSTRUCTION
+    ml = SPOKEN_INSTRUCTION["ml"]
+    assert "NOT reading a notice" in ml and "മൈലേജ് നല്ലതാ" in ml and "never സാർ/മാഡം" in ml
 
 
 @pytest.mark.parametrize(("text", "expected"), [
@@ -265,3 +272,17 @@ def test_truechoice_voice_order(clients_dir) -> None:
 ])
 def test_car_names_keep_their_numbers_in_voice(text: str, expected: str) -> None:
     assert to_speech(text, "ml") == expected
+
+
+def test_voice_script_that_invents_a_car_is_caught() -> None:
+    from app.agent.spoken import invented_words
+    # live 2026-10-21: a plain greeting "spoke" about an i20 and a Creta
+    assert invented_words("ശരി, i20 ആണെങ്കിൽ Creta നല്ലതാ", "ഹലോ! എന്ത് തരത്തിലുള്ള കാർ?") == ["Creta", "i20"]
+    assert invented_words("ആ, Brezza മൈലേജ് നല്ലതാ... city-ൽ സുഖം", "Brezza VXI ₹9.3 lakh (TC-1)") == []
+
+
+def test_unfilled_placeholder_is_a_reply_problem() -> None:
+    from app.agent.agent import placeholder_problem
+    assert placeholder_problem("Main showroom address: [insert address]")
+    assert placeholder_problem("Hi {name}, Swift undu")
+    assert placeholder_problem("Swift ₹5 lakh (TC-1E6434), Makkaraparamba") is None
