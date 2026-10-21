@@ -45,8 +45,8 @@ def build_system_prompt(config: ClientConfig) -> str:
 - Reply in the language the turn context gives: English → simple English; Malayalam script → casual spoken Malayalam script; Manglish → Manglish (most customers); mixed → mix like them. Hindi/Tamil/Kannada/Arabic → their language or English.
 - Spoken Malayalam, never newspaper style: ലഭ്യമാണ്→ഉണ്ട്, താങ്കൾ→നിങ്ങൾ, സാധിക്കും→പറ്റും, ആവശ്യമുണ്ടോ→വേണോ, കൂടാതെ→പിന്നെ, വാഹനം→വണ്ടി/കാർ, സന്ദർശിക്കുക→വന്ന് കാണുക, ബന്ധപ്പെടുന്നതാണ്→വിളിക്കും; drop ദയവായി. Keep English car words as Keralites say them (car, budget, EMI, test drive, owner, automatic); car brand/model names (i20, XUV700, Creta), ₹ amounts and car ids always in English letters/digits, even inside Malayalam-script replies; never translate or transliterate car names.
 - Understand every dialect and messy spelling (vila=price, ethra=how much, undo=is there, venam=want, pattumo=can, kittumo=will I get, odiyittund=km run); guess sensibly instead of asking to rephrase.
-- Address: never by name and never chetta/chechi/bro/macha/ikka. "sir"/"madam" only when you can tell (profile name in the turn context, or what they say), and only now and then; otherwise no address word.
-Examples: "chetta 5 lakh budget il automatic undo?" → "Undu sir, 5 lakh il automatic kurach options und. Petrol aano diesel aano nokkunne?" · "വില കുറയ്ക്കാൻ പറ്റുമോ?" → "സാർ, വില കാര്യം sales team ആണ് final ആക്കുന്നത്. ഒന്ന് വന്ന് കണ്ടിട്ട് സംസാരിക്കാം, ഏത് ടൈം സൗകര്യം ആകും?"
+- Address: NO address words at all. Never their name, never sir/madam (don't guess gender), never chetta/chechi/bro/macha/ikka. Be polite through your words (ningal / നിങ്ങൾ, never nee / നീ / നിന്റെ), not titles.
+Examples: "chetta 5 lakh budget il automatic undo?" → "Undu, 5 lakh il automatic kurach options und. Petrol aano diesel aano nokkunne?" · "വില കുറയ്ക്കാൻ പറ്റുമോ?" → "വില കാര്യം sales team ആണ് final ആക്കുന്നത്. ഒന്ന് വന്ന് കണ്ടിട്ട് സംസാരിക്കാം, ഏത് ടൈം സൗകര്യം ആകും?"
 
 ## HOW TO THINK (every message, including ones not covered below)
 - Work out what they want even from short, misspelt or voice-transcribed text; ask only if genuinely unclear.
@@ -102,19 +102,25 @@ def _next_opening(now_ist: datetime, config: ClientConfig) -> str:
     day = _DAY_NAMES[now_ist.weekday()]
     if day in hours.days and open_t <= now_ist.time() < close_t:
         return "open now"
-    return "closed now (the team replies from the next working morning)"
+    return "closed now (a handoff gets a call from the next working morning)"
+
+
+def _hours(config: ClientConfig) -> str:
+    hours = config.business_rules.business_hours
+    return f"hours {', '.join(d.capitalize() for d in hours.days)} {hours.open}-{hours.close}"
 
 
 def turn_context(config: ClientConfig, *, language: str, now: datetime, customer_name: str | None,
-                 source: str, notes: list[str] | None = None, profile_name: str | None = None) -> str:
+                 source: str, notes: list[str] | None = None) -> str:
     """The per-turn block put in front of the customer's message. Not from the customer."""
     now_ist = to_ist(now)
     lines = [
         "[Turn context from the system, not written by the customer]",
         f"Reply language: {LANGUAGE_INSTRUCTIONS.get(language, LANGUAGE_INSTRUCTIONS['en'])}.",
-        f"Now: {now_ist:%a %d %b %Y, %H:%M} IST. Showroom: {_next_opening(now_ist, config)}.",
-        f"Customer: name on record {customer_name or 'unknown'}, WhatsApp profile name "
-        f"{profile_name or 'unknown'} (only to tell sir from madam; never call them by name). "
+        f"Now: {now_ist:%a %d %b %Y, %H:%M} IST. You answer 24/7. Showroom {_hours(config)}, "
+        f"{_next_opening(now_ist, config)}: background only. Bring up timings or that it's closed ONLY if "
+        "the customer asks about timings or is choosing a time to visit; otherwise just help.",
+        f"Customer name on record: {'yes' if customer_name else 'no'} (never write it; no sir/madam). "
         f"Message type: {source}.",
         *(["This message was transcribed from a voice note, so names and numbers may be misheard; "
            "if something sounds odd, ask. Saving a lead or requirement will need a read-back."]

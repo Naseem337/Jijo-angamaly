@@ -17,10 +17,12 @@ StopReason = Literal["end", "tool_calls", "max_tokens", "refusal"]
 class LLMError(RuntimeError):
     """A provider call failed. The fallback chain moves on to the next provider."""
 
-    def __init__(self, provider: str, message: str, *, retryable: bool = True) -> None:
+    def __init__(self, provider: str, message: str, *, retryable: bool = True,
+                 retry_after: float | None = None) -> None:
         super().__init__(f"[{provider}] {message}")
         self.provider = provider
         self.retryable = retryable
+        self.retry_after = retry_after  # seconds until a rate limit resets, if the provider said
 
 
 class LLMNotConfigured(RuntimeError):

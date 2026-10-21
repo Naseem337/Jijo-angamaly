@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -34,6 +35,19 @@ def _call_to_wire(c: ToolCall) -> dict[str, Any]:
     if c.extra_content:
         wire["extra_content"] = c.extra_content
     return wire
+
+
+_TRY_AGAIN = re.compile(r"try again in (?:(\d+)m)?(\d+(?:\.\d+)?)s", re.IGNORECASE)
+
+
+def _retry_after(resp: httpx.Response) -> float | None:
+    """Seconds until a rate limit resets: the Retry-After header, or Groq's 'try again in 11.57s'."""
+    try:
+        return float(resp.headers["retry-after"])
+    except (KeyError, ValueError):
+        pass
+    match = _TRY_AGAIN.search(resp.text)
+    return int(match[1] or 0) * 60 + float(match[2]) if match else None
 
 
 def _to_wire(system: str, messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -111,7 +125,8 @@ class OpenAICompatibleLLM:
             raise LLMError(self.name, f"request failed: {exc!r}") from exc
         if resp.status_code != 200:
             retryable = resp.status_code == 429 or resp.status_code >= 500
-            raise LLMError(self.name, f"HTTP {resp.status_code}: {resp.text[:300]}", retryable=retryable)
+            raise LLMError(self.name, f"HTTP {resp.status_code}: {resp.text[:300]}", retryable=retryable,
+                           retry_after=_retry_after(resp) if resp.status_code == 429 else None)
 
         try:
             data = resp.json()

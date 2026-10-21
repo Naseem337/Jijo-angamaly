@@ -276,7 +276,7 @@ def test_voice_note_gets_voice_only_reply(env_with_voice, stt) -> None:
     bodies = sent_bodies(sent)
     assert [b.get("type", "read") for b in bodies] == ["read", "audio"]  # no duplicate text
     assert bodies[1]["audio"] == {"id": "uploaded-voice", "voice": True}
-    assert tts.calls == [("ഇല്ല സാർ, ഞായറാഴ്ച അവധിയാണ്. തിങ്കളാഴ്ച മുതൽ വരാം.", "ml-IN")]
+    assert tts.calls == [("ഇല്ല, ഞായറാഴ്ച അവധിയാണ്. തിങ്കളാഴ്ച മുതൽ വരാം.", "ml-IN")]  # no സാർ
     assert "WHOLE reply" in llm.calls[1].system  # the voice says everything
 
 
@@ -302,15 +302,15 @@ def test_failed_voice_note_falls_back_to_text(env_with_voice, stt) -> None:
     post(client, payload(VOICE))
     bodies = sent_bodies(sent)
     assert [b.get("type", "read") for b in bodies] == ["read", "text"]
-    assert bodies[1]["text"]["body"] == "Sunday closed aanu sir."
+    assert bodies[1]["text"]["body"] == "Sunday closed aanu."  # never sir/madam
 
 
-def test_profile_name_reaches_the_ai_only_for_sir_or_madam(env, stt) -> None:
+def test_no_name_and_no_sir_or_madam(env, stt) -> None:
     client, llm, _, sent = env
-    llm.script.append(MockLLM.text("Hello sir!"))
+    llm.script.append(MockLLM.text("Hello Arun sir! Swift undu."))
     post(client, payload(text_msg("Hi")))
-    context = llm.calls[0].messages[-1].content
-    assert "WhatsApp profile name Arun (only to tell sir from madam; never call them by name)" in context
+    assert "Arun" not in llm.calls[0].messages[-1].content  # the profile name never reaches the AI
+    assert sent_bodies(sent)[-1]["text"]["body"] == "Hello! Swift undu."  # and is cut if it appears
 
 
 def test_text_message_gets_text_only(env_with_voice) -> None:

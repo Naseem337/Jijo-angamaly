@@ -23,7 +23,7 @@ SPOKEN_INSTRUCTION = {
     "ml": """Rewrite the WhatsApp reply below as a short voice note, the way a friendly Kerala car salesman would actually say it out loud to a customer. Write it in Malayalam script (never English letters for Malayalam words) for text-to-speech.
 Make it sound like a real person talking, not a news reader:
 - Start naturally, e.g. "ആ, ഉണ്ട്!", "ശരി,", "നോക്കട്ടെ..." (vary it).
-- Address the customer exactly as the reply does ("സാർ"/"മാഡം" or nothing); never by name, never ചേട്ടാ/ചേച്ചി.
+- No address words: never a name, never സാർ/മാഡം, never ചേട്ടാ/ചേച്ചി. Polite words (നിങ്ങൾ), never നീ.
 - Short spoken phrases with commas and "..." for natural pauses; it's fine to drop formal words.
 - Spoken words, not written ones: ഉണ്ട് (not ലഭ്യമാണ്), പറ്റും (not സാധിക്കും), വണ്ടി/കാർ (not വാഹനം), പിന്നെ (not കൂടാതെ), വിളിക്കും (not ബന്ധപ്പെടുന്നതാണ്).
 - English words Keralites use are good, written in Malayalam script: മോഡൽ, കണ്ടീഷൻ, ടെസ്റ്റ് ഡ്രൈവ്, ബജറ്റ്, ഓണർ.

@@ -75,6 +75,24 @@ providers:
       timeout_s: 12
       thinking_headroom_tokens: 2048
       extra: {reasoning_effort: low}
+    # Groq free tier (2026-10-21: Google blocked the Gemini account). Model names in .env;
+    # check them with: python -m app.providers.llm --client truechoice --each
+    groq:
+      kind: openai_compatible
+      base_url: https://api.groq.com/openai/v1
+      model: "${GROQ_MODEL:-openai/gpt-oss-120b}"
+      api_key_secret: groq_api_key
+      timeout_s: 20
+      thinking_headroom_tokens: 1024   # gpt-oss reasons before answering
+      extra: {reasoning_effort: low}
+    groq_backup:
+      kind: openai_compatible
+      base_url: https://api.groq.com/openai/v1
+      model: "${GROQ_BACKUP_MODEL:-openai/gpt-oss-20b}"   # own per-minute limit; Qwen's Malayalam was poor
+      api_key_secret: groq_api_key
+      timeout_s: 20
+      thinking_headroom_tokens: 1024
+      extra: {reasoning_effort: low}
     anthropic:
       kind: anthropic
       model: "${ANTHROPIC_MODEL}"   # fill in the current Claude Haiku model ID in .env

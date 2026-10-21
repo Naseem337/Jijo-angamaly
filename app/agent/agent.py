@@ -9,6 +9,7 @@ staff commands and paused chats are handled by the router before the agent is ca
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from app.agent import prompts
@@ -25,6 +26,44 @@ from app.storage.models import Message
 from app.storage.repository import Repository
 
 log = logging.getLogger(__name__)
+
+_ODD_DASHES = str.maketrans({c: "-" for c in "‐‑‒−"})
+
+
+_GREETING = r"(hi|hello|hey|dear|namaskaram|thanks|thank you|welcome)"
+
+
+def without_names(text: str, names: list[str | None]) -> str:
+    """Remove the customer's name where a reply addresses them ('Hi Danish,' -> 'Hi,',
+    'Danish, ...' -> '...', 'Thanks, Danish!' -> 'Thanks!'). Only address positions are touched,
+    so a profile name that is also a normal word ('Swift') can't damage car talk."""
+    words = sorted({w for n in names if n for w in re.findall(r"[A-Za-z]{3,}", n)}, key=len, reverse=True)
+    if not words:
+        return text
+    one = "|".join(re.escape(w) for w in words)
+    name = rf"(?:{one})(?:\s+(?:{one}))*"
+    out = re.sub(rf"\b{_GREETING}\s+{name}\b", r"\1", text, flags=re.IGNORECASE)
+    out = re.sub(rf"(?m)^([ \t]*){name}[ \t]*[,!][ \t]*", r"\1", out, flags=re.IGNORECASE)
+    out = re.sub(rf",[ \t]*{name}\b(?=[ \t]*(?:[!?.,]|$))", "", out, flags=re.IGNORECASE | re.MULTILINE)
+    return out
+
+
+_TITLES = re.compile(r"[ \t]*(?<!\w)(?:sir|madam|ma'am|maam|സാർ|സർ|മാഡം)(?!\w)", re.IGNORECASE)
+
+
+def without_titles(text: str) -> str:
+    """Drop sir / madam (English and Malayalam): the bot never guesses gender.
+    'Undu sir, 5 lakh' -> 'Undu, 5 lakh'; 'സാർ, വില...' -> 'വില...'; 'Hello sir!' -> 'Hello!'."""
+    out = _TITLES.sub("", text)
+    out = re.sub(r"(?m)^([ \t]*)[,!][ \t]*", r"\1", out)  # a line that started with the title
+    out = re.sub(r",[ \t]*([,.!?])", r"\1", out)
+    return out
+
+
+def plain_dashes(text: str) -> str:
+    """Some models write ids with a non-breaking hyphen ('TC‑2253AD'); car ids must use '-'
+    so customers can copy them and the router can find car lines. Range dashes (–, —) stay."""
+    return text.translate(_ODD_DASHES)
 
 MAX_TOOL_ROUNDS = 5
 HISTORY_CHARS = 300
@@ -105,26 +144,28 @@ class Agent:
         ctx = ToolContext(self.config, self.repo, self.inventory, phone, now, language, source)
         notes = [n for n in [resolve_pending(ctx, text)] if n]
         context = prompts.turn_context(self.config, language=language, now=now,
-                                       customer_name=customer.name, source=source, notes=notes,
-                                       profile_name=profile_name)
+                                       customer_name=customer.name, source=source, notes=notes)
         history = [m for m in history if not m.meta.get("voice_note")]  # voice copies of text replies
         # Old replies are cut to HISTORY_CHARS: a car list from 6 messages ago costs tokens on every
         # call but rarely matters (the agent can search again; guardrails still see the full text).
         messages = [ChatMessage("user" if m.direction == "in" else "assistant",
                                 m.text if len(m.text) <= HISTORY_CHARS else m.text[:HISTORY_CHARS] + "…")
                     for m in history]
-        while messages and messages[0].role == "assistant":  # e.g. an alert we sent first
-            messages.pop(0)
+        if messages and messages[0].role == "assistant":  # we wrote first, e.g. a car alert: keep it
+            messages.insert(0, ChatMessage.user("(earlier conversation)"))
         messages.append(ChatMessage.user(f"{context}\n{text}"))
         facts = facts_from(texts=[m.text for m in history] + [text] + notes,
                            years=[now.year, now.year - 1])
 
         meter = _Meter(self.llm)
         reply = self._run(messages, ctx, facts, language, meter)
+        # User rules (2026-10-21): never the customer's name, never sir/madam (no gender guessing).
+        reply.text = without_titles(without_names(reply.text, [customer.name, profile_name]))
         reply.saved = list(ctx.saved)
         reply.photos = list(ctx.photos) if reply.guardrail in ("ok", "rewritten") else []
         if want_voice:
-            reply.spoken_text = self._spoken(reply, facts, meter)
+            spoken = self._spoken(reply, facts, meter)
+            reply.spoken_text = without_titles(spoken) if spoken else spoken
         reply.usage = dict(meter.totals)
         day = ist_today(self.clock).isoformat()
         for name in TOKEN_COUNTERS:  # daily totals: python -m app.usage --client <id>
@@ -181,7 +222,7 @@ class Agent:
             return AgentReply(prompts.TECHNICAL_ISSUE_REPLY[language], language, ctx.handoff,
                               tools_used, "llm_error", [str(exc)])
 
-        text = response.text.strip()
+        text = plain_dashes(response.text.strip())
         if response.tool_calls or response.stop_reason == "refusal" or not text:
             reason = "too many tool rounds" if response.tool_calls else response.stop_reason
             return self._fallback(ctx, language, tools_used, [f"no usable reply ({reason})"], response.provider)
@@ -193,7 +234,7 @@ class Agent:
         log.warning("Guardrail rewrite for %s: %s", ctx.phone, problems)
         rewritten = self._rewrite(messages, response, problems, llm)
         if rewritten and not check_reply(rewritten.text, facts):
-            return AgentReply(rewritten.text.strip(), language, ctx.handoff, tools_used, "rewritten",
+            return AgentReply(plain_dashes(rewritten.text.strip()), language, ctx.handoff, tools_used, "rewritten",
                               [str(p) for p in problems], rewritten.provider)
         return self._fallback(ctx, language, tools_used, [str(p) for p in problems], response.provider)
 

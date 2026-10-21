@@ -98,7 +98,15 @@ local `.env` override can't change test results.
     the user missed).
   - If port 8000 is busy, check for an old `uvicorn --reload` and its `spawn_main` child process.
 - `scripts/send_test_message.ps1` sends a test text from the test number.
-- **AI provider for testing: Gemini free tier** (user's choice on 2026-10-17, no DeepSeek credit yet).
+- **AI provider now: Groq free tier (2026-10-21).** Google blocked the Gemini account ("project denied access",
+  and a new key in a new project was blocked too), so Gemini chat AND the Algenib voice are gone for now.
+  - `.env`: `GROQ_API_KEY`, `LLM_CHAIN=groq,groq_backup`, `GROQ_MODEL=openai/gpt-oss-120b`,
+    `GROQ_BACKUP_MODEL=openai/gpt-oss-20b`. Both write good Malayalam; `qwen/qwen3.8-27b` wrote gibberish Malayalam.
+  - Groq free = **8,000 tokens/min per model** (~2 calls/min each; one customer turn is 2–3 calls of ~3.3k).
+    On a 429 that says "try again in Xs" (≤15 s), FallbackLLM waits once and retries instead of apologising.
+  - Voice replies are off until a TTS is chosen (Sarvam anand is ready via `tts_sarvam_option`).
+  - The user plans a paid key later (Groq pay-as-you-go = same models, or DeepSeek).
+- **Before that: Gemini free tier** (user's choice on 2026-10-17, no DeepSeek credit yet).
   - **Latency fix (2026-10-20):** gemini-3.8-flash kept timing out at 30 s on the free tier (over a minute
     per reply), so `.env` now has `GEMINI_MODEL=gemini-3.5-flash` (~3.5 s) and `GEMINI_BACKUP_MODEL=gemini-3.8-flash`.
     Gemini providers have `timeout_s: 12`, and FallbackLLM rests a provider for 120 s after a retryable failure.
@@ -135,8 +143,11 @@ local `.env` override can't change test results.
   - **Voice reply rules (user, 2026-10-20, superseded by v2 above):** a voice note in gets a voice note out with **no duplicate text**.
     When the reply has car data (search_cars / get_car_details / emi_estimate were used), the text is sent too
     and the voice summarises. If the voice fails, the text is sent instead.
-  - **Address (user, 2026-10-20):** never the name and never chetta/chechi/bro; "sir"/"madam" only when the
-    gender is clear (the WhatsApp profile name is passed in the turn context for that), otherwise nothing.
+  - **Address (user, 2026-10-21, replaces the 2026-10-20 sir/madam rule):** NO address words at all. Never
+    the name, never sir/madam (no gender guessing), never chetta/chechi. The profile name is no longer sent to
+    the AI. Code also enforces it: `without_names` + `without_titles` in agent.py clean every reply and voice script.
+  - **24/7 (user, 2026-10-21):** the bot never brings up showroom hours or "closed now" unless the customer asks
+    about timings or is picking a visit time (turn_context marks hours as background only).
   - **Voice rules (user, 2026-10-19, to cut cost):** voice only when the customer sent a voice note AND
     the bot has a real answer. Text only for: AI outage apologies, guardrail fallbacks, and
     "couldn't hear" / "too long".
