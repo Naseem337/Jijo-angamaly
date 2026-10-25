@@ -227,3 +227,48 @@ def test_voice_then_typed_follow_up_is_one_conversation_with_the_last_reply_whol
     assert [m.role for m in second] == ["user", "assistant", "user"]
     assert second[0].content == "Creta undo?" and car_list in second[1].content  # the whole list, not cut at 300
     assert "ONE conversation" in llm.calls[1].system and "refers to YOUR LAST message" in llm.calls[1].system
+
+
+INVITE = "Ennaa pinne direct showroom-lekku vaa, namukku oru Sulaimani-okke kudichu kaaryangal urappikkaam!"
+
+
+def test_sulaimani_invitation_is_used_once_per_customer(make_agent, repo, clock) -> None:
+    agent, llm = make_agent(MockLLM.text(f"Nalla car aanu. {INVITE}"), MockLLM.text(f"Ok, ethra time aanu? {INVITE}"))
+    first = agent.handle(PHONE, "Njan nale varunnund")
+    assert "Sulaimani" in first.text  # the first time it is welcome
+    assert "ALREADY used the Sulaimani" not in llm.calls[0].messages[-1].content
+    second = agent.handle(PHONE, "ok")
+    assert "ALREADY used the Sulaimani invitation" in llm.calls[1].messages[-1].content
+    assert second.text == "Ok, ethra time aanu?"  # and the code cuts it even if the AI repeats it
+
+
+def test_the_prompt_has_the_gulf_uncle_voice_and_the_invitation(clients_dir) -> None:
+    from app.agent import prompts
+    config = load_client_config("truechoice", clients_dir)
+    system = prompts.build_system_prompt(config)
+    assert "TRUSTED GULF UNCLE" in system and "ellaam clear aayi paranju tharaam" in system
+    assert "Sulaimani-okke kudichu kaaryangal urappikkaam" in system and "ONCE per customer" in system
+    assert "Gulf-returned uncle" in config.business_rules.speaking_style
+
+
+def test_the_stock_is_searched_in_code_when_the_message_names_a_car(make_agent) -> None:
+    agent, llm = make_agent(MockLLM.text("Swift und, ithil ethu nokkanam?"))
+    reply = agent.handle(PHONE, "Swift undo 7 lakhinu thazhe?")
+    context = llm.calls[0].messages[-1].content
+    assert "Stock search ALREADY DONE" in context and "search_cars(" in context and "TC-" in context
+    assert len(llm.calls) == 1  # one AI call, not a tool round first
+    assert "search_cars" in reply.tools_used  # so the car list still goes out as usual
+
+
+def test_no_stock_search_for_a_greeting_or_a_follow_up(make_agent) -> None:
+    agent, llm = make_agent(MockLLM.text("Namaskaram!"), MockLLM.text("Evide aanu."))
+    agent.handle(PHONE, "Hi")
+    agent.handle(PHONE, "evde")
+    assert all("Stock search ALREADY DONE" not in call.messages[-1].content for call in llm.calls)
+
+
+def test_a_profile_name_without_letters_gives_no_title(make_agent) -> None:
+    agent, llm = make_agent(MockLLM.text("Sir, we sell pre-owned cars only."))
+    reply = agent.handle(PHONE, "I need a new Brezza", profile_name="~")
+    assert reply.text == "we sell pre-owned cars only."  # '~' is no name, so no sir/madam guess
+    assert "profile name unknown" in llm.calls[0].messages[-1].content

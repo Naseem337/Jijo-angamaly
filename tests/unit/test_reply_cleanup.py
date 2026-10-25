@@ -57,3 +57,30 @@ def test_prompt_forbids_guessing_and_says_every_car_is_pre_owned(clients_dir) ->
     config = load_client_config("truechoice", clients_dir)
     system = prompts.build_system_prompt(config)
     assert "NEVER GUESS" in system and "PRE-OWNED" in system and "salesman will contact" in system
+
+
+@pytest.mark.parametrize("reply, expected", [
+    ("Undu sir, 5 lakh il automatic und.", "Undu, 5 lakh il automatic und."),
+    ("സാർ, വില കാര്യം team ആണ്.", "വില കാര്യം team ആണ്."),
+    ("Hello madam!", "Hello!"),
+    ("Desire undu", "Desire undu"),
+])
+def test_titles_are_removed_when_nothing_tells_the_gender(reply, expected) -> None:
+    from app.agent.agent import without_titles
+    assert without_titles(reply) == expected
+
+
+def test_tool_messages_become_plain_text_when_a_call_has_no_tools() -> None:
+    """Sarvam rejects tool messages without tools; the guardrail rewrite sends none (live 2026-10-25)."""
+    from app.providers.llm import ChatMessage, ToolCall
+    from app.providers.llm.openai_compatible import _to_wire
+
+    call = ToolCall("c1", "search_cars", {"model": "swift"}, None, None)
+    messages = [ChatMessage.user("Swift undo?"), ChatMessage("assistant", "", tool_calls=[call]),
+                ChatMessage.tool_result("c1", '{"cars": []}'), ChatMessage("assistant", "Illa."),
+                ChatMessage.user("rewrite")]
+    plain = _to_wire("system", messages, keep_tools=False)
+    assert [m["role"] for m in plain] == ["system", "user", "user", "assistant", "user"]
+    assert all("tool_calls" not in m and m["role"] != "tool" for m in plain)
+    assert "stock tool result" in plain[2]["content"] and '"cars"' in plain[2]["content"]
+    assert [m["role"] for m in _to_wire("system", messages)] == ["system", "user", "assistant", "tool", "assistant", "user"]

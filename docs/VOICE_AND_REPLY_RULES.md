@@ -192,3 +192,28 @@ Pattambi, Cochin). The bot is True Choice's virtual assistant and never names th
 
 Whenever the user gives a new instruction about how the bot talks, sounds or behaves, add it here (section, date, the live failure that
 caused it, and the code that enforces it) so a new model or session does not start from scratch.
+
+## 18. The Gulf uncle (user, 2026-10-25)
+
+- Be a trusted **Gulf-returned uncle from Malabar**: Malabar buyers trust references, so talk as if recommending a car to a close relative.
+  Warm, honest, never corporate or cold. Promise clarity ("ellaam clear aayi paranju tharaam") and then be clear, limits of the car included.
+- **Closing invitation, ONCE per customer, never repeated:**
+  - Manglish: "Ennaa pinne direct showroom-lekku vaa, namukku oru Sulaimani-okke kudichu kaaryangal urappikkaam!"
+  - Malayalam: "എന്നാ പിന്നെ നേരെ ഷോറൂമിലേക്ക് വാ, നമുക്ക് ഒരു സുലൈമാനിയൊക്കെ കുടിച്ച് കാര്യങ്ങൾ ഉറപ്പിക്കാം!"
+  - Use it when the customer shows real interest, asks about visiting, or a recommendation is wrapping up. "Sir/Madam" only when the gender is clear.
+- Enforced in code: if an earlier bot message already has "Sulaimani", the turn context says so and `without_sulaimani` cuts the
+  sentence from the text and the voice script (`app/agent/agent.py`). Prompt section: "YOUR VOICE: THE TRUSTED GULF UNCLE".
+- Observed: Sarvam's chat model followed this weakly (it skipped the invitation when the customer said "I'll come tomorrow"); Gemini follows persona better.
+
+## 19. The stock is searched in code before the AI answers (2026-10-25)
+
+- Live failure: the AI said "Swift options und" **without searching** (a guess shown as fact) and lost the thread. Now `app/agent/prefetch.py` reads the
+  customer's message with rules (model, make, budget, fuel, body type, gearbox) and runs `search_cars` before the AI call, putting the result in the turn
+  context. One AI call instead of two or three; a follow-up like "ethra km?" is answered from the conversation as before.
+- If the AI's reply is rewritten after a guardrail failure, tool messages are sent as plain text when no tools are attached (Sarvam rejects them otherwise).
+
+## 20. The AI brain order (2026-10-25)
+
+`LLM_CHAIN=gemini,sarvam_chat,groq` (set it on Render too). Gemini 3.5 Flash writes the best Malayalam and follows the persona but the free tier allows only about
+20 calls a day (billing fixes that); Sarvam `sarvam-105b-conversations` is fast and decent, about ₹0.3 per message; Groq gpt-oss-120b garbles Malayalam and is the last
+resort. The weak Groq 20b backup is not in the chain. Test any change with real Malayalam questions before trusting it.

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from app.agent import prompts
 from app.agent.confirmation import resolve_pending
+from app.agent.prefetch import stock_note
 from app.agent.guardrails import SourcedFacts, Violation, check_reply, facts_from
 from app.agent.spoken import invented_words, draft_spoken, to_speech
 from app.agent.tools import TOOL_SPECS, HandoffRequest, ToolContext, run_tool
@@ -73,6 +74,35 @@ def placeholder_problem(text: str) -> str | None:
         return ("The reply contains a placeholder like [insert address]. Never write placeholders: "
                 "if you don't have the fact, say the team will share it.")
     return None
+
+
+_TITLES = re.compile(r"[ \t]*(?<!\w)(?:sir|madam|ma'am|maam|സാർ|സർ|മാഡം)(?!\w)", re.IGNORECASE)
+
+
+def without_titles(text: str) -> str:
+    """Drop sir / madam (English and Malayalam). Used when nothing tells us the customer's gender:
+    the profile name is unknown and they said nothing about themselves, so any title is a guess.
+    'Undu sir, 5 lakh' -> 'Undu, 5 lakh'; 'സാർ, വില...' -> 'വില...'; 'Hello madam!' -> 'Hello!'."""
+    out = _TITLES.sub("", text)
+    out = re.sub(r"(?m)^([ \t]*)[,!][ \t]*", r"\1", out)
+    out = re.sub(r",[ \t]*([,.!?])", r"\1", out)
+    return out
+
+
+_SULAIMANI = re.compile(r"sulaimani|sulaimaani|സുലൈമാനി", re.IGNORECASE)
+
+
+def mentions_sulaimani(text: str) -> bool:
+    return bool(_SULAIMANI.search(text))
+
+
+def without_sulaimani(text: str) -> str:
+    """Cut the sentence(s) with the Sulaimani invitation: it is used once per customer (user, 2026-10-25)."""
+    kept: list[str] = []
+    for line in text.split("\n"):
+        sentences = re.split(r"(?<=[.!?])\s+", line)
+        kept.append(" ".join(s for s in sentences if not mentions_sulaimani(s)).strip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
 
 def plain_dashes(text: str) -> str:
@@ -144,6 +174,8 @@ class Agent:
                profile_name: str | None = None) -> AgentReply:
         now = self.clock.now()
         cid = self.config.client_id
+        if profile_name and not re.search(r"[A-Za-zഀ-ൿ]", profile_name):
+            profile_name = None  # '~', emoji or digits only: WhatsApp's 'no name', so no clue about gender
         customer = self.repo.get_or_create_customer(cid, phone, now)
         history = self.repo.list_messages(cid, phone, limit=self.config.business_rules.bot.history_messages)
 
@@ -166,6 +198,14 @@ class Agent:
             notes.append("The customer asked for a voice reply: your reply WILL be sent as a voice note. Give "
                          "the answer they were waiting for (e.g. explain or compare the cars just discussed) "
                          "in the reply; don't ask what they mean and don't mention voice or audio.")
+        invited = any(m.direction == "out" and mentions_sulaimani(m.text)
+                      for m in self.repo.list_messages(cid, phone, limit=300))
+        if invited:
+            notes.append("You ALREADY used the Sulaimani invitation with this customer: never say it again; "
+                         "invite them in other plain words if needed.")
+        stock = stock_note(ctx, text, self.config.business_rules.model_aliases) if source != "voice" or text else None
+        if stock:
+            notes.append(stock[0])
         context = prompts.turn_context(self.config, language=language, now=now,
                                        customer_name=customer.name, source=source, notes=notes,
                                        profile_name=profile_name)
@@ -187,11 +227,19 @@ class Agent:
         reply = self._run(messages, ctx, facts, language, meter)
         # User rule (2026-10-21): never the customer's name; sir/madam only when the gender is clear.
         reply.text = without_names(reply.text, [customer.name, profile_name])
+        if not (customer.name or profile_name):  # no clue about gender: a title would be a guess
+            reply.text = without_titles(reply.text)
+        if invited and mentions_sulaimani(reply.text):
+            reply.text = without_sulaimani(reply.text) or reply.text
+        if stock and stock[1] and "search_cars" not in reply.tools_used:
+            reply.tools_used.append("search_cars")  # the stock was searched in code: the car list goes out as usual
         reply.saved = list(ctx.saved)
         reply.photos = list(ctx.photos) if reply.guardrail in ("ok", "rewritten") else []
         if want_voice:
             spoken = self._spoken(reply, facts, meter)
-            reply.spoken_text = spoken
+            reply.spoken_text = spoken if (customer.name or profile_name or not spoken) else without_titles(spoken)
+            if invited and reply.spoken_text and mentions_sulaimani(reply.spoken_text):
+                reply.spoken_text = without_sulaimani(reply.spoken_text) or None
         reply.usage = dict(meter.totals)
         day = ist_today(self.clock).isoformat()
         for name in TOKEN_COUNTERS:  # daily totals: python -m app.usage --client <id>

@@ -100,7 +100,8 @@ local `.env` override can't change test results.
     the user missed).
   - If port 8000 is busy, check for an old `uvicorn --reload` and its `spawn_main` child process.
 - `scripts/send_test_message.ps1` sends a test text from the test number.
-- **AI brain now: `LLM_CHAIN=gemini,groq` (2026-10-21, later).** The user's new Google project works for chat and the Algenib
+- **AI brain now: `LLM_CHAIN=gemini,sarvam_chat,groq` (2026-10-25).** `sarvam_chat` = Sarvam `sarvam-105b-conversations` (same key as speech; tested: fast, tool calls work). Details in docs/VOICE_AND_REPLY_RULES.md §18-20. Set the same chain on Render.
+- **Earlier: `LLM_CHAIN=gemini,groq` (2026-10-21, later).** The user's new Google project works for chat and the Algenib
   voice; Groq's free models wrote garbled Malayalam ("Santoor" for Santro), so Gemini 3.5 Flash is first and Groq
   gpt-oss-120b is the fallback (the 20b backup is dropped). Set the same `LLM_CHAIN` on Render. See docs/VOICE_AND_REPLY_RULES.md §12.
 - **Earlier today: Groq free tier (2026-10-21).** Google blocked the Gemini account ("project denied access",

@@ -75,6 +75,14 @@ providers:
       timeout_s: 12
       thinking_headroom_tokens: 2048
       extra: {reasoning_effort: low}
+    # Sarvam's own chat model (built for Indian languages; same key as speech). Tested 2026-10-25: natural Malayalam,
+    # about 1-2 s, tool calls work. Official price Rs 29.28 per M tokens in, Rs 73.2 out.
+    sarvam_chat:
+      kind: openai_compatible
+      base_url: https://api.sarvam.ai/v1
+      model: "${SARVAM_CHAT_MODEL:-sarvam-105b-conversations}"
+      api_key_secret: sarvam_api_key
+      timeout_s: 30
     # Groq free tier (2026-10-21: Google blocked the Gemini account). Model names in .env;
     # check them with: python -m app.providers.llm --client truechoice --each
     groq:

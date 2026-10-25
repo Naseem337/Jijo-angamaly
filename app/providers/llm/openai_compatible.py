@@ -50,10 +50,17 @@ def _retry_after(resp: httpx.Response) -> float | None:
     return int(match[1] or 0) * 60 + float(match[2]) if match else None
 
 
-def _to_wire(system: str, messages: list[ChatMessage]) -> list[dict[str, Any]]:
+def _to_wire(system: str, messages: list[ChatMessage], *, keep_tools: bool = True) -> list[dict[str, Any]]:
+    """keep_tools=False (a rewrite call without tools): some APIs (Sarvam) reject tool messages when no
+    tools are sent, so tool calls and results become plain text the model can still read."""
     wire: list[dict[str, Any]] = [{"role": "system", "content": system}]
     for m in messages:
-        if m.role == "tool":
+        if not keep_tools and m.role == "tool":
+            wire.append({"role": "user", "content": f"[stock tool result]\n{m.content}"})
+        elif not keep_tools and m.role == "assistant" and m.tool_calls:
+            if m.content:
+                wire.append({"role": "assistant", "content": m.content})
+        elif m.role == "tool":
             wire.append({"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content})
         elif m.role == "assistant" and m.tool_calls:
             wire.append({
@@ -109,7 +116,7 @@ class OpenAICompatibleLLM:
     ) -> LLMResponse:
         body: dict[str, Any] = {
             "model": self.model,
-            "messages": _to_wire(system, messages),
+            "messages": _to_wire(system, messages, keep_tools=bool(tools)),
             "max_tokens": max_tokens + self._headroom,
             **self._extra,
         }
