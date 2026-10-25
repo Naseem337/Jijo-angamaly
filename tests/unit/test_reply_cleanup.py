@@ -48,3 +48,21 @@ def test_turn_context_says_24x7_and_hours_only_when_asked(clients_dir) -> None:
     text = prompts.turn_context(config, language="en", now=night, customer_name="Danish", source="text")
     assert "You answer 24/7" in text and "ONLY if the customer asks about timings" in text
     assert "Danish" not in text and "no sir/madam" in text
+
+
+@pytest.mark.parametrize("reply, hedged", [
+    ("Yeah, I guess it's a new car", True),
+    ("Probably a 2019 model", True),
+    ("ഒരുപക്ഷേ പുതിയതാകാം", True),
+    ("It's a 2019 Swift, ₹5.5 lakh (TC-1E6434), pre-owned", False),
+    ("Our salesman will contact you to confirm", False),
+])
+def test_guessing_words_trigger_a_rewrite(reply, hedged) -> None:
+    from app.agent.agent import hedge_problem
+    assert bool(hedge_problem(reply)) == hedged
+
+
+def test_prompt_forbids_guessing_and_says_every_car_is_pre_owned(clients_dir) -> None:
+    config = load_client_config("truechoice", clients_dir)
+    system = prompts.build_system_prompt(config)
+    assert "NEVER GUESS" in system and "PRE-OWNED" in system and "salesman will contact" in system

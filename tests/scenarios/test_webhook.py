@@ -280,7 +280,7 @@ def test_voice_note_gets_voice_only_reply(env_with_voice, stt) -> None:
     assert "WHOLE reply" in llm.calls[1].system  # the voice says everything
 
 
-def test_voice_note_with_car_details_gets_voice_then_only_the_details_as_text(env_with_voice, stt) -> None:
+def test_voice_note_with_car_details_gets_the_list_first_then_a_short_voice(env_with_voice, stt) -> None:
     client, llm, _, sent, tts = env_with_voice
     stt.script.append(Transcript("Swift undo 7 lakhinu thazhe?", "en-IN", 0.95))
     llm.script += [MockLLM.tool("search_cars", model="swift", budget_max=700000),
@@ -289,9 +289,9 @@ def test_voice_note_with_car_details_gets_voice_then_only_the_details_as_text(en
                    MockLLM.text("ഉണ്ട് സാർ, 2021 Swift ₹6,95,000. വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്.")]
     post(client, payload(VOICE))
     bodies = sent_bodies(sent)
-    assert [b.get("type", "read") for b in bodies] == ["read", "audio", "text"]
-    assert bodies[2]["text"]["body"] == "*2021 Maruti Suzuki Swift ZXi AMT* · ₹6,95,000 (TC-1002)"  # no repeated talk
-    assert "ALSO sent as a text message" in llm.calls[2].system
+    assert [b.get("type", "read") for b in bodies] == ["read", "text", "audio"]  # the list first, then the voice
+    assert bodies[1]["text"]["body"] == "*2021 Maruti Suzuki Swift ZXi AMT* · ₹6,95,000 (TC-1002)"  # no repeated talk
+    assert "ALREADY sent as a text message" in llm.calls[2].system
 
 
 def test_failed_voice_note_falls_back_to_text(env_with_voice, stt) -> None:
@@ -341,3 +341,17 @@ def test_typed_request_for_voice_gets_a_voice_note(env_with_voice) -> None:
     assert [b.get("type", "read") for b in sent_bodies(sent)] == ["read", "audio"]  # spoken, no duplicate text
     assert "asked for a voice reply" in llm.calls[0].messages[-1].content
     assert len(tts.calls) == 1
+
+
+def test_failed_voice_after_the_car_list_sends_only_the_rest_of_the_text(env_with_voice, stt) -> None:
+    client, llm, _, sent, tts = env_with_voice
+    tts.fail = __import__("app.providers.tts", fromlist=["TTSError"]).TTSError("both voices down")
+    stt.script.append(Transcript("Swift undo 7 lakhinu thazhe?", "en-IN", 0.95))
+    llm.script += [MockLLM.tool("search_cars", model="swift", budget_max=700000),
+                   MockLLM.text("Undu, 7 lakh-inu thazhe Swift und:\n"
+                                "*2021 Maruti Suzuki Swift ZXi AMT* · ₹6,95,000 (TC-1002)\nIthil ethu venam?"),
+                   MockLLM.text("ഉണ്ട്, 2021 Swift ₹6,95,000. വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്.")]
+    post(client, payload(VOICE))
+    texts = [b["text"]["body"] for b in sent_bodies(sent) if b.get("type") == "text"]
+    assert texts == ["*2021 Maruti Suzuki Swift ZXi AMT* · ₹6,95,000 (TC-1002)",
+                     "Undu, 7 lakh-inu thazhe Swift und:\nIthil ethu venam?"]  # the list is never sent twice

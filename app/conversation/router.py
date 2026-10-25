@@ -140,11 +140,20 @@ class MessageRouter:
         """Text in → text out. Voice in → voice out, never the same words again as text (user rule,
         2026-10-20); only the car details (list, prices, EMI figures) follow as text to read. If the
         voice note fails, the full text goes instead, so the customer always gets an answer."""
-        if voice_out and reply.spoken_text and voice_out.send(phone, reply.spoken_text, reply.language):
-            details = car_details_text(reply.text) if reply.has_car_details else ""
+        details = car_details_text(reply.text) if reply.has_car_details else ""
+        if voice_out and reply.spoken_text:
+            # Cars: the list goes FIRST as text, then a short voice note that names the cars and
+            # budgets (user, 2026-10-21). Otherwise the voice note is the whole reply.
             if details and not self._send(phone, details, store=False):
                 return "send_failed"
-            return "replied"
+            if voice_out.send(phone, reply.spoken_text, reply.language):
+                return "replied"
+            # The voice failed: send the rest of the text (the list already went out).
+            listed = details.splitlines()
+            rest = "\n".join(line for line in reply.text.splitlines() if line.strip() and line not in listed)
+            if details and not rest:
+                return "replied"
+            return "replied" if self._send(phone, rest or reply.text, store=False) else "send_failed"
         return "replied" if self._send(phone, reply.text, store=False) else "send_failed"
 
     def _keywords(self, customer: Customer, text: str, msg_id: str, now, source: str) -> Outcome | None:

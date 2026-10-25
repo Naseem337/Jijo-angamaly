@@ -63,6 +63,23 @@ def without_titles(text: str) -> str:
 _PLACEHOLDER = re.compile(r"\[[^\]\n]{2,40}\]|\{\{?[^}\n]+\}\}?|<[A-Za-z ]{3,30}>")
 
 
+_HEDGE = re.compile(
+    r"\b(?:i guess|i suppose|i assume|i think|i believe|i'm not sure|probably|possibly|perhaps|maybe|might be|"
+    r"may be|should be|looks like|seems like|seems to be|aayirikkum|aayirikkam|thonnunnu|ennu thonnum|"
+    r"sheriyaakum|ayirikkum)\b|ഒരുപക്ഷേ|തോന്നുന്നു|ആയിരിക്കും|ആകാം",
+    re.IGNORECASE)
+
+
+def hedge_problem(text: str) -> str | None:
+    """Guessing words ('I guess it's a new car'). Stock data is exact, so a reply states it plainly,
+    or says the salesman will confirm (user, 2026-10-21)."""
+    if _HEDGE.search(text):
+        return ("The reply guesses or hedges (I guess / probably / maybe / തോന്നുന്നു). Our stock data is exact: "
+                "state it plainly. If you don't have the fact, or the customer is unsure, say the salesman will "
+                "contact them to confirm. Every car is pre-owned, never new.")
+    return None
+
+
 def placeholder_problem(text: str) -> str | None:
     """'[insert address]', '{name}', '<link>': a template slot the AI left unfilled."""
     if _PLACEHOLDER.search(text):
@@ -255,7 +272,7 @@ class Agent:
             return self._fallback(ctx, language, tools_used, [f"no usable reply ({reason})"], response.provider)
 
         problems = check_reply(text, facts)
-        wrong_language = (reply_language_problem(text, language) if ctx.enforce_language else None)             or placeholder_problem(text)
+        wrong_language = (reply_language_problem(text, language) if ctx.enforce_language else None)             or placeholder_problem(text) or hedge_problem(text)
         if not problems and not wrong_language:
             return AgentReply(text, language, ctx.handoff, tools_used, "ok", provider=response.provider)
         if not problems:  # only the language is off: one rewrite, else send it as it is (never a fallback)

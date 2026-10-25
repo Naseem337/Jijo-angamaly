@@ -61,7 +61,12 @@ Pattambi, Cochin). The bot is True Choice's virtual assistant and never names th
 - **A typed request for voice gets one too** ("voice itt paray", "voice note ayakko"); "voice venda" / "text please" does not.
 - Text in → text out.
 - **Never the same words twice.** A voice reply has no duplicate text.
-- **When cars are involved**: the car lines (name, price, km, id, EMI figures) go as TEXT after the voice, and the
+- **When cars are involved (updated 2026-10-21): the car list goes FIRST as text, THEN a short voice note.** The voice only
+  names the cars (at most 3, with year or fuel if that tells them apart) and their exact prices in digits, e.g.
+  "ഇതാ Creta ഡീസൽ, ₹8.4 lakh; പിന്നെ Creta പെട്രോൾ, ₹6.3 lakh", then the question and "വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്".
+  No km, owner, showroom or ids in the voice, and no long explanations. If the voice fails, only the non-list text follows.
+  (The older rule below, "voice explains instead of reading", is superseded by this.)
+- (superseded) **When cars are involved**: the car lines (name, price, km, id, EMI figures) go as TEXT after the voice, and the
   voice does NOT read them again. The voice gives a salesman's spoken take instead: what stands out, a quick
   comparison, which suits what the customer asked, ending with a question and "വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്".
   (Example of the content wanted: "Brezza diesel automatic: low fuel use and service cost. Ertiga petrol: more seats,
@@ -110,3 +115,11 @@ Pattambi, Cochin). The bot is True Choice's virtual assistant and never names th
 - Never promise discounts, loan approval or guarantees; hand off to the team.
 - Never print or commit secrets; never paste keys in chat; the bot never names the AI company or model.
 - Give the user PowerShell commands, one small setup step per message, and wait for "done".
+
+## 10. Never guess (user, 2026-10-21)
+
+- Stock data is exact and true: state it plainly. **No "I guess / I think / probably / maybe / ഒരുപക്ഷേ / തോന്നുന്നു".**
+  (Live bug: the bot said "yeah, I guess it's a new car".) Code: `hedge_problem` in `app/agent/agent.py` → one rewrite.
+- Every car True Choice sells is **pre-owned**; never say or imply a car is new.
+- If the data doesn't show something, or the customer is still unsure or confused: say plainly that **the salesman will
+  contact them and confirm**, and hand off (`handoff_to_human`). Never fill a gap with a guess.

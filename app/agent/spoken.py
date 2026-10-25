@@ -32,15 +32,15 @@ It must sound like a real person chatting, NOT reading a notice:
 Bad (stiff): "ഇന്ധന ഉപയോഗം കുറവാണ്, സർവീസ് ചെലവ് കുറവാണ്." Good (spoken): "മൈലേജ് നല്ലതാ... സർവീസ് ചെലവും കുറവാ."
 Rules:
 - Say ONLY what the reply says. Never add a car, fact, price or question that is not in the reply (a greeting stays a greeting).
-- At most 3 short sentences, under 300 characters.
-- Mention at most 2 cars. Car brand and model names ALWAYS stay exactly in English letters as written (i20, XUV700, Creta, Alto 800): never translate them, never write them in Malayalam script, never turn their numbers into Malayalam words.
+- At most 3 short sentences, under 350 characters.
+- Mention only cars the reply names, at most 3. Car brand and model names ALWAYS stay exactly in English letters as written (i20, XUV700, Creta, Alto 800): never translate them, never write them in Malayalam script, never turn their numbers into Malayalam words.
 - Keep every price, year and km figure as digits exactly as in the reply (₹9,80,000, 2021, 42,000 km). Do not add any number that is not in the reply.
 - No lists, car ids, emoji, asterisks or links.
 Reply with the script only.""",
     "en": """Rewrite the WhatsApp reply below as a short voice note, the way a friendly Kerala car salesman would say it out loud in simple Indian English: relaxed, natural pauses (commas, "..."), not formal, not a news reader.
 Rules:
 - At most 3 short sentences, under 300 characters.
-- Mention at most 2 cars by brand, model and year.
+- Mention only cars the reply names, at most 3, by brand, model and year.
 - Keep every price, year and km figure exactly as in the reply. Do not add any number that is not in the reply.
 - No lists, car ids, emoji, asterisks or links.
 Reply with the script only.""",
@@ -52,12 +52,14 @@ def speech_language(language: str) -> str:
     return "en" if language == "en" else "ml"
 
 
-# The car lines (price, km, id) go as text, so the voice must NOT read them out again (user,
-# 2026-10-21): it gives a salesman's spoken take on them instead.
-_DETAILS_TAKE = ("The car list with prices, km and ids is ALSO sent as a text message, so do NOT read it out "
-                 "or repeat its prices and km. Instead give a short spoken take, like a salesman: what stands "
-                 "out (newest, automatic, low km, single owner, which is the better buy), a quick comparison, "
-                 "or which suits what they asked; then ask what they'd like, and end with: ")
+# The car list (full lines with km, owner, showroom, id) was ALREADY sent as text just before this
+# voice note (user, 2026-10-21): the voice only introduces the mandatory facts, briefly.
+_DETAILS_TAKE = ("The full car list was ALREADY sent as a text message just before this voice note. So say ONLY "
+                 "which cars these are and their price, nothing else: name each car (at most 3) with its year or "
+                 "fuel if that tells two apart, and its price. Do NOT say km, owner, showroom, tyres, insurance or "
+                 "ids, and do not explain the cars. Keep each price EXACTLY as written in the reply, in digits "
+                 "(₹8.4 lakh), never rounded or reworded, and write any year in digits (2019). Example shape: 'ഇതാ Creta ഡീസൽ, ₹8.4 lakh; "
+                 "പിന്നെ Creta പെട്രോൾ, ₹6.3 lakh.' Then one short question if the reply asks one, and end with: ")
 DETAILS_NOTE = {
     "ml": _DETAILS_TAKE + "വിവരങ്ങൾ മെസ്സേജിൽ അയച്ചിട്ടുണ്ട്.",
     "en": _DETAILS_TAKE + "I've sent the details in the message.",
