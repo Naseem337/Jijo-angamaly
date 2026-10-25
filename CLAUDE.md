@@ -182,6 +182,18 @@ local `.env` override can't change test results.
     free) and `tc_still_looking`.
   - They must be submitted again in True Choice's own account at go-live.
 
+## Hosting (updated 2026-10-21)
+
+- **Testing runs on Render's FREE plan:** https://whatsapp-truechoice.onrender.com (service `whatsapp-truechoice`, Docker, Singapore).
+  Free Render sleeps after 15 min (first reply ~1 min later) and its disk is wiped on every sleep or redeploy, so the
+  database resets: **test only, never real customers**. `ALERTS_EVERY_MINUTES=0` there (the hourly timer can't run asleep).
+  Variables come from `data/railway.env` (made by `scripts/railway_env.py`, git-ignored, holds real keys). Meta's webhook
+  was set with `scripts/set_webhook.py <url>`. Stop the laptop bot (`dev_whatsapp.py`) first, because it re-points Meta at the laptop.
+- **Go-live plan: Railway Hobby ($5/month, includes a volume for SQLite).** Dockerfile, railway.toml and the in-process
+  timer (`app/scheduler.py`, `ALERTS_EVERY_MINUTES=60` in the Dockerfile) are ready; repo is private; code is pushed.
+  Nothing is deployed on Railway yet (the user hit issues with it). Free always-on VMs (Google e2-micro, Oracle) were
+  discussed as alternatives. Monthly cost estimate for 50 messages/day: about ₹800–1,000.
+
 ## Decisions made in chat (not yet in PLAN.md)
 
 - **WISH → LEAD, and what a lead is (2026-10-20, now also in PLAN.md §9):** staff commands are `RESUME` and `LEAD`.

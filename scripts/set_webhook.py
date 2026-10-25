@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import httpx
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # so `app` imports from scripts/
 
 from app.core.client_config import load_client_config
 from app.settings import EnvSecretResolver, get_settings
