@@ -24,19 +24,19 @@ MIN_LANGUAGE_PROBABILITY = 0.4
 
 VOICE_PROBLEM_REPLY: dict[Problem, dict[str, str]] = {
     "too_long": {
-        "ml": "ക്ഷമിക്കണം, ഈ വോയ്‌സ് മെസ്സേജ് വളരെ നീളമുള്ളതാണ്. ഒരു മിനിറ്റിൽ താഴെയുള്ള മെസ്സേജ് അയയ്ക്കാമോ, അല്ലെങ്കിൽ ടൈപ്പ് ചെയ്യാമോ?",
-        "manglish": "Sorry, ee voice message valare neelam aanu. Oru minute-il thazhe ulla message ayakkamo, allenkil type cheyyamo?",
-        "en": "Sorry, that voice message is too long. Could you send one under a minute, or type your question?",
+        "ml": "വോയ്‌സ് കുറച്ച് നീളം കൂടുതലാ, ഒരു മിനിറ്റിൽ താഴെ അയക്കാമോ?",
+        "manglish": "Voice kurachu neelam koodipoyi, oru minute-il thazhe ayakkamo?",
+        "en": "That voice note is a bit long, can you send one under a minute?",
     },
     "unclear": {
-        "ml": "ക്ഷമിക്കണം, എനിക്ക് വ്യക്തമായി കേൾക്കാൻ കഴിഞ്ഞില്ല. ഒന്നുകൂടി പറയാമോ, അല്ലെങ്കിൽ ടൈപ്പ് ചെയ്യാമോ?",
-        "manglish": "Sorry, enikku clear aayi kelkkan pattiyilla. Onnu koodi parayamo, allenkil type cheyyamo?",
-        "en": "Sorry, I couldn't hear that clearly. Could you say it again, or type it?",
+        "ml": "മനസ്സിലായില്ല, ഒന്നൂടെ പറയാമോ?",
+        "manglish": "Manasilayilla, onnu koodi parayamo?",
+        "en": "Didn't catch that, can you say it again?",
     },
     "failed": {
-        "ml": "ക്ഷമിക്കണം, ഇപ്പോൾ വോയ്‌സ് മെസ്സേജ് വായിക്കാൻ കഴിയുന്നില്ല. ദയവായി ടൈപ്പ് ചെയ്ത് അയയ്ക്കാമോ?",
-        "manglish": "Sorry, ippol voice message vayikkan pattunnilla. Onnu type cheythu ayakkamo?",
-        "en": "Sorry, I can't process voice messages right now. Could you type your question?",
+        "ml": "ഇപ്പോൾ വോയ്‌സ് കേൾക്കാൻ പറ്റുന്നില്ല, ടൈപ്പ് ചെയ്യാമോ?",
+        "manglish": "Ippo voice kelkkan pattunnilla, onnu type cheyyamo?",
+        "en": "Can't play voice notes right now, can you type it?",
     },
 }
 

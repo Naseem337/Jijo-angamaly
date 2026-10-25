@@ -222,7 +222,7 @@ def test_system_handoff_notifies_once_a_day_without_pausing(env) -> None:
     assert not repo.get_customer("truechoice", CUSTOMER).bot_paused
     notices = [t for t in texts_to(sent, STAFF) if "llm_unavailable" in t]
     assert len(notices) == 1  # an outage doesn't spam staff on every message
-    assert len([t for t in texts_to(sent, CUSTOMER) if "technical problem" in t]) == 3
+    assert len([t for t in texts_to(sent, CUSTOMER) if "cheriya oru problem" in t]) == 3
 
 
 def test_staff_help(env) -> None:

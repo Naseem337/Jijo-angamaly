@@ -48,20 +48,7 @@ def without_names(text: str, names: list[str | None]) -> str:
     return out
 
 
-_TITLES = re.compile(r"[ \t]*(?<!\w)(?:sir|madam|ma'am|maam|സാർ|സർ|മാഡം)(?!\w)", re.IGNORECASE)
-
-
-def without_titles(text: str) -> str:
-    """Drop sir / madam (English and Malayalam): the bot never guesses gender.
-    'Undu sir, 5 lakh' -> 'Undu, 5 lakh'; 'സാർ, വില...' -> 'വില...'; 'Hello sir!' -> 'Hello!'."""
-    out = _TITLES.sub("", text)
-    out = re.sub(r"(?m)^([ \t]*)[,!][ \t]*", r"\1", out)  # a line that started with the title
-    out = re.sub(r",[ \t]*([,.!?])", r"\1", out)
-    return out
-
-
 _PLACEHOLDER = re.compile(r"\[[^\]\n]{2,40}\]|\{\{?[^}\n]+\}\}?|<[A-Za-z ]{3,30}>")
-
 
 _HEDGE = re.compile(
     r"\b(?:i guess|i suppose|i assume|i think|i believe|i'm not sure|probably|possibly|perhaps|maybe|might be|"
@@ -179,7 +166,8 @@ class Agent:
                          "the answer they were waiting for (e.g. explain or compare the cars just discussed) "
                          "in the reply; don't ask what they mean and don't mention voice or audio.")
         context = prompts.turn_context(self.config, language=language, now=now,
-                                       customer_name=customer.name, source=source, notes=notes)
+                                       customer_name=customer.name, source=source, notes=notes,
+                                       profile_name=profile_name)
         history = [m for m in history if not m.meta.get("voice_note")]  # voice copies of text replies
         # Old replies are cut to HISTORY_CHARS: a car list from 6 messages ago costs tokens on every
         # call but rarely matters (the agent can search again; guardrails still see the full text).
@@ -194,13 +182,13 @@ class Agent:
 
         meter = _Meter(self.llm)
         reply = self._run(messages, ctx, facts, language, meter)
-        # User rules (2026-10-21): never the customer's name, never sir/madam (no gender guessing).
-        reply.text = without_titles(without_names(reply.text, [customer.name, profile_name]))
+        # User rule (2026-10-21): never the customer's name; sir/madam only when the gender is clear.
+        reply.text = without_names(reply.text, [customer.name, profile_name])
         reply.saved = list(ctx.saved)
         reply.photos = list(ctx.photos) if reply.guardrail in ("ok", "rewritten") else []
         if want_voice:
             spoken = self._spoken(reply, facts, meter)
-            reply.spoken_text = without_titles(spoken) if spoken else spoken
+            reply.spoken_text = spoken
         reply.usage = dict(meter.totals)
         day = ist_today(self.clock).isoformat()
         for name in TOKEN_COUNTERS:  # daily totals: python -m app.usage --client <id>
@@ -272,7 +260,8 @@ class Agent:
             return self._fallback(ctx, language, tools_used, [f"no usable reply ({reason})"], response.provider)
 
         problems = check_reply(text, facts)
-        wrong_language = (reply_language_problem(text, language) if ctx.enforce_language else None)             or placeholder_problem(text) or hedge_problem(text)
+        wrong_language = ((reply_language_problem(text, language) if ctx.enforce_language else None)
+                          or placeholder_problem(text) or hedge_problem(text))
         if not problems and not wrong_language:
             return AgentReply(text, language, ctx.handoff, tools_used, "ok", provider=response.provider)
         if not problems:  # only the language is off: one rewrite, else send it as it is (never a fallback)

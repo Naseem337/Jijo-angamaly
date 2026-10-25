@@ -258,6 +258,18 @@ def asks_for_voice(text: str) -> bool:
     return bool(_VOICE_WORD.search(text)) and not _NO_VOICE.search(text)
 
 
+_EMOJI_CHAR = re.compile("[\U0001F000-\U0001FAFF←-⇿⌀-⏿☀-➿⬀-⯿]")
+
+
+def is_emoji_only(text: str) -> bool:
+    """A message that is only emoji (👍, 🙏🙏, ❤️), maybe with spaces or punctuation: no words to answer.
+    A lone '?' or a number is not emoji-only."""
+    stripped = text.strip()
+    if not stripped or any(ch.isalnum() for ch in stripped):
+        return False
+    return bool(_EMOJI_CHAR.search(stripped))
+
+
 LANGUAGE_NAMES = {"ml": "Malayalam script", "manglish": "Manglish (English letters)", "en": "English"}
 _LATIN_WORD = re.compile(r"[a-z']+")
 _CAR_ID = re.compile(r"\b[A-Z]{2,4}-[0-9A-Z]{3,}\b")

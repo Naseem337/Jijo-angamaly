@@ -27,7 +27,7 @@ It must sound like a real person chatting, NOT reading a notice:
 - Short phrases, commas and "..." for small pauses; one thought at a time; contractions like "അതാ", "ഇതാ", "പോകാം".
 - Spoken words, never written ones: ഉണ്ട് (not ലഭ്യമാണ്), പറ്റും (not സാധിക്കും), വണ്ടി/കാർ (not വാഹനം), പിന്നെ (not കൂടാതെ), വിളിക്കും (not ബന്ധപ്പെടുന്നതാണ്), മൈലേജ് (not ഇന്ധനക്ഷമത), സർവീസ് ചെലവ് (not പരിപാലനച്ചെലവ്).
 - English words Keralites use, written in Malayalam script: മോഡൽ, കണ്ടീഷൻ, ടെസ്റ്റ് ഡ്രൈവ്, ബജറ്റ്, ഓണർ, ഓട്ടോമാറ്റിക്.
-- No address words: never a name, never സാർ/മാഡം, never ചേട്ടാ/ചേച്ചി. Use നിങ്ങൾ, never നീ.
+- Address the customer exactly as the reply does ("സാർ"/"മാഡം" or nothing); never by name, never ചേട്ടാ/ചേച്ചി. Use നിങ്ങൾ, never നീ.
 - Keep the question the reply asks, if it asks one; never add a question of your own.
 Bad (stiff): "ഇന്ധന ഉപയോഗം കുറവാണ്, സർവീസ് ചെലവ് കുറവാണ്." Good (spoken): "മൈലേജ് നല്ലതാ... സർവീസ് ചെലവും കുറവാ."
 Rules:

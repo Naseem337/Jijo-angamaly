@@ -100,7 +100,10 @@ local `.env` override can't change test results.
     the user missed).
   - If port 8000 is busy, check for an old `uvicorn --reload` and its `spawn_main` child process.
 - `scripts/send_test_message.ps1` sends a test text from the test number.
-- **AI provider now: Groq free tier (2026-10-21).** Google blocked the Gemini account ("project denied access",
+- **AI brain now: `LLM_CHAIN=gemini,groq` (2026-10-21, later).** The user's new Google project works for chat and the Algenib
+  voice; Groq's free models wrote garbled Malayalam ("Santoor" for Santro), so Gemini 3.5 Flash is first and Groq
+  gpt-oss-120b is the fallback (the 20b backup is dropped). Set the same `LLM_CHAIN` on Render. See docs/VOICE_AND_REPLY_RULES.md §12.
+- **Earlier today: Groq free tier (2026-10-21).** Google blocked the Gemini account ("project denied access",
   and a new key in a new project was blocked too), so Gemini chat AND the Algenib voice are gone for now.
   - `.env`: `GROQ_API_KEY`, `LLM_CHAIN=groq,groq_backup`, `GROQ_MODEL=openai/gpt-oss-120b`,
     `GROQ_BACKUP_MODEL=openai/gpt-oss-20b`. Both write good Malayalam; `qwen/qwen3.8-27b` wrote gibberish Malayalam.
@@ -153,9 +156,8 @@ local `.env` override can't change test results.
   - **Voice reply rules (user, 2026-10-20, superseded by v2 above):** a voice note in gets a voice note out with **no duplicate text**.
     When the reply has car data (search_cars / get_car_details / emi_estimate were used), the text is sent too
     and the voice summarises. If the voice fails, the text is sent instead.
-  - **Address (user, 2026-10-21, replaces the 2026-10-20 sir/madam rule):** NO address words at all. Never
-    the name, never sir/madam (no gender guessing), never chetta/chechi. The profile name is no longer sent to
-    the AI. Code also enforces it: `without_names` + `without_titles` in agent.py clean every reply and voice script.
+  - **Address (user, 2026-10-21, final): sir/madam only when it is clear** (the profile name is a hint in the turn
+    context, never written), now and then; never the name, never chetta/chechi. `without_names` strips names from every reply.
   - **24/7 (user, 2026-10-21):** the bot never brings up showroom hours or "closed now" unless the customer asks
     about timings or is picking a visit time (turn_context marks hours as background only).
   - **Voice rules (user, 2026-10-19, to cut cost):** voice only when the customer sent a voice note AND

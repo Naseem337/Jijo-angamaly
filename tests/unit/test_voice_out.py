@@ -262,7 +262,7 @@ def test_truechoice_voice_order(clients_dir) -> None:
 def test_human_voice_script_instruction_has_spoken_style_and_no_address_words() -> None:
     from app.agent.spoken import SPOKEN_INSTRUCTION
     ml = SPOKEN_INSTRUCTION["ml"]
-    assert "NOT reading a notice" in ml and "മൈലേജ് നല്ലതാ" in ml and "never സാർ/മാഡം" in ml
+    assert "NOT reading a notice" in ml and "മൈലേജ് നല്ലതാ" in ml and "never ചേട്ടാ/ചേച്ചി" in ml
 
 
 @pytest.mark.parametrize(("text", "expected"), [

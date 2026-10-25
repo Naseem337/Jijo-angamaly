@@ -117,3 +117,12 @@ def test_neutral_messages_keep_the_customers_language(text: str) -> None:
 def test_reply_language_problem(reply: str, language: str, wrong: bool) -> None:
     from app.core.language import reply_language_problem
     assert (reply_language_problem(reply, language) is not None) == wrong
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("👍", True), ("🙏🙏", True), ("❤️", True), ("👍 👍", True), ("😊!", True),
+    ("?", False), ("2019", False), ("ok 👍", False), ("ശരി 🙏", False), ("", False), ("   ", False),
+])
+def test_is_emoji_only(text: str, expected: bool) -> None:
+    from app.core.language import is_emoji_only
+    assert is_emoji_only(text) is expected

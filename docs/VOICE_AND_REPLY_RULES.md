@@ -37,11 +37,14 @@ Pattambi, Cochin). The bot is True Choice's virtual assistant and never names th
   (e.g. "voice itt paray" = "answer my last question as a voice note").
 - Handle ANY message a Malayali customer might send, with general rules, not one-off fixes for single messages.
 
-## 3. How the bot addresses the customer (code: `without_names`, `without_titles` in `app/agent/agent.py`)
+## 3. How the bot addresses the customer (code: `without_names` in `app/agent/agent.py`; prompt + `turn_context`)
 
-- **No address words at all.** Never the customer's name (not even "Hi Danish"). Never sir/madam: do not guess gender.
-  Never chetta / chechi / bro / macha / ikka. Politeness comes from the words (ningal), not titles.
-- The WhatsApp profile name is not sent to the AI. Code strips any name, sir or madam from every reply and voice script.
+- **Final rule (user, 2026-10-21, after changing their mind twice): detect sir/madam and use it, only when it is clear.**
+  The WhatsApp profile name goes into the turn context ONLY as a hint to tell sir from madam, or the customer says it
+  themselves. Use it now and then, not in every message. If it isn't clear, use no address word. Never guess the wrong one.
+- **Never the customer's name** (not even "Hi Danish"); code strips it from every reply and voice script (`without_names`).
+- Never chetta / chechi / bro / macha / ikka.
+- Politeness comes from "ningal" / നിങ്ങൾ, never "nee" / നീ.
 
 ## 4. Timings: the bot is 24/7 (prompt: `turn_context` in `app/agent/prompts.py`)
 
@@ -123,3 +126,47 @@ Pattambi, Cochin). The bot is True Choice's virtual assistant and never names th
 - Every car True Choice sells is **pre-owned**; never say or imply a car is new.
 - If the data doesn't show something, or the customer is still unsure or confused: say plainly that **the salesman will
   contact them and confirm**, and hand off (`handoff_to_human`). Never fill a gap with a guess.
+
+## 11. Say nothing to emojis, reactions and stickers (user, 2026-10-21)
+
+- A message that is only an emoji (👍, 🙏, ❤️), a WhatsApp **reaction** or a **sticker** gets **no reply at all**: no read receipt
+  line, no "I only understand text and voice" message, no AI call. The message is just stored.
+  Code: `is_emoji_only` in `app/core/language.py`, `SILENT_TYPES` in `app/conversation/router.py` (outcome `ignored`).
+- The polite "text or voice please" line stays only for images, videos, documents and other media.
+- Exception: if a voice read-back is waiting for a yes, an emoji goes to the agent.
+
+## 12. The AI brain must write sensible Malayalam (user, 2026-10-21)
+
+- Live failure: for "santro" the bot sent Malayalam nonsense ("സാൻഡ് റൗണ്ട് എതാണെന്ന് പറയാമോ?...") because the free **Groq** models garble
+  Malayalam (one read Santro as "Santoor", the 20b backup didn't even search). **Gemini 3.5 Flash** answered correctly.
+- So the brain order is **`LLM_CHAIN=gemini,groq`** (Gemini first, Groq gpt-oss-120b as the fallback; the weak 20b backup is dropped).
+  Gemini costs about ₹2 per customer message and takes about 9 s; the user accepts this for quality.
+- If a model's Malayalam looks wrong, test with `python -m app.providers.llm --client truechoice --each` and a few real
+  questions before changing the chain. Never let a weak model answer customers.
+- A car that is not in stock: say so plainly, offer similar cars, and offer to alert them when one arrives (the LEAD flow).
+
+## 13. Where every setting lives (so a new model does not start from scratch)
+
+| What | Where |
+|---|---|
+| Persona (Anees), city, languages | `clients/truechoice/client.yaml` (`bot_name`, `city`, `languages`) |
+| Dialect, politeness, tone | `clients/truechoice/business_rules.yaml` → `speaking_style` |
+| Dealer facts the bot may state (Sunday closed, exchange, test drives, buys cars, showrooms, loans) | `business_rules.yaml` → `dealer_facts` |
+| The sales prompt, how to think, selling flow, stock rules, situations, handoff | `app/agent/prompts.py` (`build_system_prompt`) |
+| Per-turn facts (language, 24/7, hours-only-when-asked, profile name hint) | `turn_context` in `app/agent/prompts.py` |
+| Reply checks: wrong language, names, placeholders, guessing, unsourced numbers | `app/agent/agent.py`, `app/agent/guardrails.py`, `app/core/language.py` |
+| Voice script wording and the "cars: names and prices only" rule | `app/agent/spoken.py` |
+| When to send voice, list-first order, emoji silence | `app/conversation/router.py`, `voice_out.py` |
+| Voice engine, order, speed | `client.yaml` → `providers.tts` (Gemini Algenib), `tts_backup` (Sarvam anand) |
+| AI brain order | `.env` `LLM_CHAIN` (and the same variable on Render) |
+| Costs and hosting decisions | `CLAUDE.md` |
+
+## 14. When the bot doesn't understand: short and human, never an essay (user, 2026-10-21)
+
+- Say it in ONE short casual line, like WhatsApp chat: "മനസ്സിലായില്ല, ഒന്നൂടെ പറയാമോ?" / "manasilayilla, onnu koodi parayamo?" /
+  "Didn't get that, say it again?". No apology paragraph, no formal sentences, and never guess what they meant.
+- The fixed system lines follow the same style (code: `FALLBACK_REPLY` / `TECHNICAL_ISSUE_REPLY` in `prompts.py`,
+  `VOICE_PROBLEM_REPLY` in `voice_in.py`, `UNSUPPORTED_REPLY` in `router.py`). Live bad example: "ക്ഷമിക്കണം, എനിക്ക് ടെക്സ്റ്റ്, വോയ്‌സ്
+  മെസ്സേജുകൾ മാത്രമേ മനസ്സിലാകൂ. ദയവായി ടൈപ്പ് ചെയ്യുകയോ പറയുകയോ ചെയ്യാമോ?"
+- The grey microphone beside the customer's own voice note turns blue only when the receiver PLAYS it. The WhatsApp Cloud API
+  lets a bot send blue ticks (`mark_read`) but has no call to mark a voice note as played, so the bot cannot change it.

@@ -195,10 +195,10 @@ def test_voice_note_is_transcribed_and_answered(env, stt) -> None:
 
 
 @pytest.mark.parametrize(("result", "expected"), [
-    (Transcript("", "ml-IN", 0.9), "couldn't hear that clearly"),
-    (Transcript("hmm", None, 0.2), "couldn't hear that clearly"),
-    (STTError("too long", too_long=True), "too long"),
-    (STTError("Sarvam HTTP 500"), "can't process voice messages"),
+    (Transcript("", "ml-IN", 0.9), "Didn't catch that"),
+    (Transcript("hmm", None, 0.2), "Didn't catch that"),
+    (STTError("too long", too_long=True), "a bit long"),
+    (STTError("Sarvam HTTP 500"), "Can't play voice notes"),
 ])
 def test_voice_problems_get_a_helpful_reply(env, stt, result, expected) -> None:
     client, llm, repo, sent = env
@@ -212,7 +212,7 @@ def test_voice_problems_get_a_helpful_reply(env, stt, result, expected) -> None:
 def test_voice_without_speech_to_text_key_asks_to_type(env_without_stt) -> None:
     client, llm, _, sent = env_without_stt
     post(client, payload(VOICE))
-    assert llm.calls == [] and "type your question" in sent_bodies(sent)[-1]["text"]["body"]
+    assert llm.calls == [] and "can you type it" in sent_bodies(sent)[-1]["text"]["body"]
 
 
 def test_images_get_text_or_voice_reply(env) -> None:
@@ -220,7 +220,7 @@ def test_images_get_text_or_voice_reply(env) -> None:
     image = {"from": "919847012345", "id": "wamid.i", "timestamp": "1792219612", "type": "image",
              "image": {"id": "media-2", "mime_type": "image/jpeg"}}
     post(client, payload(image))
-    assert llm.calls == [] and "text and voice messages" in sent_bodies(sent)[0]["text"]["body"]
+    assert llm.calls == [] and "send text or a voice note" in sent_bodies(sent)[0]["text"]["body"]
 
 
 def test_failed_send_does_not_crash(env) -> None:
@@ -276,7 +276,7 @@ def test_voice_note_gets_voice_only_reply(env_with_voice, stt) -> None:
     bodies = sent_bodies(sent)
     assert [b.get("type", "read") for b in bodies] == ["read", "audio"]  # no duplicate text
     assert bodies[1]["audio"] == {"id": "uploaded-voice", "voice": True}
-    assert tts.calls == [("ഇല്ല, ഞായറാഴ്ച അവധിയാണ്. തിങ്കളാഴ്ച മുതൽ വരാം.", "ml-IN")]  # no സാർ
+    assert tts.calls == [("ഇല്ല സാർ, ഞായറാഴ്ച അവധിയാണ്. തിങ്കളാഴ്ച മുതൽ വരാം.", "ml-IN")]
     assert "WHOLE reply" in llm.calls[1].system  # the voice says everything
 
 
@@ -302,15 +302,16 @@ def test_failed_voice_note_falls_back_to_text(env_with_voice, stt) -> None:
     post(client, payload(VOICE))
     bodies = sent_bodies(sent)
     assert [b.get("type", "read") for b in bodies] == ["read", "text"]
-    assert bodies[1]["text"]["body"] == "Sunday closed aanu."  # never sir/madam
+    assert bodies[1]["text"]["body"] == "Sunday closed aanu sir."
 
 
-def test_no_name_and_no_sir_or_madam(env, stt) -> None:
+def test_profile_name_is_a_hint_for_sir_or_madam_but_never_written(env, stt) -> None:
     client, llm, _, sent = env
     llm.script.append(MockLLM.text("Hello Arun sir! Swift undu."))
     post(client, payload(text_msg("Hi")))
-    assert "Arun" not in llm.calls[0].messages[-1].content  # the profile name never reaches the AI
-    assert sent_bodies(sent)[-1]["text"]["body"] == "Hello! Swift undu."  # and is cut if it appears
+    context = llm.calls[0].messages[-1].content
+    assert "WhatsApp profile name Arun (only to tell sir from madam; NEVER write their name" in context
+    assert sent_bodies(sent)[-1]["text"]["body"] == "Hello sir! Swift undu."  # the name is cut, sir stays
 
 
 def test_text_message_gets_text_only(env_with_voice) -> None:
@@ -355,3 +356,28 @@ def test_failed_voice_after_the_car_list_sends_only_the_rest_of_the_text(env_wit
     texts = [b["text"]["body"] for b in sent_bodies(sent) if b.get("type") == "text"]
     assert texts == ["*2021 Maruti Suzuki Swift ZXi AMT* · ₹6,95,000 (TC-1002)",
                      "Undu, 7 lakh-inu thazhe Swift und:\nIthil ethu venam?"]  # the list is never sent twice
+
+
+@pytest.mark.parametrize("message", [
+    text_msg("👍"),
+    text_msg("🙏🙏"),
+    text_msg("❤️"),
+    {"from": "919847012345", "id": "wamid.1", "timestamp": "1792219612", "type": "reaction",
+     "reaction": {"message_id": "wamid.out", "emoji": "👍"}},
+    {"from": "919847012345", "id": "wamid.1", "timestamp": "1792219612", "type": "sticker",
+     "sticker": {"id": "stk1", "mime_type": "image/webp"}},
+])
+def test_emoji_reaction_or_sticker_gets_no_reply(env, message) -> None:
+    client, llm, repo, sent = env
+    post(client, payload(message))
+    assert sent_bodies(sent) == []  # no answer, not even a read receipt or an "I only understand text" line
+    assert llm.calls == []  # and no AI tokens spent
+    [stored] = repo.list_messages("truechoice", CUSTOMER)
+    assert stored.direction == "in"
+
+
+def test_a_picture_still_gets_the_polite_text_or_voice_line(env) -> None:
+    client, llm, repo, sent = env
+    post(client, payload({"from": "919847012345", "id": "wamid.1", "timestamp": "1792219612", "type": "image",
+                          "image": {"id": "img1", "mime_type": "image/jpeg"}}))
+    assert len(sent_bodies(sent)) == 1 and "text" in sent_bodies(sent)[0]

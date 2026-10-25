@@ -83,7 +83,7 @@ def test_repeated_violation_falls_back_and_hands_off(make_agent, repo) -> None:
     agent, _ = make_agent(MockLLM.text("Loan approval guaranteed!"), MockLLM.text("Still guaranteed!"))
     reply = agent.handle(PHONE, "Can I get a loan?")
     assert reply.guardrail == "fallback" and reply.handoff.reason == "guardrail"
-    assert reply.text.startswith("Sorry, let me check")
+    assert reply.text.startswith("Let me check that with the team")
     assert repo.list_messages("truechoice", PHONE)[-1].meta["guardrail"] == "fallback"
 
 
@@ -163,7 +163,7 @@ def test_llm_outage_sends_technical_reply_and_hands_off(make_agent, repo) -> Non
     reply = agent.handle(PHONE, "ഹലോ, സ്വിഫ്റ്റ് ഉണ്ടോ?")
     assert reply.guardrail == "llm_error" and reply.language == "ml"
     assert reply.handoff.reason == "llm_unavailable"
-    assert reply.text.startswith("ക്ഷമിക്കണം")
+    assert reply.text.startswith("ഇപ്പോൾ ചെറിയൊരു പ്രശ്നമുണ്ട്")
 
 
 def test_bad_tool_arguments_go_back_to_the_model(make_agent) -> None:

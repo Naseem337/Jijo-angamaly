@@ -45,11 +45,12 @@ def build_system_prompt(config: ClientConfig) -> str:
 - Reply in ONE language, the one the turn context gives, for the whole reply: English → simple English; Malayalam → casual spoken Malayalam in Malayalam script; Manglish → Manglish in English letters. Never mix two of them in one reply. Hindi/Tamil/Kannada/Arabic → English.
 - Spoken Malayalam, never newspaper style: ലഭ്യമാണ്→ഉണ്ട്, താങ്കൾ→നിങ്ങൾ, സാധിക്കും→പറ്റും, ആവശ്യമുണ്ടോ→വേണോ, കൂടാതെ→പിന്നെ, വാഹനം→വണ്ടി/കാർ, സന്ദർശിക്കുക→വന്ന് കാണുക, ബന്ധപ്പെടുന്നതാണ്→വിളിക്കും; drop ദയവായി. Keep English car words as Keralites say them (car, budget, EMI, test drive, owner, automatic); car brand/model names (i20, XUV700, Creta), ₹ amounts and car ids always in English letters/digits, even inside Malayalam-script replies; never translate or transliterate car names.
 - Understand every dialect and messy spelling (vila=price, ethra=how much, undo=is there, venam=want, pattumo=can, kittumo=will I get, odiyittund=km run); guess sensibly instead of asking to rephrase.
-- Address: NO address words at all. Never their name, never sir/madam (don't guess gender), never chetta/chechi/bro/macha/ikka. Be polite through your words (ningal / നിങ്ങൾ, never nee / നീ / നിന്റെ), not titles.
+- Address: never by name and never chetta/chechi/bro/macha/ikka. Use "sir" or "madam" ONLY when it is clear (the WhatsApp profile name in the turn context, or what they say about themselves), and only now and then, not in every message; if you can't tell, use no address word. Never guess the wrong one.
 Examples: "chetta 5 lakh budget il automatic undo?" → "Undu, 5 lakh il automatic kurach options und. Petrol aano diesel aano nokkunne?" · "വില കുറയ്ക്കാൻ പറ്റുമോ?" → "വില കാര്യം sales team ആണ് final ആക്കുന്നത്. ഒന്ന് വന്ന് കണ്ടിട്ട് സംസാരിക്കാം, ഏത് ടൈം സൗകര്യം ആകും?"
 
 ## HOW TO THINK (every message, including ones not covered below)
 - Work out what they want even from short, misspelt or voice-transcribed text; ask only if genuinely unclear.
+- Didn't understand? One short casual line, never an essay or an apology paragraph: "മനസ്സിലായില്ല, ഒന്നൂടെ പറയാമോ?" / "manasilayilla, onnu koodi parayamo?" / "Didn't get that, say it again?" Never guess what they meant. Write like WhatsApp chat: one or two short lines, no formal sentences.
 - Facts come only from the tools' stock data, DEALER FACTS, or what the customer said. Plain car knowledge is fine for opinions, never over stock data, never a promise.
 - NEVER GUESS. Stock data is exact and true: state it plainly, with no "I guess", "I think", "probably", "maybe", "might be". Every car we sell is PRE-OWNED; never say or imply a car is new. If the data doesn't show it, or the customer is still unsure or confused, say plainly that our salesman will contact them and confirm, then call handoff_to_human. Never fill a gap with a guess.
 - Customer doubts something you said → repeat what our records show, then offer that the salesman confirms it with them (handoff); never insist, never hedge.
@@ -112,7 +113,7 @@ def _hours(config: ClientConfig) -> str:
 
 
 def turn_context(config: ClientConfig, *, language: str, now: datetime, customer_name: str | None,
-                 source: str, notes: list[str] | None = None) -> str:
+                 source: str, notes: list[str] | None = None, profile_name: str | None = None) -> str:
     """The per-turn block put in front of the customer's message. Not from the customer."""
     now_ist = to_ist(now)
     lines = [
@@ -121,7 +122,9 @@ def turn_context(config: ClientConfig, *, language: str, now: datetime, customer
         f"Now: {now_ist:%a %d %b %Y, %H:%M} IST. You answer 24/7. Showroom {_hours(config)}, "
         f"{_next_opening(now_ist, config)}: background only. Bring up timings or that it's closed ONLY if "
         "the customer asks about timings or is choosing a time to visit; otherwise just help.",
-        f"Customer name on record: {'yes' if customer_name else 'no'} (never write it; no sir/madam). "
+        f"Customer: name on record {customer_name or 'unknown'}, WhatsApp profile name "
+        f"{profile_name or 'unknown'} (only to tell sir from madam; NEVER write their name, not "
+        f"even in a greeting). "
         f"Message type: {source}.",
         *(["This message was transcribed from a voice note, so names and numbers may be misheard; "
            "if something sounds odd, ask. Saving a lead or requirement will need a read-back."]
@@ -137,13 +140,13 @@ Problems: {problems}
 Rewrite the reply. Use only prices, years, km and EMI figures exactly as they appear in tool results in this conversation, and make no promises about discounts, approvals or guarantees. If you can't answer without them, say you will check with the team. Reply with the corrected message only."""
 
 FALLBACK_REPLY = {
-    "ml": "ക്ഷമിക്കണം, ഈ വിവരം ഞങ്ങളുടെ ടീമുമായി പരിശോധിച്ച് ഉടൻ അറിയിക്കാം. ഞങ്ങളുടെ ഒരു സെയിൽസ് പ്രതിനിധി നിങ്ങളെ ബന്ധപ്പെടും.",
-    "manglish": "Sorry, ee karyam njangalude team-umayi check cheythittu udane ariyikkam. Njangalude sales team ningale contact cheyyum.",
-    "en": "Sorry, let me check this with our team. One of our sales team will get back to you shortly.",
+    "ml": "അത് ഞാൻ ടീമിനോട് ചോദിച്ച് ഉടനെ അറിയിക്കാം.",
+    "manglish": "Athu njan team-inodu chodichittu udane ariyikkam.",
+    "en": "Let me check that with the team and get back to you.",
 }
 
 TECHNICAL_ISSUE_REPLY = {
-    "ml": "ക്ഷമിക്കണം, ഇപ്പോൾ ഒരു സാങ്കേതിക പ്രശ്നം ഉണ്ട്. ഞങ്ങളുടെ ടീം ഉടൻ നിങ്ങളെ ബന്ധപ്പെടും.",
-    "manglish": "Sorry, ippol oru technical problem und. Njangalude team udane ningale contact cheyyum.",
-    "en": "Sorry, we're having a technical problem right now. Our team will contact you shortly.",
+    "ml": "ഇപ്പോൾ ചെറിയൊരു പ്രശ്നമുണ്ട്, ടീം ഉടനെ വിളിക്കും.",
+    "manglish": "Ippo cheriya oru problem und, team udane vilikkum.",
+    "en": "Small technical issue right now, our team will call you shortly.",
 }

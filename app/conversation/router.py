@@ -23,7 +23,7 @@ from app.conversation.photos import PhotoSender
 from app.conversation.voice_out import VoiceOut
 from app.core.client_config import ClientConfig
 from app.core.clock import Clock
-from app.core.language import classify_confirmation, is_opt_in, is_opt_out
+from app.core.language import classify_confirmation, is_emoji_only, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.handoff.handoff import HandoffService
 from app.handoff.staff_commands import StaffCommands
@@ -35,13 +35,15 @@ from app.whatsapp.parse import InboundMessage
 
 log = logging.getLogger(__name__)
 
-Outcome = Literal["duplicate", "staff_command", "opted_out", "opted_in", "lead_consent", "paused",
+Outcome = Literal["duplicate", "staff_command", "opted_out", "opted_in", "lead_consent", "paused", "ignored",
                   "unsupported", "voice_problem", "replied", "send_failed"]
 
+SILENT_TYPES = frozenset({"reaction", "sticker"})  # never answered
+
 UNSUPPORTED_REPLY = {
-    "ml": "ക്ഷമിക്കണം, എനിക്ക് ടെക്സ്റ്റ്, വോയ്‌സ് മെസ്സേജുകൾ മാത്രമേ മനസ്സിലാകൂ. ദയവായി ടൈപ്പ് ചെയ്യുകയോ പറയുകയോ ചെയ്യാമോ?",
-    "manglish": "Sorry, enikku text-um voice message-um mathrame manasilaakoo. Onnu type cheyyukayo parayukayo cheyyamo?",
-    "en": "Sorry, I can only understand text and voice messages. Could you type or say your question?",
+    "ml": "ഇത് തുറക്കാൻ പറ്റില്ല, ടെക്സ്റ്റോ വോയ്‌സോ അയക്കാമോ?",
+    "manglish": "Ithu enikku kaanan pattilla, text-o voice-o ayakkamo?",
+    "en": "I can't open this, can you send text or a voice note?",
 }
 
 
@@ -87,6 +89,11 @@ class MessageRouter:
                 return "staff_command" if self._send(phone, staff_reply, store=True) else "send_failed"
 
         customer = self.repo.get_or_create_customer(cid, phone, now)
+        if msg.type in SILENT_TYPES or (msg.is_text and is_emoji_only(msg.text)
+                                        and not self.repo.get_pending_action(cid, phone)):
+            # A reaction, sticker or lone emoji needs no answer (user, 2026-10-21): keep a record, say nothing.
+            self.repo.add_message(Message(cid, phone, "in", msg.text or f"[{msg.type}]", now, id=msg.id))
+            return "ignored"
         if msg.is_text and (outcome := self._keywords(customer, msg.text, msg.id, now, "text")):
             return outcome
         if customer.bot_paused and not (self.handoff and self.handoff.resume_if_due(customer, now)):
