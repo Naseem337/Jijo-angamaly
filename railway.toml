@@ -1,0 +1,11 @@
+# Railway settings: build the Dockerfile, check /health, restart if it crashes.
+# The database lives on a volume mounted at /data (add it in the Railway dashboard).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
