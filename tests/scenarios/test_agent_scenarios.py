@@ -214,3 +214,16 @@ def test_search_results_are_compact_lines(make_agent) -> None:
     agent.handle(PHONE, "15 lakhinu thazhe?")
     cars = tool_result(llm)["cars"]
     assert len(cars) == 3 and all(isinstance(c, str) and " | ₹" in c and " km | " in c for c in cars)
+
+
+def test_voice_then_typed_follow_up_is_one_conversation_with_the_last_reply_whole(make_agent) -> None:
+    car_list = "\n".join(f"*Hyundai Creta {name}* · Diesel · Manual · first owner · good tyres · full service history "
+                         "· Makkaraparamba showroom · test drive possible any day except Sunday"
+                         for name in ("SX", "E", "S"))  # longer than 300 characters, with no figures to source
+    agent, llm = make_agent(MockLLM.text(f"Undu, ithu nokku:\n{car_list}"), MockLLM.text("Message ayachittund, ithaa."))
+    agent.handle(PHONE, "Creta undo?", source="voice")  # a voice note first
+    agent.handle(PHONE, "Evde")  # then a typed follow-up
+    second = llm.calls[1].messages
+    assert [m.role for m in second] == ["user", "assistant", "user"]
+    assert second[0].content == "Creta undo?" and car_list in second[1].content  # the whole list, not cut at 300
+    assert "ONE conversation" in llm.calls[1].system and "refers to YOUR LAST message" in llm.calls[1].system

@@ -170,3 +170,25 @@ Pattambi, Cochin). The bot is True Choice's virtual assistant and never names th
   മെസ്സേജുകൾ മാത്രമേ മനസ്സിലാകൂ. ദയവായി ടൈപ്പ് ചെയ്യുകയോ പറയുകയോ ചെയ്യാമോ?"
 - The grey microphone beside the customer's own voice note turns blue only when the receiver PLAYS it. The WhatsApp Cloud API
   lets a bot send blue ticks (`mark_read`) but has no call to mark a voice note as played, so the bot cannot change it.
+
+## 15. Sell like a good salesman: understand the customer, make them want to keep talking (user, 2026-10-25)
+
+- Read the customer's behaviour: browsing or ready to buy, price-sensitive, family, first-time buyer, hurried, doubtful. Match their pace
+  and length; polite, warm, easy words, no jargon.
+- Pick up their need, say in one line why a car suits THAT need (real facts only), then ONE easy next step or question, so they keep talking.
+- Build interest honestly (single owner, low km, recent, automatic, fits the budget). Never invent urgency or scarcity, never pressure, never promise.
+- Prompt section: "READ THE CUSTOMER, SELL LIKE A GOOD SALESMAN" in `app/agent/prompts.py`.
+
+## 16. Voice and typed messages are ONE conversation (user, 2026-10-25)
+
+- Live failure: the customer got a voice reply ("vivarangal message il ayachittund"), the text didn't arrive, they typed "Evde" and the bot
+  restarted with "car type, budget, fuel etc venam?". A voice note and a typed message continue each other; a short follow-up
+  ("evde", "ithu", "athu", "ok") refers to the bot's LAST message; if the customer says they didn't get the details/photo/message, send them again.
+- Code: the last two messages go to the AI almost whole (`RECENT_CHARS` 1200; older ones 300), voice transcripts and typed messages share one history.
+- **Free Render wipes its database whenever it sleeps or redeploys, which also erases the conversation memory.** Test multi-turn chats without
+  long gaps, and don't push code mid-test. A persistent disk (Railway volume, a paid Render disk or a small VPS) fixes it.
+
+## 17. How to keep this file useful
+
+Whenever the user gives a new instruction about how the bot talks, sounds or behaves, add it here (section, date, the live failure that
+caused it, and the code that enforces it) so a new model or session does not start from scratch.

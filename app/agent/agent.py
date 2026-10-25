@@ -82,6 +82,7 @@ def plain_dashes(text: str) -> str:
 
 MAX_TOOL_ROUNDS = 5
 HISTORY_CHARS = 300
+RECENT_CHARS = 1200  # the last two messages stay (nearly) whole: the customer is almost always answering them
 DATA_TOOLS = frozenset({"search_cars", "get_car_details", "emi_estimate"})
 MAX_REPLY_TOKENS = 700
 
@@ -171,9 +172,11 @@ class Agent:
         history = [m for m in history if not m.meta.get("voice_note")]  # voice copies of text replies
         # Old replies are cut to HISTORY_CHARS: a car list from 6 messages ago costs tokens on every
         # call but rarely matters (the agent can search again; guardrails still see the full text).
+        # The last two messages are kept whole, so "evde?" right after a car list still has that list.
         messages = [ChatMessage("user" if m.direction == "in" else "assistant",
-                                m.text if len(m.text) <= HISTORY_CHARS else m.text[:HISTORY_CHARS] + "…")
-                    for m in history]
+                                m.text if len(m.text) <= (RECENT_CHARS if i >= len(history) - 2 else HISTORY_CHARS)
+                                else m.text[:RECENT_CHARS if i >= len(history) - 2 else HISTORY_CHARS] + "…")
+                    for i, m in enumerate(history)]
         if messages and messages[0].role == "assistant":  # we wrote first, e.g. a car alert: keep it
             messages.insert(0, ChatMessage.user("(earlier conversation)"))
         messages.append(ChatMessage.user(f"{context}\n{text}"))
