@@ -10,9 +10,9 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-BOOKING_STATUSES = ("hold", "paid", "failed", "expired", "cancelled")
+BOOKING_STATUSES = ("hold", "paid", "checked_in", "checked_out", "failed", "expired", "cancelled")
 # Statuses that keep rooms blocked. A hold only blocks until hold_expires_at.
-BLOCKING = ("hold", "paid")
+BLOCKING = ("hold", "paid", "checked_in", "checked_out")
 
 
 def new_id(prefix: str) -> str:
@@ -88,6 +88,15 @@ class Booking:
     payment_link_id: str = ""
     payment_link_url: str = ""
     razorpay_payment_id: str = ""
+    payment_method: str = ""  # online (Razorpay) | cash | upi | card | bank_transfer
+    payment_ref: str = ""  # transaction / receipt / UTR number
+    amount_paid: int = 0  # rupees actually received so far
+    payment_note: str = ""
+    received_by: str = ""  # staff email for cash / manual payments
+    checked_in_at: datetime | None = None
+    checked_out_at: datetime | None = None
+    room_numbers: str = ""  # physical rooms given at check-in, e.g. "101, 102"
+    cancel_reason: str = ""
     notes: str = ""
     id: str = field(default_factory=lambda: new_id("RB"))
 
@@ -96,8 +105,14 @@ class Booking:
         return (self.check_out - self.check_in).days
 
     @property
+    def paid_amount(self) -> int:
+        """Rupees received so far (older paid bookings didn't store it: they paid the advance)."""
+        return self.amount_paid or (self.advance if self.status == "paid" else 0)
+
+    @property
     def balance(self) -> int:
-        return self.total - self.advance if self.status == "paid" else self.total
+        """Still to pay at the property."""
+        return max(self.total - self.paid_amount, 0)
 
 
 @dataclass
@@ -128,3 +143,48 @@ class DashboardUser:
     role: str = "owner"  # owner | manager
     property_ids: list[str] = field(default_factory=list)  # empty = all properties
     active: bool = True
+
+
+CHARGE_CATEGORIES = ("food", "activity", "laundry", "extra_bed", "transport", "other")
+
+
+@dataclass
+class Charge:
+    """An extra on the guest's bill (food, activity, laundry...). Room rent is the booking total."""
+
+    booking_id: str
+    description: str
+    amount: int  # rupees, always positive
+    at: datetime
+    category: str = "other"
+    added_by: str = ""
+    id: str = field(default_factory=lambda: new_id("CH"))
+
+
+@dataclass
+class Refund:
+    booking_id: str
+    amount: int  # rupees
+    at: datetime
+    method: str = "cash"  # cash | upi | bank_transfer | online
+    ref: str = ""
+    note: str = ""
+    by: str = ""
+    id: str = field(default_factory=lambda: new_id("RF"))
+
+
+@dataclass
+class IdProof:
+    """A guest's ID photo sent on WhatsApp. `data` is the image; only the last 4 digits are kept as text."""
+
+    booking_id: str
+    guest_no: int  # 1 = lead guest, 2 = next adult ...
+    id_type: str  # aadhaar | passport | driving_licence | voter_id | other | later
+    received_at: datetime
+    last4: str = ""
+    mime: str = ""
+    data: bytes = b""
+    status: str = "received"  # received | verified | rejected | pending (promised for check-in)
+    verified_by: str = ""
+    delete_after: date | None = None
+    id: str = field(default_factory=lambda: new_id("ID"))

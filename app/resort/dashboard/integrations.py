@@ -35,3 +35,18 @@ def send_staff_text(phone: str, text: str) -> str | None:
     except Exception as exc:  # noqa: BLE001
         log.warning("send_text failed: %s", exc)
         return f"Could not send: {exc}"
+
+
+def announce_paid(booking: Booking) -> str | None:
+    """Confirm a desk-recorded payment to the guest on WhatsApp and alert staff.
+    Returns a note for staff if the guest could not be messaged, or None on success."""
+    import os
+    if not (os.environ.get("RESORT_WHATSAPP_PHONE_NUMBER_ID") and os.environ.get("RESORT_WHATSAPP_ACCESS_TOKEN")):
+        return "WhatsApp is not connected, so the guest was not messaged"
+    try:
+        from app.resort.services import get_services
+        get_services().bot.announce_paid(booking)
+        return None
+    except Exception as exc:  # noqa: BLE001 - the payment is already saved; just tell staff
+        log.warning("announce_paid failed: %s", exc)
+        return f"Saved, but the guest could not be messaged: {exc}"

@@ -69,3 +69,66 @@
     ta.addEventListener('input', upd); upd();
   });
 })();
+
+// Sidebar: property switcher (remembered in a cookie) and the phone menu.
+var closeDrawer = function () {};
+(function () {
+  var scope = document.getElementById('scope');
+  if (scope) scope.addEventListener('change', function () {
+    document.cookie = 'rp=' + encodeURIComponent(scope.value) + '; path=/resort/admin; max-age=31536000; samesite=lax';
+    var u = new URL(location.href); u.searchParams.delete('property_id'); u.searchParams.delete('room_type_id'); location.href = u;
+  });
+  var sb = document.getElementById('sidebar'), scrim = document.getElementById('scrim'), mb = document.getElementById('menu-btn');
+  function menu(open) { if (sb) sb.classList.toggle('open', open); if (scrim) scrim.classList.toggle('show', open); }
+  if (mb) mb.addEventListener('click', function () { menu(!sb.classList.contains('open')); });
+  if (scrim) scrim.addEventListener('click', function () { menu(false); });
+  // "/" jumps to the search box, like in Frappe.
+  document.addEventListener('keydown', function (e) {
+    var t = e.target, typing = t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
+    if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey) {
+      var s = document.getElementById('global-search'); if (s) { e.preventDefault(); s.focus(); s.select(); }
+    }
+    if (e.key === 'Escape') { menu(false); closeDrawer(); }
+  });
+})();
+
+// Copy buttons, dialogs and quick amounts.
+(function () {
+  function say(msg) {
+    var t = document.getElementById('toast'); if (!t) return;
+    t.textContent = msg; t.className = 'toast show'; setTimeout(function () { t.className = 'toast'; }, 1800);
+  }
+  document.addEventListener('click', function (e) {
+    var c = e.target.closest('[data-copy]');
+    if (c) {
+      var text = c.dataset.copy;
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { say('Copied'); });
+      else { var a = document.createElement('textarea'); a.value = text; document.body.appendChild(a); a.select(); document.execCommand('copy'); a.remove(); say('Copied'); }
+    }
+    var o = e.target.closest('[data-open]');
+    if (o) { var d = document.getElementById(o.dataset.open); if (d && d.showModal) d.showModal(); }
+    if (e.target.closest('[data-close]')) { var m = e.target.closest('dialog'); if (m) m.close(); }
+    if (e.target.tagName === 'DIALOG') e.target.close();  // a click on the backdrop
+    var q = e.target.closest('[data-amount]');
+    if (q) { var f = document.getElementById('pay-amount'); if (f) f.value = q.dataset.amount; }
+  });
+})();
+
+// Calendar: click a day and the side panel loads that day's bookings (HTML from the server).
+(function () {
+  var grid = document.getElementById('cal-grid'); if (!grid) return;
+  var layout = grid.closest('.cal-layout'), body = document.getElementById('drawer-body'), current = null;
+  var dayUrl = location.pathname.replace(/\/calendar.*$/, '') + '/calendar/day';
+  closeDrawer = function () { layout.classList.remove('open'); if (current) current.classList.remove('sel'); current = null; };
+  grid.addEventListener('click', function (e) {
+    var cell = e.target.closest('.cal-day'); if (!cell) return;
+    e.preventDefault();
+    if (current) current.classList.remove('sel');
+    current = cell; cell.classList.add('sel'); layout.classList.add('open');
+    body.textContent = 'Loading...';
+    var q = new URLSearchParams({ property_id: grid.dataset.prop, room_type_id: grid.dataset.room, date: cell.dataset.date });
+    fetch(dayUrl + '?' + q).then(function (r) { return r.text(); }).then(function (html) { body.innerHTML = html; })
+      .catch(function () { body.textContent = 'Could not load this day.'; });
+  });
+  document.addEventListener('click', function (e) { if (e.target.closest('[data-drawer-close]')) closeDrawer(); });
+})();

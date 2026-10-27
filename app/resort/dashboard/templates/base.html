@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>{% block title %}Resort Desk{% endblock %}</title>
 <link rel="stylesheet" href="{{ BASE }}/static/app.css">
 </head>
@@ -12,6 +13,13 @@
 <div class="shell">
   <aside class="sidebar" id="sidebar">
     <a class="brand" href="{{ BASE }}/"><span class="logo">R</span><span>Resort Desk</span></a>
+    <div class="scope">
+      <label for="scope">Property</label>
+      <select id="scope" data-scope="{{ cur_prop }}">
+        <option value="">All properties</option>
+        {% for sp in side_props %}<option value="{{ sp.id }}" {{ 'selected' if sp.id == cur_prop }}>{{ sp.name }}</option>{% endfor %}
+      </select>
+    </div>
     <nav>
       {% set nav_items = [("home","Home","home",""),("bookings","Bookings","book","/bookings"),("calendar","Calendar","cal","/calendar"),
         ("properties","Properties","building","/properties"),("guests","Guests","users","/guests"),("chats","Conversations","chat","/conversations")] %}
@@ -25,11 +33,12 @@
       {% endif %}
     </nav>
   </aside>
+  <div class="scrim" id="scrim"></div>
   <div class="main">
     <header class="topbar">
-      <button class="menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Menu">{{ icon('menu') }}</button>
+      <button class="menu-btn" id="menu-btn" aria-label="Menu">{{ icon('menu') }}</button>
       <form class="search" action="{{ BASE }}/search" method="get">
-        {{ icon('search') }}<input name="q" placeholder="Search booking, guest, phone" value="{{ q if nav == '' else '' }}">
+        {{ icon('search') }}<input id="global-search" name="q" placeholder="Search booking, guest or phone" value="{{ q if nav == '' else '' }}" autocomplete="off"><kbd>/</kbd>
       </form>
       <div class="user-menu">
         <span class="avatar">{{ (user.name or user.email)[:1]|upper }}</span>

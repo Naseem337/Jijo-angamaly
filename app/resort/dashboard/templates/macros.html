@@ -11,6 +11,12 @@
 {%- elif name == 'menu' %}<path d="M4 7h16M4 12h16M4 17h16"/>
 {%- elif name == 'search' %}<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>
 {%- elif name == 'plus' %}<path d="M12 5v14M5 12h14"/>
+{%- elif name == 'cash' %}<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v.01M18 14.5v.01"/>
+{%- elif name == 'copy' %}<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/>
+{%- elif name == 'x' %}<path d="M6 6l12 12M18 6L6 18"/>
+{%- elif name == 'left' %}<path d="M15 5l-7 7 7 7"/>
+{%- elif name == 'right' %}<path d="M9 5l7 7-7 7"/>
+{%- elif name == 'bolt' %}<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>
 {%- elif name == 'download' %}<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>
 {%- endif %}</svg>
 {%- endmacro %}
@@ -34,4 +40,10 @@
 <label class="field"><span>{{ label }}</span><textarea name="{{ name }}" rows="{{ rows }}">{{ value }}</textarea>{% if hint %}<small>{{ hint }}</small>{% endif %}</label>
 {%- endmacro %}
 
-{% macro empty(text) -%}<div class="empty">{{ text }}</div>{%- endmacro %}
+{% macro empty(text, icon_name='', href='', label='') -%}
+<div class="empty"><span class="empty-ic">{{ icon(icon_name or 'search') }}</span><p>{{ text }}</p>{% if href %}<a class="btn primary" href="{{ href }}">{{ label or 'Add' }}</a>{% endif %}</div>
+{%- endmacro %}
+
+{% macro method_chip(method) -%}
+{% if method %}<span class="mchip m-{{ method }}">{{ METHODS.get(method, method) }}</span>{% else %}<span class="muted">—</span>{% endif %}
+{%- endmacro %}

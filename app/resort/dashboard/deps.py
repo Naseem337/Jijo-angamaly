@@ -13,7 +13,9 @@ from fastapi import HTTPException, Request
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
+from app.core.clock import IST
 from app.resort.db import ResortRepo
+from app.resort.paying import DESK_METHODS, METHODS, method_label
 from app.resort.models import DashboardUser, Property
 from app.settings import PROJECT_ROOT, get_settings
 
@@ -114,7 +116,28 @@ templates.env.filters["rupees"] = lambda n: f"₹{int(n or 0):,}"
 templates.env.filters["urlq"] = lambda s: quote(str(s), safe="")
 
 
+def ist(value: datetime | None, fmt: str = "%d %b %Y, %I:%M %p") -> str:
+    """A stored UTC time shown in Indian time."""
+    return value.astimezone(IST).strftime(fmt).lstrip("0") + " IST" if value else ""
+
+
+templates.env.filters["ist"] = ist
+templates.env.filters["method_label"] = method_label
+templates.env.globals["METHODS"] = METHODS
+templates.env.globals["DESK_METHODS"] = DESK_METHODS
+SCOPE_COOKIE = "rp"  # the property chosen in the sidebar switcher
+
+
+def current_property(request: Request, auth: Auth) -> str:
+    """The property picked in the sidebar ('' = all), only if this user may see it."""
+    chosen = request.cookies.get(SCOPE_COOKIE, "")
+    return chosen if chosen and auth.can_see(chosen) else ""
+
+
 def page(request: Request, name: str, auth: Auth | None, **ctx):
     ctx.setdefault("toast", request.query_params.get("toast", ""))
+    if auth:
+        ctx.setdefault("side_props", auth.properties(get_repo(), active_only=True))
+        ctx.setdefault("cur_prop", current_property(request, auth))
     return templates.TemplateResponse(request, name, {"auth": auth, "user": auth.user if auth else None,
                                                       "csrf": auth.csrf if auth else "", **ctx})

@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from app.resort.availability import free_units
-from app.resort.models import (BLOCKING, Booking, ChatMessage, DashboardUser, Guest, Property, RateRule,
-                               RoomType)
+from app.resort.models import (BLOCKING, Booking, Charge, ChatMessage, DashboardUser, Guest, IdProof, Property,
+                               RateRule, Refund, RoomType)
 
 
 class SoldOut(Exception):
@@ -40,7 +40,10 @@ CREATE TABLE IF NOT EXISTS bookings (
     rooms INTEGER NOT NULL, total INTEGER NOT NULL, advance INTEGER NOT NULL, status TEXT NOT NULL,
     created_at TEXT NOT NULL, hold_expires_at TEXT, paid_at TEXT,
     payment_link_id TEXT NOT NULL DEFAULT '', payment_link_url TEXT NOT NULL DEFAULT '',
-    razorpay_payment_id TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '');
+    razorpay_payment_id TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+    payment_method TEXT NOT NULL DEFAULT '', payment_ref TEXT NOT NULL DEFAULT '', amount_paid INTEGER NOT NULL DEFAULT 0,
+    payment_note TEXT NOT NULL DEFAULT '', received_by TEXT NOT NULL DEFAULT '',
+    checked_in_at TEXT, checked_out_at TEXT, room_numbers TEXT NOT NULL DEFAULT '', cancel_reason TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS bookings_room ON bookings(room_type_id, status);
 CREATE INDEX IF NOT EXISTS bookings_phone ON bookings(guest_phone);
 CREATE TABLE IF NOT EXISTS guests (phone TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
@@ -53,6 +56,14 @@ CREATE TABLE IF NOT EXISTS chat_state (phone TEXT PRIMARY KEY, data TEXT NOT NUL
     paused_at TEXT);
 CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users (email TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS charges (id TEXT PRIMARY KEY, booking_id TEXT NOT NULL, description TEXT NOT NULL,
+    amount INTEGER NOT NULL, at TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'other', added_by TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS refunds (id TEXT PRIMARY KEY, booking_id TEXT NOT NULL, amount INTEGER NOT NULL, at TEXT NOT NULL,
+    method TEXT NOT NULL DEFAULT 'cash', ref TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', by TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS id_proofs (id TEXT PRIMARY KEY, booking_id TEXT NOT NULL, guest_no INTEGER NOT NULL,
+    id_type TEXT NOT NULL, received_at TEXT NOT NULL, last4 TEXT NOT NULL DEFAULT '', mime TEXT NOT NULL DEFAULT '',
+    data BLOB, status TEXT NOT NULL DEFAULT 'received', verified_by TEXT NOT NULL DEFAULT '', delete_after TEXT);
+CREATE INDEX IF NOT EXISTS id_proofs_booking ON id_proofs(booking_id);
 """
 
 
@@ -73,7 +84,11 @@ def _booking(row: sqlite3.Row) -> Booking:
         advance=row["advance"], status=row["status"], created_at=_dt(row["created_at"]),  # type: ignore[arg-type]
         hold_expires_at=_dt(row["hold_expires_at"]), paid_at=_dt(row["paid_at"]),
         payment_link_id=row["payment_link_id"], payment_link_url=row["payment_link_url"],
-        razorpay_payment_id=row["razorpay_payment_id"], notes=row["notes"])
+        razorpay_payment_id=row["razorpay_payment_id"], payment_method=row["payment_method"],
+        payment_ref=row["payment_ref"], amount_paid=row["amount_paid"], payment_note=row["payment_note"],
+        received_by=row["received_by"], checked_in_at=_dt(row["checked_in_at"]),
+        checked_out_at=_dt(row["checked_out_at"]), room_numbers=row["room_numbers"],
+        cancel_reason=row["cancel_reason"], notes=row["notes"])
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
@@ -93,6 +108,13 @@ class ResortRepo:
         self._db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(SCHEMA)
+        have = {r["name"] for r in self._db.execute("PRAGMA table_info(bookings)")}
+        for col, ddl in (("payment_method", "TEXT NOT NULL DEFAULT ''"), ("payment_ref", "TEXT NOT NULL DEFAULT ''"),
+                         ("amount_paid", "INTEGER NOT NULL DEFAULT 0"), ("payment_note", "TEXT NOT NULL DEFAULT ''"),
+                         ("received_by", "TEXT NOT NULL DEFAULT ''"), ("checked_in_at", "TEXT"), ("checked_out_at", "TEXT"),
+                         ("room_numbers", "TEXT NOT NULL DEFAULT ''"), ("cancel_reason", "TEXT NOT NULL DEFAULT ''")):
+            if col not in have:  # databases created before payment details were stored
+                self._db.execute(f"ALTER TABLE bookings ADD COLUMN {col} {ddl}")
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
@@ -209,19 +231,26 @@ class ResortRepo:
         db.execute(
             "INSERT INTO bookings(id, property_id, room_type_id, guest_phone, guest_name, language, check_in, "
             "check_out, adults, children, rooms, total, advance, status, created_at, hold_expires_at, paid_at, "
-            "payment_link_id, payment_link_url, razorpay_payment_id, notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "payment_link_id, payment_link_url, razorpay_payment_id, notes, payment_method, payment_ref, amount_paid, "
+            "payment_note, received_by, checked_in_at, checked_out_at, room_numbers, cancel_reason) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (b.id, b.property_id, b.room_type_id, b.guest_phone, b.guest_name, b.language, b.check_in.isoformat(),
              b.check_out.isoformat(), b.adults, b.children, b.rooms, b.total, b.advance, b.status,
              _iso(b.created_at), _iso(b.hold_expires_at), _iso(b.paid_at), b.payment_link_id, b.payment_link_url,
-             b.razorpay_payment_id, b.notes))
+             b.razorpay_payment_id, b.notes, b.payment_method, b.payment_ref, b.amount_paid, b.payment_note,
+             b.received_by, _iso(b.checked_in_at), _iso(b.checked_out_at), b.room_numbers, b.cancel_reason))
 
     def save_booking(self, b: Booking) -> Booking:
         """Update an existing booking (status, payment ids, notes...)."""
         self._run(
             "UPDATE bookings SET guest_name=?, language=?, status=?, hold_expires_at=?, paid_at=?, "
-            "payment_link_id=?, payment_link_url=?, razorpay_payment_id=?, notes=?, total=?, advance=? WHERE id=?",
+            "payment_link_id=?, payment_link_url=?, razorpay_payment_id=?, notes=?, total=?, advance=?, payment_method=?, "
+            "payment_ref=?, amount_paid=?, payment_note=?, received_by=?, checked_in_at=?, checked_out_at=?, "
+            "room_numbers=?, cancel_reason=? WHERE id=?",
             (b.guest_name, b.language, b.status, _iso(b.hold_expires_at), _iso(b.paid_at), b.payment_link_id,
-             b.payment_link_url, b.razorpay_payment_id, b.notes, b.total, b.advance, b.id))
+             b.payment_link_url, b.razorpay_payment_id, b.notes, b.total, b.advance, b.payment_method, b.payment_ref,
+             b.amount_paid, b.payment_note, b.received_by, _iso(b.checked_in_at), _iso(b.checked_out_at),
+            b.room_numbers, b.cancel_reason, b.id))
         return b
 
     def get_booking(self, booking_id: str) -> Booking | None:
@@ -350,3 +379,60 @@ class ResortRepo:
 
     def delete_user(self, email: str) -> None:
         self._run("DELETE FROM users WHERE email=?", (email.lower(),))
+
+    # ------------------------------------------------------------------ folio, refunds, ID proofs
+
+    def add_charge(self, c: Charge) -> Charge:
+        self._run("INSERT INTO charges(id, booking_id, description, amount, at, category, added_by) VALUES(?,?,?,?,?,?,?)",
+                  (c.id, c.booking_id, c.description, c.amount, _iso(c.at), c.category, c.added_by))
+        return c
+
+    def list_charges(self, booking_id: str) -> list[Charge]:
+        return [Charge(r["booking_id"], r["description"], r["amount"], _dt(r["at"]), r["category"],  # type: ignore[arg-type]
+                       r["added_by"], r["id"])
+                for r in self._all("SELECT * FROM charges WHERE booking_id=? ORDER BY at", (booking_id,))]
+
+    def delete_charge(self, charge_id: str) -> None:
+        self._run("DELETE FROM charges WHERE id=?", (charge_id,))
+
+    def add_refund(self, r: Refund) -> Refund:
+        self._run("INSERT INTO refunds(id, booking_id, amount, at, method, ref, note, by) VALUES(?,?,?,?,?,?,?,?)",
+                  (r.id, r.booking_id, r.amount, _iso(r.at), r.method, r.ref, r.note, r.by))
+        return r
+
+    def list_refunds(self, booking_id: str | None = None) -> list[Refund]:
+        rows = (self._all("SELECT * FROM refunds WHERE booking_id=? ORDER BY at", (booking_id,)) if booking_id
+                else self._all("SELECT * FROM refunds ORDER BY at"))
+        return [Refund(r["booking_id"], r["amount"], _dt(r["at"]), r["method"], r["ref"], r["note"],  # type: ignore[arg-type]
+                       r["by"], r["id"]) for r in rows]
+
+    def save_id_proof(self, p: IdProof) -> IdProof:
+        self._run("INSERT INTO id_proofs(id, booking_id, guest_no, id_type, received_at, last4, mime, data, status, "
+                  "verified_by, delete_after) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+                  "id_type=excluded.id_type, last4=excluded.last4, mime=excluded.mime, data=excluded.data, "
+                  "status=excluded.status, verified_by=excluded.verified_by, delete_after=excluded.delete_after",
+                  (p.id, p.booking_id, p.guest_no, p.id_type, _iso(p.received_at), p.last4, p.mime, p.data, p.status,
+                   p.verified_by, p.delete_after.isoformat() if p.delete_after else None))
+        return p
+
+    @staticmethod
+    def _id_proof(r: sqlite3.Row, with_data: bool) -> IdProof:
+        return IdProof(r["booking_id"], r["guest_no"], r["id_type"], _dt(r["received_at"]),  # type: ignore[arg-type]
+                       r["last4"], r["mime"], (r["data"] or b"") if with_data else b"", r["status"], r["verified_by"],
+                       date.fromisoformat(r["delete_after"]) if r["delete_after"] else None, r["id"])
+
+    def list_id_proofs(self, booking_id: str, with_data: bool = False) -> list[IdProof]:
+        return [self._id_proof(r, with_data)
+                for r in self._all("SELECT * FROM id_proofs WHERE booking_id=? ORDER BY guest_no, received_at",
+                                   (booking_id,))]
+
+    def get_id_proof(self, proof_id: str) -> IdProof | None:
+        row = self._one("SELECT * FROM id_proofs WHERE id=?", (proof_id,))
+        return self._id_proof(row, True) if row else None
+
+    def delete_expired_id_proofs(self, today: date) -> int:
+        """Privacy clean-up: drop ID photos whose delete_after date has passed. Returns how many."""
+        with self._lock:
+            cur = self._db.execute("DELETE FROM id_proofs WHERE delete_after IS NOT NULL AND delete_after < ?",
+                                   (today.isoformat(),))
+            return cur.rowcount

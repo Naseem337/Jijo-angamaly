@@ -26,6 +26,7 @@ from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo, SoldOut
 from app.resort.i18n import LANG_NAMES, LANGS, detect_script, status_name, t
 from app.resort.models import Booking, ChatMessage as Chat, Property, RoomType
+from app.resort.paying import apply_payment, method_label
 from app.resort.payments import Payments, PaymentError
 from app.whatsapp.client import WhatsAppClient, WhatsAppError
 from app.whatsapp.parse import InboundMessage
@@ -718,7 +719,6 @@ class BookingBot:
             return "already_paid"
         now = self.clock.now()
         rt = self.repo.get_room_type(b.room_type_id)
-        prop = self.repo.get_property(b.property_id)
         if b.status in ("expired", "cancelled") and rt is not None \
                 and self.repo.free_rooms(rt, b.check_in, b.check_out, now) < b.rooms:
             b.notes = (b.notes + " PAID AFTER EXPIRY, ROOMS GONE: REFUND NEEDED").strip()
@@ -727,17 +727,24 @@ class BookingBot:
             self.alert_staff(f"REFUND NEEDED: {b.id} was paid after the hold expired and the rooms are gone "
                              f"({b.guest_name} {b.guest_phone}, Rs {b.advance}).", b.property_id)
             return "refund_needed"
-        b.status, b.paid_at = "paid", now
         b.razorpay_payment_id = payment_id or b.razorpay_payment_id
-        b.hold_expires_at = None
+        apply_payment(b, method="online", amount=b.advance if b.advance >= 1 else b.total,
+                      ref=payment_id or link_id or b.payment_link_id or f"online-{b.id}", now=now)
         self.repo.save_booking(b)
+        self.announce_paid(b)
+        return "paid"
+
+    def announce_paid(self, b: Booking) -> None:
+        """Tell the guest their booking is confirmed and alert the staff (online or desk payment)."""
+        prop = self.repo.get_property(b.property_id)
+        rt = self.repo.get_room_type(b.room_type_id)
         text = t("paid", b.language, id=b.id, property=prop.name if prop else "", check_in=fmt_date(b.check_in),
                  check_out=fmt_date(b.check_out), rooms=b.rooms, checkin_time=prop.checkin_time if prop else "")
         self._notify_guest(b, text, "paid", self._params(b))
         self.alert_staff(f"New booking {b.id} PAID: {prop.name if prop else ''}, {rt.name if rt else ''} x {b.rooms}, "
                          f"{fmt_date(b.check_in)} to {fmt_date(b.check_out)}, {b.adults}A {b.children}C. "
-                         f"{b.guest_name} {b.guest_phone}. Advance Rs {b.advance} of Rs {b.total}.", b.property_id)
-        return "paid"
+                         f"{b.guest_name} {b.guest_phone}. Paid Rs {b.paid_amount} of Rs {b.total} "
+                         f"({method_label(b.payment_method)}).", b.property_id)
 
     def payment_failed(self, *, booking_id: str = "", link_id: str = "") -> str:
         b = (self.repo.get_booking(booking_id) if booking_id else None) or (

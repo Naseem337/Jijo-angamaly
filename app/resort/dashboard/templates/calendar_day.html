@@ -1,0 +1,21 @@
+<div class="drawer-head">
+  <div><h3>{{ day.strftime('%A') }}</h3><p class="muted">{{ day.strftime('%d %B %Y') }} · {{ prop.name }}</p></div>
+  <button type="button" class="btn ghost sm" data-drawer-close aria-label="Close">✕</button>
+</div>
+<div class="drawer-stats"><div><b>{{ used }}</b><small>rooms taken</small></div><div><b>{{ free }}</b><small>rooms free</small></div><div><b>{{ total }}</b><small>total</small></div></div>
+<a class="btn primary block" href="{{ BASE }}/bookings/new?property_id={{ prop.id }}&room_type_id={{ rt_id }}&check_in={{ day }}">+ New booking for {{ day.strftime('%d %b') }}</a>
+<div class="drawer-list">
+{% for b in items %}
+  <a class="dbook" href="{{ BASE }}/bookings/{{ b.id }}">
+    <div class="dbook-top"><b>{{ b.guest_name or b.guest_phone }}</b><span class="pill {{ b.status }}">{{ b.status|capitalize }}</span></div>
+    <div class="muted">{{ names[b.room_type_id].name if b.room_type_id in names else '' }} × {{ b.rooms }} · {{ b.check_in.strftime('%d %b') }} → {{ b.check_out.strftime('%d %b') }}</div>
+    <div class="dbook-pay">
+      {% if b.paid_amount %}<span class="mchip m-{{ b.payment_method or 'online' }}">{{ METHODS.get(b.payment_method or 'online', b.payment_method) }}</span><small>{{ b.paid_amount|rupees }} paid{% if b.balance %} · {{ b.balance|rupees }} due{% endif %}</small>
+      {% else %}<small>Unpaid · advance {{ b.advance|rupees }}</small>{% endif %}
+      {% if b.check_in == day %}<span class="tag in">Arrives</span>{% endif %}
+    </div>
+  </a>
+{% else %}
+  <div class="empty"><p>No bookings on this day.</p></div>
+{% endfor %}
+</div>

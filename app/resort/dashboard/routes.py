@@ -14,9 +14,10 @@ from app.core.clock import IST
 from app.core.phone import try_normalize_phone
 from app.resort import availability as av
 from app.resort.dashboard import integrations
-from app.resort.dashboard.deps import (BASE, COOKIE, HERE, Auth, form_of, get_repo, make_session, now_utc, page,
-                                       require_owner, require_user, toast_url)
+from app.resort.dashboard.deps import (BASE, COOKIE, HERE, Auth, current_property, form_of, get_repo,
+                                       make_session, now_utc, page, require_owner, require_user, templates, toast_url)
 from app.resort.db import SoldOut, check_password, hash_password
+from app.resort.paying import DESK_METHODS, METHODS, PaymentError, apply_payment, history, method_label
 from app.resort.models import (Booking, ChatMessage, DashboardUser, Property, RateRule, RoomType)
 
 router = APIRouter(prefix=BASE)
@@ -139,15 +140,20 @@ def home(request: Request, auth: Auth = Depends(require_user)):
     holds = [b for b in mine if b.status == "hold" and av.booking_blocks(b, now)]
     month_start = today.replace(day=1)
     paid = [b for b in mine if b.status == "paid"]
-    revenue_month = sum(b.advance for b in paid if b.paid_at and b.paid_at.astimezone(IST).date() >= month_start)
-    revenue_all = sum(b.advance for b in paid)
+    revenue_month = sum(b.paid_amount for b in paid if b.paid_at and b.paid_at.astimezone(IST).date() >= month_start)
+    revenue_all = sum(b.paid_amount for b in paid)
+    by_method: dict[str, int] = {}
+    for b in paid:
+        key = b.payment_method or "online"
+        by_method[key] = by_method.get(key, 0) + b.paid_amount
+    methods = sorted(by_method.items(), key=lambda kv: -kv[1])
     convos = repo.list_conversations()
     paused = [c for c in convos if c["paused"]]
     waiting = [c for c in convos if c["direction"] == "in" and not c["paused"]]
     occ = [(p, occupancy(repo, p, today, 14, now)) for p in props if p.active]
     return page(request, "home.html", auth, nav="home", today=today, arrivals=arrivals, departures=departures,
                 holds=holds, revenue_month=revenue_month, revenue_all=revenue_all, paused=len(paused),
-                waiting=len(waiting), occ=occ, props=props_by_id, rooms=rooms, paid_count=len(paid))
+                waiting=len(waiting), occ=occ, props=props_by_id, rooms=rooms, paid_count=len(paid), methods=methods)
 
 
 # --------------------------------------------------------------------------- bookings
@@ -162,6 +168,9 @@ def _filtered_bookings(repo, auth: Auth, params) -> list[Booking]:
                               status=params.get("status") or None, start=start, end=end, limit=5000)
     if rt := params.get("room_type_id"):
         items = [b for b in items if b.room_type_id == rt]
+    if method := params.get("method"):
+        items = [b for b in items if (b.payment_method or ("online" if b.status == "paid" else ""))
+                 == ("" if method == "unpaid" else method)]
     if q := (params.get("q") or "").strip().lower():
         items = [b for b in items if q in b.guest_phone.lower() or q in b.guest_name.lower() or q in b.id.lower()]
     return items
@@ -170,11 +179,14 @@ def _filtered_bookings(repo, auth: Auth, params) -> list[Booking]:
 @router.get("/bookings")
 def bookings_list(request: Request, auth: Auth = Depends(require_user)):
     repo = get_repo()
-    items = _filtered_bookings(repo, auth, request.query_params)
+    params = dict(request.query_params)
+    if "property_id" not in params and (scope := current_property(request, auth)):
+        params["property_id"] = scope  # the sidebar switcher is the default filter
+    items = _filtered_bookings(repo, auth, params)
     props, rooms = _names(repo)
     return page(request, "bookings.html", auth, nav="bookings", items=items, props=props, rooms=rooms,
-                my_props=auth.properties(repo), statuses=STATUSES, f=dict(request.query_params),
-                query=str(request.query_params))
+                my_props=auth.properties(repo), statuses=STATUSES, f=params, methods=METHODS,
+                query=str(request.query_params), collected=sum(b.paid_amount for b in items))
 
 
 def _csv_cell(value: object) -> str:
@@ -189,12 +201,16 @@ def bookings_csv(request: Request, auth: Auth = Depends(require_user)):
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["Booking", "Status", "Property", "Room type", "Guest", "Phone", "Check-in", "Check-out", "Nights",
-                     "Rooms", "Adults", "Children", "Total", "Advance", "Paid at", "Created"])
+                     "Rooms", "Adults", "Children", "Total", "Advance", "Payment method", "Payment reference",
+                     "Razorpay payment id", "Amount paid", "Balance", "Received by", "Paid at (IST)", "Created"])
     for b in _filtered_bookings(repo, auth, request.query_params):
         writer.writerow([b.id, b.status, _csv_cell(props[b.property_id].name if b.property_id in props else ""),
                          _csv_cell(rooms[b.room_type_id].name if b.room_type_id in rooms else ""),
                          _csv_cell(b.guest_name), b.guest_phone, b.check_in, b.check_out, b.nights, b.rooms,
-                         b.adults, b.children, b.total, b.advance, b.paid_at or "", b.created_at])
+                         b.adults, b.children, b.total, b.advance, method_label(b.payment_method) if b.payment_method else "",
+                         _csv_cell(b.payment_ref), b.razorpay_payment_id, b.paid_amount, b.balance,
+                         _csv_cell(b.received_by),
+                         b.paid_at.astimezone(IST).strftime("%Y-%m-%d %H:%M") if b.paid_at else "", b.created_at])
     return Response(out.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": 'attachment; filename="bookings.csv"'})
 
@@ -206,9 +222,15 @@ def _booking_form_data(repo, auth: Auth) -> list[dict]:
 @router.get("/bookings/new")
 def booking_new(request: Request, auth: Auth = Depends(require_user)):
     repo = get_repo()
-    today = today_ist()
+    today, q = today_ist(), request.query_params
+    check_in = _date(q.get("check_in"), today)
+    check_out = _date(q.get("check_out"), check_in + timedelta(days=1))
+    if check_out <= check_in:
+        check_out = check_in + timedelta(days=1)
     return page(request, "booking_new.html", auth, nav="bookings", data=_booking_form_data(repo, auth),
-                today=today, tomorrow=today + timedelta(days=1))
+                today=check_in, tomorrow=check_out, desk_methods=DESK_METHODS,
+                pre_property=q.get("property_id") or current_property(request, auth),
+                pre_room=q.get("room_type_id", ""))
 
 
 @router.get("/api/quote")
@@ -263,17 +285,24 @@ async def booking_create(request: Request, auth: Auth = Depends(require_user)):
         raise redirect(toast_url(back, f"!{rooms} room(s) cannot hold {adults} adults and {children} children"))
     quote = av.quote(prop, rt, repo.list_rate_rules(rt.id), check_in, check_out, rooms)
     now = now_utc()
-    paid = f.get("payment") == "paid"
+    method = f.get("pay_method") or ("cash" if f.get("payment") == "paid" else "")  # "payment=paid": the old form
     booking = Booking(prop.id, rt.id, phone, check_in, check_out, adults, children, rooms, quote.total, quote.advance,
-                      now, status="paid" if paid else "hold", guest_name=f.get("guest_name", "").strip(),
-                      hold_expires_at=None if paid else now + timedelta(hours=1), paid_at=now if paid else None,
-                      notes=f"Added by {auth.user.email}")
+                      now, status="hold", guest_name=f.get("guest_name", "").strip(),
+                      hold_expires_at=now + timedelta(hours=1), notes=f"Added by {auth.user.email}")
+    if method:
+        amount = _int(f, "pay_amount", quote.advance, 0, quote.total) or quote.advance
+        try:
+            apply_payment(booking, method=method, amount=amount, ref=f.get("pay_ref", ""), note=f.get("pay_note", ""),
+                          received_by=auth.user.email, now=now)
+        except PaymentError as exc:
+            raise redirect(toast_url(back, f"!{exc}")) from None
     try:
         repo.add_manual_booking(booking, now)
     except SoldOut:
         raise redirect(toast_url(back, "!Not enough free rooms for those dates")) from None
     repo.touch_guest(phone, now, name=booking.guest_name)
-    raise redirect(toast_url(f"{BASE}/bookings/{booking.id}", "Booking created"))
+    note = integrations.announce_paid(booking) if method else None
+    raise redirect(toast_url(f"{BASE}/bookings/{booking.id}", f"Booking created. {note}" if note else "Booking created"))
 
 
 def redirect(url: str) -> HTTPException:
@@ -289,11 +318,23 @@ def booking_detail(booking_id: str, request: Request, auth: Auth = Depends(requi
     if b.payment_link_url:
         timeline.append((None, "Payment link created"))
     if b.paid_at:
-        timeline.append((b.paid_at, "Advance paid"))
+        timeline.append((b.paid_at, f"First payment received ({method_label(b.payment_method)})"))
     if b.status in ("expired", "cancelled", "failed"):
         timeline.append((None, f"Marked {b.status}"))
     return page(request, "booking_detail.html", auth, nav="bookings", b=b, prop=props.get(b.property_id),
-                rt=rooms.get(b.room_type_id), timeline=timeline, guest=repo.get_guest(b.guest_phone))
+                rt=rooms.get(b.room_type_id), timeline=timeline, guest=repo.get_guest(b.guest_phone),
+                pay_history=history(b), desk_methods=DESK_METHODS, source=_source(b))
+
+
+def _source(b: Booking) -> str:
+    """Where the money came from, in plain words."""
+    if not b.paid_amount:
+        return "Not paid yet"
+    if b.payment_method == "online":
+        return "Online: Razorpay payment link (the guest paid on their phone)"
+    if b.payment_method == "mixed":
+        return "Several payments (see the history)"
+    return f"Recorded by staff at the desk ({method_label(b.payment_method)})"
 
 
 @router.post("/bookings/{booking_id}/action")
@@ -302,15 +343,26 @@ async def booking_action(booking_id: str, request: Request, auth: Auth = Depends
     repo = get_repo()
     b = _booking(repo, auth, booking_id)
     url, action, now = f"{BASE}/bookings/{b.id}", f.get("action", ""), now_utc()
-    if action == "mark_paid":
-        if b.status != "paid":
-            rt = repo.get_room_type(b.room_type_id)
-            if b.status != "hold" and rt and repo.free_rooms(rt, b.check_in, b.check_out, now) < b.rooms:
-                raise redirect(toast_url(url, "!Those rooms are taken now; cannot mark paid"))
-            b.status, b.paid_at, b.hold_expires_at = "paid", now, None
-            b.notes = (b.notes + f"\nMarked paid by {auth.user.email}").strip()
-            repo.save_booking(b)
-        raise redirect(toast_url(url, "Marked as paid"))
+    if action in ("mark_paid", "record_payment"):
+        if action == "mark_paid":  # the old one-click button: the advance, in cash
+            if b.paid_amount:
+                raise redirect(toast_url(url, "Already paid"))
+            f = {**f, "method": "cash", "amount": str(b.advance)}
+        if b.status == "cancelled":
+            raise redirect(toast_url(url, "!This booking is cancelled"))
+        first = b.paid_amount == 0
+        active_hold = b.status == "hold" and b.hold_expires_at is not None and b.hold_expires_at > now
+        rt = repo.get_room_type(b.room_type_id)
+        if first and not active_hold and rt and repo.free_rooms(rt, b.check_in, b.check_out, now) < b.rooms:
+            raise redirect(toast_url(url, "!Those rooms are taken now; cannot record the payment"))
+        try:
+            ref = apply_payment(b, method=f.get("method", ""), amount=_int(f, "amount", b.advance if first else b.balance),
+                                ref=f.get("ref", ""), note=f.get("note", ""), received_by=auth.user.email, now=now)
+        except PaymentError as exc:
+            raise redirect(toast_url(url, f"!{exc}")) from None
+        repo.save_booking(b)
+        warning = integrations.announce_paid(b) if first else None
+        raise redirect(toast_url(url, f"Payment recorded ({ref}). {warning}" if warning else f"Payment recorded ({ref})"))
     if action == "cancel":
         b.status = "cancelled"
         b.notes = (b.notes + f"\nCancelled by {auth.user.email}").strip()
@@ -331,32 +383,98 @@ async def booking_action(booking_id: str, request: Request, auth: Auth = Depends
 # --------------------------------------------------------------------------- calendar
 
 
+def _month_start(value: str | None) -> date:
+    return (_date((value or "") + "-01") or today_ist()).replace(day=1)
+
+
+def _calendar_scope(request: Request, auth: Auth, repo):
+    """(visible properties, chosen property, its room types, chosen room type id)."""
+    q = request.query_params
+    props = auth.properties(repo, active_only=True)
+    wanted = q.get("property_id") or current_property(request, auth)
+    prop = next((p for p in props if p.id == wanted), props[0] if props else None)
+    types = repo.list_room_types(prop.id) if prop else []
+    rt_id = q.get("room_type_id", "")
+    return props, prop, types, rt_id if any(rt.id == rt_id for rt in types) else ""
+
+
+def _month_weeks(repo, prop: Property, types: list[RoomType], rt_id: str, first: date, now: datetime) -> list[list[dict]]:
+    """Monday-first weeks covering the month; every cell knows its rooms paid / held / free."""
+    chosen = [rt for rt in types if rt.id == rt_id] or types
+    ids, total = {rt.id for rt in chosen}, sum(rt.units for rt in chosen)
+    last = first.replace(day=monthrange(first.year, first.month)[1])
+    grid_start = first - timedelta(days=first.weekday())
+    grid_end = last + timedelta(days=6 - last.weekday())
+    bookings = [b for b in repo.list_bookings(property_id=prop.id, start=grid_start,
+                                              end=grid_end + timedelta(days=1), limit=5000)
+                if b.room_type_id in ids and av.booking_blocks(b, now)]
+    today, weeks, day = today_ist(), [], grid_start
+    while day <= grid_end:
+        week = []
+        for _ in range(7):
+            on = [b for b in bookings if b.check_in <= day < b.check_out]
+            paid, held = sum(b.rooms for b in on if b.status == "paid"), sum(b.rooms for b in on if b.status == "hold")
+            free = max(total - paid - held, 0)
+            week.append({"day": day, "in_month": day.month == first.month, "today": day == today,
+                         "weekend": day.weekday() >= 5, "paid": paid, "held": held, "free": free, "total": total,
+                         "pct": round(100 * (paid + held) / total) if total else 0,
+                         "state": "none" if not total else "full" if free == 0 else "busy" if paid + held else "free",
+                         "past": day < today})
+            day += timedelta(days=1)
+        weeks.append(week)
+    return weeks
+
+
 @router.get("/calendar")
 def calendar(request: Request, auth: Auth = Depends(require_user)):
     repo, q, now = get_repo(), request.query_params, now_utc()
-    props = auth.properties(repo, active_only=True)
-    if not props:
-        return page(request, "calendar.html", auth, nav="calendar", props=[], prop=None, rows=[], days=[], month="")
-    prop = next((p for p in props if p.id == q.get("property_id")), props[0])
-    first = _date(q.get("month", "") + "-01") or today_ist().replace(day=1)
-    first = first.replace(day=1)
-    days = [first + timedelta(days=i) for i in range(monthrange(first.year, first.month)[1])]
+    props, prop, types, rt_id = _calendar_scope(request, auth, repo)
+    if not prop:
+        return page(request, "calendar.html", auth, nav="calendar", props=[], prop=None)
+    first = _month_start(q.get("month"))
     nxt = (first + timedelta(days=32)).replace(day=1)
     prev = (first - timedelta(days=1)).replace(day=1)
-    bookings = repo.list_bookings(property_id=prop.id, start=first, end=nxt, limit=5000)
-    rows = []
-    for rt in repo.list_room_types(prop.id):
-        cells = []
-        for day in days:
-            on = [b for b in bookings if b.room_type_id == rt.id and av.booking_blocks(b, now)
-                  and b.check_in <= day < b.check_out]
-            booked = sum(b.rooms for b in on if b.status == "paid")
-            held = sum(b.rooms for b in on if b.status == "hold")
-            cells.append({"day": day, "booked": booked, "held": held, "free": max(rt.units - booked - held, 0)})
-        rows.append({"rt": rt, "cells": cells})
-    return page(request, "calendar.html", auth, nav="calendar", props=props, prop=prop, rows=rows, days=days,
-                month=first.strftime("%B %Y"), prev=prev.strftime("%Y-%m"), nxt=nxt.strftime("%Y-%m"),
-                today=today_ist())
+    view = "timeline" if q.get("view") == "timeline" else "month"
+    ctx = dict(props=props, prop=prop, types=types, rt_id=rt_id, month=first.strftime("%B %Y"), month_key=first.strftime("%Y-%m"),
+               prev=prev.strftime("%Y-%m"), nxt=nxt.strftime("%Y-%m"), today=today_ist(), view=view, weeks=[], rows=[], days=[])
+    if view == "month":
+        ctx["weeks"] = _month_weeks(repo, prop, types, rt_id, first, now)
+    else:
+        days = [first + timedelta(days=i) for i in range(monthrange(first.year, first.month)[1])]
+        bookings = repo.list_bookings(property_id=prop.id, start=first, end=nxt, limit=5000)
+        rows = []
+        for rt in types:
+            cells = []
+            for day in days:
+                on = [b for b in bookings if b.room_type_id == rt.id and av.booking_blocks(b, now)
+                      and b.check_in <= day < b.check_out]
+                booked, held = sum(b.rooms for b in on if b.status == "paid"), sum(b.rooms for b in on if b.status == "hold")
+                cells.append({"day": day, "booked": booked, "held": held, "free": max(rt.units - booked - held, 0)})
+            rows.append({"rt": rt, "cells": cells})
+        ctx.update(days=days, rows=rows)
+    return page(request, "calendar.html", auth, nav="calendar", **ctx)
+
+
+@router.get("/calendar/day")
+def calendar_day(request: Request, auth: Auth = Depends(require_user)):
+    """The side panel for one day: HTML fragment, loaded by the calendar page."""
+    repo, q, now = get_repo(), request.query_params, now_utc()
+    _, prop, types, rt_id = _calendar_scope(request, auth, repo)
+    day = _date(q.get("date"))
+    if not prop or not day:
+        raise HTTPException(404, "Pick a day")
+    names = {rt.id: rt for rt in types}
+    chosen = [rt for rt in types if rt.id == rt_id] or types
+    items = [b for b in _visible_bookings(repo, auth, property_id=prop.id, start=day, end=day + timedelta(days=1),
+                                          limit=500)
+             if b.room_type_id in {rt.id for rt in chosen} and b.status in ("paid", "hold")
+             and (b.status == "paid" or av.booking_blocks(b, now))]
+    items.sort(key=lambda b: (b.status != "paid", b.check_in))
+    total = sum(rt.units for rt in chosen)
+    used = sum(b.rooms for b in items)
+    return templates.TemplateResponse(request, "calendar_day.html", {
+        "BASE": BASE, "day": day, "prop": prop, "rt_id": rt_id, "items": items, "names": names, "total": total,
+        "used": used, "free": max(total - used, 0)})
 
 
 # --------------------------------------------------------------------------- properties, room types, rates

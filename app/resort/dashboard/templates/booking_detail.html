@@ -1,6 +1,7 @@
 {% extends "base.html" %}
-{% from "macros.html" import page_head, pill, csrf_field %}
+{% from "macros.html" import page_head, pill, csrf_field, icon, method_chip %}
 {% block title %}{{ b.id }} · Resort Desk{% endblock %}
+{% macro copy(text) -%}<button type="button" class="copy" data-copy="{{ text }}" title="Copy" aria-label="Copy">{{ icon('copy') }}</button>{%- endmacro %}
 {% block content %}
 {% call page_head(b.id, (prop.name if prop else '') ~ ' · ' ~ (rt.name if rt else '')) %}{{ pill(b.status) }}{% endcall %}
 <div class="grid2">
@@ -12,27 +13,67 @@
   <dt>Check-out</dt><dd>{{ b.check_out.strftime('%a, %d %b %Y') }}{% if prop %} · by {{ prop.checkout_time }}{% endif %}</dd>
   <dt>Nights</dt><dd>{{ b.nights }}</dd><dt>Rooms</dt><dd>{{ b.rooms }} × {{ rt.name if rt else '' }}</dd>
   <dt>Guests</dt><dd>{{ b.adults }} adults, {{ b.children }} children</dd></dl>
+  <h3>Timeline</h3>
+  <ul class="timeline">{% for at, text in timeline %}<li>{{ text }}{% if at %}<small>{{ at|ist }}</small>{% endif %}</li>{% endfor %}</ul>
 </section>
 <section class="card"><h3>Payment</h3>
-  <dl class="kv"><dt>Total</dt><dd><b>{{ b.total|rupees }}</b></dd><dt>Advance ({{ prop.advance_pct if prop else '' }}%)</dt><dd>{{ b.advance|rupees }}</dd>
-  <dt>Balance at property</dt><dd>{{ (b.total - b.advance)|rupees }}</dd>
-  {% if b.paid_at %}<dt>Paid</dt><dd>{{ b.paid_at.strftime('%d %b %Y %H:%M') }} UTC</dd>{% endif %}
-  {% if b.razorpay_payment_id %}<dt>Razorpay ID</dt><dd>{{ b.razorpay_payment_id }}</dd>{% endif %}
-  {% if b.payment_link_url %}<dt>Link</dt><dd class="wrap"><a href="{{ b.payment_link_url }}" rel="noopener" target="_blank">{{ b.payment_link_url }}</a></dd>{% endif %}</dl>
+  <div class="money-strip">
+    <div><small>Total</small><b>{{ b.total|rupees }}</b></div>
+    <div><small>Paid</small><b class="ok">{{ b.paid_amount|rupees }}</b></div>
+    <div><small>Balance at property</small><b class="{{ 'warn' if b.balance else 'ok' }}">{{ b.balance|rupees }}</b></div>
+  </div>
+  <dl class="kv">
+    <dt>Payment status</dt><dd>{% if b.paid_amount %}{{ pill('paid') }}{% else %}{{ pill(b.status) }}{% endif %}</dd>
+    <dt>Method</dt><dd>{{ method_chip(b.payment_method) }}</dd>
+    <dt>Source</dt><dd>{{ source }}</dd>
+    <dt>Reference / transaction ID</dt><dd>{% if b.payment_ref %}<code>{{ b.payment_ref }}</code>{{ copy(b.payment_ref) }}{% else %}—{% endif %}</dd>
+    {% if b.razorpay_payment_id %}<dt>Razorpay payment ID</dt><dd><code>{{ b.razorpay_payment_id }}</code>{{ copy(b.razorpay_payment_id) }}</dd>{% endif %}
+    {% if b.payment_link_id %}<dt>Payment link ID</dt><dd><code>{{ b.payment_link_id }}</code>{{ copy(b.payment_link_id) }}</dd>{% endif %}
+    {% if b.payment_link_url %}<dt>Payment link</dt><dd class="wrap"><a href="{{ b.payment_link_url }}" rel="noopener" target="_blank">{{ b.payment_link_url }}</a>{{ copy(b.payment_link_url) }}</dd>{% endif %}
+    <dt>Advance due ({{ prop.advance_pct if prop else '' }}%)</dt><dd>{{ b.advance|rupees }}</dd>
+    <dt>Amount paid</dt><dd>{{ b.paid_amount|rupees }}</dd>
+    <dt>Balance still to pay</dt><dd>{{ b.balance|rupees }}</dd>
+    <dt>Paid at</dt><dd>{{ b.paid_at|ist or '—' }}</dd>
+    <dt>Received by</dt><dd>{{ b.received_by or ('Razorpay (automatic)' if b.payment_method == 'online' else '—') }}</dd>
+  </dl>
+  {% if pay_history %}<h3>Payment history</h3><ul class="history">{% for line in pay_history %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
   <div class="btn-row">
+  {% if b.status != 'cancelled' and b.balance > 0 %}
+    <button type="button" class="btn primary" data-open="pay-dialog">{{ icon('cash') }} {{ 'Record balance payment' if b.paid_amount else 'Record payment' }}</button>
+  {% endif %}
   {% if b.status != 'paid' and b.status != 'cancelled' %}
-    <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="mark_paid"><button class="btn primary" data-confirm="Mark this booking as paid?">Mark paid</button></form>
     <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="resend_link"><button class="btn">Resend payment link</button></form>
   {% endif %}
   {% if b.status != 'cancelled' %}
     <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="cancel"><button class="btn danger" data-confirm="Cancel this booking and free the rooms?">Cancel booking</button></form>
   {% endif %}
   </div>
-  <h3>Timeline</h3>
-  <ul class="timeline">{% for at, text in timeline %}<li>{{ text }}{% if at %}<small>{{ at.strftime('%d %b %H:%M') }} UTC</small>{% endif %}</li>{% endfor %}</ul>
 </section></div>
 <section class="card"><h3>Notes</h3>
   {% if b.notes %}<pre class="notes">{{ b.notes }}</pre>{% endif %}
   <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action" class="inline-form">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="note"><input name="note" placeholder="Add a note for the team" required><button class="btn">Add note</button></form>
 </section>
+
+<dialog id="pay-dialog" class="modal">
+  <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action" class="modal-body">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="record_payment">
+    <div class="modal-head"><h3>{{ 'Record balance payment' if b.paid_amount else 'Record payment' }}</h3><button type="button" class="btn ghost sm" data-close aria-label="Close">{{ icon('x') }}</button></div>
+    <label class="field"><span>Paid by</span>
+      <select name="method" id="pay-method">{% for key in desk_methods %}<option value="{{ key }}">{{ METHODS[key] }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Amount received (₹)</span>
+      <input type="number" name="amount" id="pay-amount" min="1" max="{{ b.balance }}" value="{{ b.balance if b.paid_amount else b.advance }}" required>
+      <div class="quick-amounts">
+        {% if not b.paid_amount %}<button type="button" class="chip-btn" data-amount="{{ b.advance }}">Advance {{ b.advance|rupees }}</button>{% endif %}
+        <button type="button" class="chip-btn" data-amount="{{ b.balance }}">{{ 'Balance' if b.paid_amount else 'Full' }} {{ b.balance|rupees }}</button></div></label>
+    <label class="field"><span id="pay-ref-label">Receipt no. (optional, made automatically if blank)</span>
+      <input name="ref" id="pay-ref" placeholder="e.g. RCPT-001"></label>
+    <label class="field"><span>Note (optional)</span><input name="note" placeholder="e.g. Paid by the guest's father"></label>
+    <p class="muted small-note">{% if not b.paid_amount %}This confirms the booking and sends the guest a WhatsApp message.{% else %}This is added to the payment history.{% endif %}</p>
+    <div class="modal-actions"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save payment</button></div>
+  </form>
+</dialog>
 {% endblock %}
+{% block scripts %}<script>
+(function(){var m=document.getElementById('pay-method'),r=document.getElementById('pay-ref'),l=document.getElementById('pay-ref-label');
+if(!m)return;function upd(){var cash=m.value==='cash';r.required=!cash;l.textContent=cash?'Receipt no. (optional, made automatically if blank)':(m.selectedOptions[0].text+' reference / transaction ID (required)');r.placeholder=cash?'e.g. RCPT-001':'e.g. UTR or transaction number'}
+m.addEventListener('change',upd);upd();})();
+</script>{% endblock %}

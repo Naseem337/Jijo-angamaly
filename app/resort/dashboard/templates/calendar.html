@@ -1,19 +1,54 @@
 {% extends "base.html" %}
-{% from "macros.html" import page_head, empty %}
+{% from "macros.html" import page_head, empty, icon %}
 {% block title %}Calendar · Resort Desk{% endblock %}
 {% block content %}
-{% if not prop %}{{ empty("Add a property first") }}{% else %}
-{% call page_head("Calendar", month) %}
-<form method="get" class="inline-form"><select name="property_id" onchange="this.form.submit()">{% for p in props %}<option value="{{ p.id }}" {{ 'selected' if p.id == prop.id }}>{{ p.name }}</option>{% endfor %}</select>
-<a class="btn" href="?property_id={{ prop.id }}&month={{ prev }}">‹</a><a class="btn" href="?property_id={{ prop.id }}&month={{ nxt }}">›</a></form>
+{% if not prop %}{{ empty("Add a property first", "building", BASE ~ "/properties", "Go to properties") }}{% else %}
+{% set qs = "property_id=" ~ prop.id ~ "&room_type_id=" ~ rt_id ~ "&view=" ~ view %}
+{% call page_head("Calendar", prop.name) %}
+<a class="btn primary" href="{{ BASE }}/bookings/new?property_id={{ prop.id }}&room_type_id={{ rt_id }}">{{ icon('plus') }} New booking</a>
 {% endcall %}
-<div class="legend"><span><i class="c free"></i>Free</span><span><i class="c held"></i>Held (unpaid)</span><span><i class="c booked"></i>Booked</span><span><i class="c full"></i>Sold out</span></div>
+<div class="cal-bar">
+  <div class="cal-nav">
+    <a class="btn" href="?{{ qs }}&month={{ prev }}" aria-label="Previous month">{{ icon('left') }}</a>
+    <h2>{{ month }}</h2>
+    <a class="btn" href="?{{ qs }}&month={{ nxt }}" aria-label="Next month">{{ icon('right') }}</a>
+    <a class="btn" href="?{{ qs }}">Today</a>
+  </div>
+  <form method="get" class="cal-filters">
+    <input type="hidden" name="month" value="{{ month_key }}"><input type="hidden" name="view" value="{{ view }}">
+    <select name="property_id" onchange="this.form.room_type_id.value='';this.form.submit()">{% for p in props %}<option value="{{ p.id }}" {{ 'selected' if p.id == prop.id }}>{{ p.name }}</option>{% endfor %}</select>
+    <select name="room_type_id" onchange="this.form.submit()"><option value="">All room types</option>{% for rt in types %}<option value="{{ rt.id }}" {{ 'selected' if rt.id == rt_id }}>{{ rt.name }}</option>{% endfor %}</select>
+  </form>
+  <div class="seg"><a class="{{ 'on' if view == 'month' }}" href="?property_id={{ prop.id }}&room_type_id={{ rt_id }}&view=month&month={{ month_key }}">Month</a><a class="{{ 'on' if view == 'timeline' }}" href="?property_id={{ prop.id }}&room_type_id={{ rt_id }}&view=timeline&month={{ month_key }}">Timeline</a></div>
+</div>
+<div class="legend"><span><i class="dot paid"></i>Booked (paid)</span><span><i class="dot held"></i>Held, unpaid</span><span><i class="dot free"></i>Free room</span><span><i class="c full"></i>Sold out</span></div>
+
+{% if view == 'month' %}
+<div class="cal-layout">
+<div class="cal-grid" id="cal-grid" data-prop="{{ prop.id }}" data-room="{{ rt_id }}">
+  {% for wd in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}<div class="cal-wd{{ ' wk' if loop.index > 5 }}">{{ wd }}</div>{% endfor %}
+  {% for week in weeks %}{% for c in week %}
+  <a class="cal-day s-{{ c.state }}{{ ' dim' if not c.in_month }}{{ ' today' if c.today }}{{ ' wk' if c.weekend }}{{ ' past' if c.past }}" href="{{ BASE }}/bookings?property_id={{ prop.id }}&date={{ c.day }}" data-date="{{ c.day }}"
+     title="{{ c.day.strftime('%a %d %b') }}: {{ c.paid }} booked, {{ c.held }} held, {{ c.free }} free">
+    <span class="num">{{ c.day.day }}</span>
+    {% if c.total %}<span class="dots">{% for _ in range([c.paid, 6]|min) %}<i class="dot paid"></i>{% endfor %}{% for _ in range([c.held, 6 - [c.paid, 6]|min]|min) %}<i class="dot held"></i>{% endfor %}{% for _ in range([c.free, 6 - [c.paid + c.held, 6]|min]|min) %}<i class="dot free"></i>{% endfor %}</span>
+    <span class="occ-txt">{{ c.paid + c.held }}/{{ c.total }}<em> booked</em></span>
+    <span class="meter"><i style="width:{{ c.pct }}%"></i></span>{% endif %}
+  </a>
+  {% endfor %}{% endfor %}
+</div>
+<aside class="drawer" id="drawer" aria-hidden="true"><div class="drawer-body" id="drawer-body"></div></aside>
+</div>
+<p class="muted">Click a day to see who is staying and to add a booking for that date.</p>
+
+{% else %}
 <div class="card table-wrap cal">
 <table><thead><tr><th class="sticky">Room type</th>{% for d in days %}<th class="{{ 'today' if d == today }}{{ ' wk' if d.weekday() in (4,5) }}">{{ d.day }}<small>{{ d.strftime('%a')[:2] }}</small></th>{% endfor %}</tr></thead><tbody>
 {% for row in rows %}<tr><th class="sticky">{{ row.rt.name }}<small>{{ row.rt.units }} room(s)</small></th>
 {% for c in row.cells %}<td class="{{ 'full' if c.free == 0 else 'booked' if c.booked else 'held' if c.held else 'free' }}">
 <a href="{{ BASE }}/bookings?property_id={{ prop.id }}&room_type_id={{ row.rt.id }}&date={{ c.day }}" title="{{ c.booked }} booked, {{ c.held }} held, {{ c.free }} free">{{ c.free if not (c.booked or c.held) else c.booked + c.held }}</a></td>{% endfor %}</tr>
-{% else %}<tr><td>{{ empty("No room types yet") }}</td></tr>{% endfor %}</tbody></table></div>
+{% else %}<tr><td>{{ empty("No room types yet", "building", BASE ~ "/properties/" ~ prop.id, "Add a room type") }}</td></tr>{% endfor %}</tbody></table></div>
 <p class="muted">Each cell shows rooms free (green) or rooms taken (amber / blue). Click a cell to see its bookings.</p>
+{% endif %}
 {% endif %}
 {% endblock %}
