@@ -401,6 +401,7 @@ async def property_save(property_id: str, request: Request, auth: Auth = Depends
     p.checkin_time, p.checkout_time = f.get("checkin_time", "14:00") or "14:00", f.get("checkout_time", "11:00") or "11:00"
     p.advance_pct, p.gst_pct = _int(f, "advance_pct", 50, 1, 100), _int(f, "gst_pct", 0, 0, 40)
     p.staff_numbers, p.photo_urls = staff, [u for u in _lines(f.get("photo_urls", "").replace(",", "\n")) if u]
+    p.highlights = _lines(f.get("highlights", ""))[:12]
     p.active = f.get("active") == "on"
     repo.save_property(p)
     raise redirect(toast_url(f"{BASE}/properties/{p.id}", "Property saved"))

@@ -29,6 +29,10 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         stop = start_background_jobs(runtime, settings.alerts_every_minutes)  # off unless configured
         stop_resort = None
+        if os.environ.get("RESORT_AUTO_SEED") == "1":  # hosts with a wiped disk start from the placeholder data
+            from app.resort.seed import seed
+            logging.getLogger("resort").info("Auto-seed: %s", " | ".join(
+                line for line in seed(resort_web.get_services().repo) if "password" not in line))
         if os.environ.get("RESORT_WHATSAPP_PHONE_NUMBER_ID"):  # resort bot is configured: expire unpaid holds
             stop_resort = resort_web.start_sweeper(resort_web.get_services())
         yield

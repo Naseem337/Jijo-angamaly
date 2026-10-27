@@ -644,7 +644,7 @@ class BookingBot:
         for p in props:
             if p is None:
                 continue
-            lines.append(f"PROPERTY {p.name} ({p.city}). {p.description} Address: {p.address} {p.map_url}. "
+            lines.append(f"PROPERTY {p.name} ({p.city}). {p.description} Highlights: {', '.join(p.highlights) or 'n/a'}. Address: {p.address} {p.map_url}. "
                          f"Check-in {p.checkin_time}, check-out {p.checkout_time}. Advance to confirm: "
                          f"{p.advance_pct}%. Policies: {p.policies or 'the team will confirm'}")
             for rt in self.repo.list_room_types(p.id):

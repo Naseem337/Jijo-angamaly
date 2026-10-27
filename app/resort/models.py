@@ -32,6 +32,7 @@ class Property:
     map_url: str = ""
     photo_urls: list[str] = field(default_factory=list)
     staff_numbers: list[str] = field(default_factory=list)  # E.164, get the handoff / booking alerts
+    highlights: list[str] = field(default_factory=list)  # short selling points: "Infinity pool", "Mountain view"
     policies: str = ""  # cancellation / refund / house rules, in the resort's own words
     active: bool = True
     id: str = field(default_factory=lambda: new_id("P"))

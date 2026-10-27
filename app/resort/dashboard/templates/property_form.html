@@ -3,32 +3,65 @@
 {% block title %}{{ p.name or 'New property' }} · Resort Desk{% endblock %}
 {% block content %}
 {% call page_head(p.name or "New property", "Property details") %}{% endcall %}
+<nav class="subnav">
+  <a href="#details">Details</a>
+  <a href="#rooms">Rooms{% if not is_new %} <b>{{ rooms|length }}</b>{% endif %}</a>
+  <a href="#payment">Payment</a>
+  <a href="#staff">Staff &amp; policies</a>
+</nav>
+
+{% if not is_new %}
+<section class="card" id="rooms">
+  <div class="card-head"><div><h3>Rooms &amp; rates</h3><p class="muted">What guests can book at this property. Open a room to change its rate, capacity and seasonal prices.</p></div>
+  <a class="btn primary" href="{{ BASE }}/properties/{{ p.id }}/rooms/new">{{ icon('plus') }} Add room type</a></div>
+  {% if rooms %}<div class="room-grid">
+  {% for t in rooms %}<a class="room-card{{ ' off' if not t.active }}" href="{{ BASE }}/properties/{{ p.id }}/rooms/{{ t.id }}">
+    <div class="room-top"><b>{{ t.name }}</b>{% if not t.active %}<span class="pill cancelled">Inactive</span>{% endif %}</div>
+    <div class="room-rate">{{ t.base_rate|rupees }}<small> / night</small></div>
+    {% if t.weekend_rate %}<small class="muted">Weekend {{ t.weekend_rate|rupees }}</small>{% endif %}
+    <div class="chips-static"><span>{{ t.units }} room{{ 's' if t.units != 1 }}</span><span>{{ t.max_adults }} adults</span><span>{{ t.max_children }} children</span><span>max {{ t.max_occupancy }}</span></div>
+    <span class="room-open">Manage rates &amp; details ›</span>
+  </a>{% endfor %}</div>
+  {% else %}{{ empty("No room types yet. Add the first one so the bot can offer rooms.") }}{% endif %}
+</section>
+{% else %}
+<section class="card hint-card" id="rooms"><h3>Rooms &amp; rates</h3><p class="muted">Save the property first. Then you can add room types, rates and seasonal prices here.</p></section>
+{% endif %}
+
 <form method="post" action="{{ BASE }}/properties/{{ 'new' if is_new else p.id }}" class="form">{{ csrf_field(csrf) }}
-<section class="card"><h3>Basics</h3><div class="cols">
+<section class="card" id="details"><h3>Basics</h3><div class="cols">
   {{ field("Name", "name", p.name, required=True) }}{{ field("City / area", "city", p.city) }}
   {{ field("Address", "address", p.address) }}{{ field("Map link", "map_url", p.map_url, "url") }}
   {{ field("Check-in time", "checkin_time", p.checkin_time, "time") }}{{ field("Check-out time", "checkout_time", p.checkout_time, "time") }}
-</div>{{ area("Description", "description", p.description, 3) }}
+</div>
+<label class="field"><span>Description</span>
+  <textarea name="description" rows="5" maxlength="900" data-count="desc-count" placeholder="Describe the stay in a few warm sentences: the setting, the views, who it suits (families, couples, groups) and what makes it special.">{{ p.description }}</textarea>
+  <small>The bot uses this to answer guests, so write it as you would tell a guest. <span id="desc-count" class="count">0 / 900</span></small></label>
+<div class="field"><span>Highlights</span>
+  <div class="chipbox" data-chips="highlights" data-kind="text" data-placeholder="e.g. Infinity pool" data-max="12">
+    <textarea name="highlights" hidden>{{ p.highlights|join('\n') }}</textarea>
+    <div class="chip-list"></div>
+    <div class="chip-add"><input type="text" maxlength="40" placeholder="e.g. Infinity pool, Mountain view, Campfire"><button type="button" class="btn">Add</button></div>
+  </div><small>Short selling points. Press Enter or Add after each one.</small></div>
 <label class="check"><input type="checkbox" name="active" {{ 'checked' if p.active }}> Active (the bot offers this property)</label></section>
-<section class="card"><h3>Payment</h3><div class="cols">
+
+<section class="card" id="payment"><h3>Payment</h3><div class="cols">
   {{ field("Advance to pay online (%)", "advance_pct", p.advance_pct, "number", attrs='min="1" max="100"') }}
   {{ field("GST (%)", "gst_pct", p.gst_pct, "number", "0 means the rates already include GST", attrs='min="0" max="40"') }}
 </div></section>
-<section class="card"><h3>Policies, photos and staff</h3>
+
+<section class="card" id="staff"><h3>Staff &amp; policies</h3>
+  <div class="field"><span>Staff WhatsApp numbers</span>
+    <div class="chipbox" data-chips="staff_numbers" data-kind="phone" data-max="10">
+      <textarea name="staff_numbers" hidden>{{ p.staff_numbers|join('\n') }}</textarea>
+      <div class="chip-list"></div>
+      <div class="chip-add"><span class="prefix">+91</span><input type="tel" inputmode="numeric" placeholder="98xxxxxxxx" maxlength="16"><button type="button" class="btn primary">{{ icon('plus') }} Add number</button></div>
+    </div><small>These numbers get booking and "talk to a person" alerts on WhatsApp. For another country, type the full number starting with +.</small></div>
   {{ area("Policies (cancellation, refund, house rules)", "policies", p.policies, 4) }}
   {{ area("Photo links (one per line)", "photo_urls", p.photo_urls|join('\n'), 3) }}
-  {{ area("Staff WhatsApp numbers (one per line)", "staff_numbers", p.staff_numbers|join('\n'), 2, "They receive booking and handoff alerts") }}
 </section>
-<div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties">Back</a><button class="btn primary">Save</button></div>
+<div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties">Back</a>
+  {% if not is_new and auth.is_owner %}<button class="btn danger" formaction="{{ BASE }}/properties/{{ p.id }}/delete" data-confirm="Delete this property and its rooms?">Delete</button>{% endif %}
+  <button class="btn primary">Save</button></div>
 </form>
-{% if not is_new %}
-<section class="card"><h3>Room types</h3>
-  <table class="list"><thead><tr><th>Name</th><th>Rooms</th><th>Max per room</th><th class="r">Rate / night</th><th></th></tr></thead><tbody>
-  {% for t in rooms %}<tr class="click" data-href="{{ BASE }}/properties/{{ p.id }}/rooms/{{ t.id }}"><td><b>{{ t.name }}</b>{% if not t.active %} <span class="pill cancelled">Inactive</span>{% endif %}</td><td>{{ t.units }}</td>
-  <td>{{ t.max_adults }} adults, {{ t.max_children }} children, {{ t.max_occupancy }} total</td><td class="r">{{ t.base_rate|rupees }}{% if t.weekend_rate %}<small class="block">Weekend {{ t.weekend_rate|rupees }}</small>{% endif %}</td><td>›</td></tr>
-  {% else %}<tr><td colspan="5">{{ empty("No room types yet") }}</td></tr>{% endfor %}</tbody></table>
-  <div class="btn-row"><a class="btn primary" href="{{ BASE }}/properties/{{ p.id }}/rooms/new">{{ icon('plus') }} Add room type</a>
-  {% if auth.is_owner %}<form method="post" action="{{ BASE }}/properties/{{ p.id }}/delete">{{ csrf_field(csrf) }}<button class="btn danger" data-confirm="Delete this property?">Delete property</button></form>{% endif %}</div>
-</section>
-{% endif %}
 {% endblock %}

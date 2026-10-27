@@ -1,0 +1,34 @@
+# Render Blueprint for the RESORT bot (free plan, testing only: the disk is wiped when it sleeps).
+services:
+  - type: web
+    name: resort-bot
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: RESORT_DB_PATH
+        value: /tmp/resort.sqlite3
+      - key: RESORT_AUTO_SEED
+        value: "1"
+      - key: RESORT_WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: RESORT_WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: RESORT_WHATSAPP_APP_SECRET
+        sync: false
+      - key: RESORT_WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: RESORT_OWNER_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: LLM_CHAIN
+        sync: false
