@@ -225,10 +225,8 @@ class Agent:
 
         meter = _Meter(self.llm)
         reply = self._run(messages, ctx, facts, language, meter)
-        # User rule (2026-10-21): never the customer's name; sir/madam only when the gender is clear.
+        # User rules: never the customer's name; always sir/madam (user, 2026-10-27).
         reply.text = without_names(reply.text, [customer.name, profile_name])
-        if not (customer.name or profile_name):  # no clue about gender: a title would be a guess
-            reply.text = without_titles(reply.text)
         if invited and mentions_sulaimani(reply.text):
             reply.text = without_sulaimani(reply.text) or reply.text
         if stock and stock[1] and "search_cars" not in reply.tools_used:
@@ -237,7 +235,7 @@ class Agent:
         reply.photos = list(ctx.photos) if reply.guardrail in ("ok", "rewritten") else []
         if want_voice:
             spoken = self._spoken(reply, facts, meter)
-            reply.spoken_text = spoken if (customer.name or profile_name or not spoken) else without_titles(spoken)
+            reply.spoken_text = spoken
             if invited and reply.spoken_text and mentions_sulaimani(reply.spoken_text):
                 reply.spoken_text = without_sulaimani(reply.spoken_text) or None
         reply.usage = dict(meter.totals)

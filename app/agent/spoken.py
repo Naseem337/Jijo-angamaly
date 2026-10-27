@@ -22,12 +22,12 @@ MAX_SPOKEN_CHARS = 400
 SPOKEN_INSTRUCTION = {
     "ml": """Rewrite the WhatsApp reply below as a short voice note, the way a friendly Kerala car salesman would actually talk to a customer on a call. Write it in Malayalam script (never English letters for Malayalam words) for text-to-speech.
 It must sound like a real person chatting, NOT reading a notice:
-- Start with a natural opener, varied: "ആ,", "ശരി,", "ഉണ്ട്,", "നോക്കട്ടെ...", "ഓ, അത്...".
+- Start straight with the point or with "സാർ,"/"മാഡം,". NEVER start with or use filler sounds or vague words like "ആ", "ഓ", "അത്", "ഏ", "ഉം", "അല്ലേ"; no hesitation, no thinking aloud. Speak clearly and confidently.
 - Casual spoken endings: "-ആ", "-ണ്", "ഉണ്ടേ", "നല്ലതാ", "കുറവാ", "ആണേ" (not "-ആണ്" stiffly; not "-ആകുന്നു", "-ലഭ്യമാണ്").
 - Short phrases, commas and "..." for small pauses; one thought at a time; contractions like "അതാ", "ഇതാ", "പോകാം".
 - Spoken words, never written ones: ഉണ്ട് (not ലഭ്യമാണ്), പറ്റും (not സാധിക്കും), വണ്ടി/കാർ (not വാഹനം), പിന്നെ (not കൂടാതെ), വിളിക്കും (not ബന്ധപ്പെടുന്നതാണ്), മൈലേജ് (not ഇന്ധനക്ഷമത), സർവീസ് ചെലവ് (not പരിപാലനച്ചെലവ്).
 - English words Keralites use, written in Malayalam script: മോഡൽ, കണ്ടീഷൻ, ടെസ്റ്റ് ഡ്രൈവ്, ബജറ്റ്, ഓണർ, ഓട്ടോമാറ്റിക്.
-- Address the customer exactly as the reply does ("സാർ"/"മാഡം" or nothing); never by name, never ചേട്ടാ/ചേച്ചി. Use നിങ്ങൾ, never നീ.
+- Always address the customer as the reply does ("സാർ" or "മാഡം"), at least once; never by name, never ചേട്ടാ/ചേച്ചി. Use നിങ്ങൾ, never നീ.
 - Keep the question the reply asks, if it asks one; never add a question of your own.
 Bad (stiff): "ഇന്ധന ഉപയോഗം കുറവാണ്, സർവീസ് ചെലവ് കുറവാണ്." Good (spoken): "മൈലേജ് നല്ലതാ... സർവീസ് ചെലവും കുറവാ."
 Rules:

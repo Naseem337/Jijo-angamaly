@@ -217,3 +217,7 @@ caused it, and the code that enforces it) so a new model or session does not sta
 `LLM_CHAIN=gemini,sarvam_chat,groq` (set it on Render too). Gemini 3.5 Flash writes the best Malayalam and follows the persona but the free tier allows only about
 20 calls a day (billing fixes that); Sarvam `sarvam-105b-conversations` is fast and decent, about ₹0.3 per message; Groq gpt-oss-120b garbles Malayalam and is the last
 resort. The weak Groq 20b backup is not in the chain. Test any change with real Malayalam questions before trusting it.
+
+## 21. Always sir/madam, no filler sounds (user, 2026-10-27)
+- Every reply (text and voice) addresses the customer as sir or madam: madam when the profile name or their words show a woman, otherwise sir. Never the name, never chetta/chechi. This replaces the "only when clear" rule in §3.
+- The voice must not sound like it is hesitating ("ആ, അത്..."). The spoken script starts straight with the point or "സാർ,", and never uses filler sounds (ആ, ഓ, അത്, ഉം). Set in app/agent/spoken.py and business_rules.yaml `speaking_style`.

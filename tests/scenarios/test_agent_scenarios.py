@@ -267,8 +267,8 @@ def test_no_stock_search_for_a_greeting_or_a_follow_up(make_agent) -> None:
     assert all("Stock search ALREADY DONE" not in call.messages[-1].content for call in llm.calls)
 
 
-def test_a_profile_name_without_letters_gives_no_title(make_agent) -> None:
+def test_a_profile_name_without_letters_still_gets_sir(make_agent) -> None:
     agent, llm = make_agent(MockLLM.text("Sir, we sell pre-owned cars only."))
     reply = agent.handle(PHONE, "I need a new Brezza", profile_name="~")
-    assert reply.text == "we sell pre-owned cars only."  # '~' is no name, so no sir/madam guess
+    assert reply.text == "Sir, we sell pre-owned cars only."  # always sir/madam (user, 2026-10-27)
     assert "profile name unknown" in llm.calls[0].messages[-1].content
