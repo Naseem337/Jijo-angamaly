@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, pill, csrf_field %}
+{% block title %}{{ b.id }} · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head(b.id, (prop.name if prop else '') ~ ' · ' ~ (rt.name if rt else '')) %}{{ pill(b.status) }}{% endcall %}
+<div class="grid2">
+<section class="card"><h3>Guest</h3>
+  <dl class="kv"><dt>Name</dt><dd>{{ b.guest_name or '—' }}</dd><dt>Phone</dt><dd><a href="{{ BASE }}/guests/{{ b.guest_phone|urlq }}">{{ b.guest_phone }}</a> · <a href="{{ BASE }}/conversations/{{ b.guest_phone|urlq }}">chat</a></dd>
+  <dt>Language</dt><dd>{{ b.language }}</dd></dl>
+  <h3>Stay</h3>
+  <dl class="kv"><dt>Check-in</dt><dd>{{ b.check_in.strftime('%a, %d %b %Y') }}{% if prop %} · from {{ prop.checkin_time }}{% endif %}</dd>
+  <dt>Check-out</dt><dd>{{ b.check_out.strftime('%a, %d %b %Y') }}{% if prop %} · by {{ prop.checkout_time }}{% endif %}</dd>
+  <dt>Nights</dt><dd>{{ b.nights }}</dd><dt>Rooms</dt><dd>{{ b.rooms }} × {{ rt.name if rt else '' }}</dd>
+  <dt>Guests</dt><dd>{{ b.adults }} adults, {{ b.children }} children</dd></dl>
+</section>
+<section class="card"><h3>Payment</h3>
+  <dl class="kv"><dt>Total</dt><dd><b>{{ b.total|rupees }}</b></dd><dt>Advance ({{ prop.advance_pct if prop else '' }}%)</dt><dd>{{ b.advance|rupees }}</dd>
+  <dt>Balance at property</dt><dd>{{ (b.total - b.advance)|rupees }}</dd>
+  {% if b.paid_at %}<dt>Paid</dt><dd>{{ b.paid_at.strftime('%d %b %Y %H:%M') }} UTC</dd>{% endif %}
+  {% if b.razorpay_payment_id %}<dt>Razorpay ID</dt><dd>{{ b.razorpay_payment_id }}</dd>{% endif %}
+  {% if b.payment_link_url %}<dt>Link</dt><dd class="wrap"><a href="{{ b.payment_link_url }}" rel="noopener" target="_blank">{{ b.payment_link_url }}</a></dd>{% endif %}</dl>
+  <div class="btn-row">
+  {% if b.status != 'paid' and b.status != 'cancelled' %}
+    <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="mark_paid"><button class="btn primary" data-confirm="Mark this booking as paid?">Mark paid</button></form>
+    <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="resend_link"><button class="btn">Resend payment link</button></form>
+  {% endif %}
+  {% if b.status != 'cancelled' %}
+    <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="cancel"><button class="btn danger" data-confirm="Cancel this booking and free the rooms?">Cancel booking</button></form>
+  {% endif %}
+  </div>
+  <h3>Timeline</h3>
+  <ul class="timeline">{% for at, text in timeline %}<li>{{ text }}{% if at %}<small>{{ at.strftime('%d %b %H:%M') }} UTC</small>{% endif %}</li>{% endfor %}</ul>
+</section></div>
+<section class="card"><h3>Notes</h3>
+  {% if b.notes %}<pre class="notes">{{ b.notes }}</pre>{% endif %}
+  <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action" class="inline-form">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="note"><input name="note" placeholder="Add a note for the team" required><button class="btn">Add note</button></form>
+</section>
+{% endblock %}

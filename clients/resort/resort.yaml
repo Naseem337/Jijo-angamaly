@@ -1,0 +1,58 @@
+# Resort booking bot (WhatsApp). Loaded by app/resort/config.py, NOT by the car-dealer loader
+# (that one only reads folders with a client.yaml), so the True Choice bot is untouched.
+# ${VAR} values come from the environment (.env locally). Secrets are only NAMES here.
+
+client_id: resort
+display_name: Resort Booking Assistant
+bot_name: Resort Assistant       # shown to guests; change to the client's brand
+languages: [en, ml, ta, hi]
+hold_minutes: 15                 # rooms are held this long while the guest pays
+max_audio_seconds: 60            # longest voice note we transcribe
+
+# Staff numbers that always get booking alerts (comma-separated, E.164) besides each property's own.
+staff_numbers: "${RESORT_STAFF_NUMBERS}"
+
+# Approved WhatsApp template names, used only when a free text can't be sent (guest silent > 24 h).
+templates:
+  paid: "${RESORT_TPL_PAID:-}"
+  failed: "${RESORT_TPL_FAILED:-}"
+  pending: "${RESORT_TPL_PENDING:-}"
+
+speaking_style: >
+  Warm, polite and brief, like a good resort front-desk host. Plain words, no slang.
+  Reply in the guest's own language and script.
+
+providers:
+  llm:
+    gemini:
+      kind: openai_compatible
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+      model: "${GEMINI_MODEL:-gemini-3.5-flash}"
+      api_key_secret: gemini_api_key
+      timeout_s: 12
+      thinking_headroom_tokens: 2048
+      extra: {reasoning_effort: low}
+    sarvam_chat:
+      kind: openai_compatible
+      base_url: https://api.sarvam.ai/v1
+      model: "${SARVAM_CHAT_MODEL:-sarvam-105b-conversations}"
+      api_key_secret: sarvam_api_key
+      timeout_s: 30
+    groq:
+      kind: openai_compatible
+      base_url: https://api.groq.com/openai/v1
+      model: "${GROQ_MODEL:-openai/gpt-oss-120b}"
+      api_key_secret: groq_api_key
+      timeout_s: 20
+      thinking_headroom_tokens: 1024
+      extra: {reasoning_effort: low}
+  llm_chain: "${LLM_CHAIN:-gemini,sarvam_chat,groq}"     # free tiers, testing
+  stt:
+    kind: sarvam
+    api_key_secret: sarvam_api_key
+    model: "${SARVAM_STT_MODEL:-saaras:v4}"
+    language_code: unknown      # auto-detect en / ml / ta / hi
+    keyterms: [resort, room, deluxe, villa, cottage, check-in, check-out, Pozhiyoram, Vibes, Kanthalloor]
+  tts:                          # unused: this bot never sends voice (user rule)
+    kind: sarvam
+    api_key_secret: sarvam_api_key

@@ -1,0 +1,64 @@
+RESORT WHATSAPP BOOKING ASSISTANT: REQUIREMENTS SUMMARY
+Updated: 2026-10-28 (draft, to be confirmed with the client)
+
+WHAT WE ARE BUILDING
+A WhatsApp assistant for resorts and staycations, plus a simple management dashboard.
+Guests chat on WhatsApp, pick their stay, pay online, and get a confirmed booking, with no phone calls
+or manual follow-up needed. The resort team manages everything from the dashboard.
+
+FIRST PROPERTIES
+- Pozhiyoram Resort
+- Vibes Kanthalloor
+One owner manages several properties. More can be added later.
+
+WHAT THE GUEST EXPERIENCE LOOKS LIKE
+1. The guest messages the resort's WhatsApp number, by text or voice note.
+2. The assistant replies in the guest's own language: English, Malayalam, Tamil or Hindi.
+   It also understands mixed styles such as Manglish, Tanglish and Hinglish. Voice notes work
+   both ways: the guest can send a voice note and get a voice reply.
+3. The assistant offers ready-made options to tap, so guests don't have to type everything:
+   - Which property (for example Pozhiyoram Resort or Vibes Kanthalloor)
+   - Check-in and check-out dates
+   - Number of guests (adults and children), with an option to choose a higher number
+   - Number of rooms
+   - Room type, with the total price for the stay
+4. Room options are checked against capacity. If a guest tries to book a large group into one room,
+   that option is not offered. The assistant shows the number of rooms the group actually needs.
+5. The assistant checks live room availability and rates from the dashboard, and never guesses.
+6. The guest confirms, and the rooms are held for a short time (about 15 minutes).
+7. The guest receives a Razorpay payment link and a UPI QR code, and can pay the advance or the full amount.
+8. After payment, the guest automatically receives a WhatsApp message:
+   - Payment received and booking confirmed
+   - Payment failed, with a link to try again
+   - Payment pending or room on hold, please wait
+   If the payment is not completed in time, the rooms are released.
+9. The assistant can send room and property photos.
+10. For anything it cannot handle (special requests, complaints, refunds), it hands the chat to the resort
+    staff with a short summary of the conversation.
+
+WHAT THE RESORT TEAM GETS (DASHBOARD)
+- A clean, simple, easy-to-use screen, in the style of the Frappe desk (sidebar, lists, forms, calendar).
+- Manage properties, room types, rooms, rates and seasonal prices.
+- Booking calendar showing availability, holds, paid and cancelled bookings.
+- Guest records with full stay history. Previous guests are stored automatically.
+- View WhatsApp conversations and staff handoff requests.
+- Login for the owner and managers.
+
+OFFERS AND REPEAT GUESTS
+- Past guests who agreed to receive messages can get offers, seasonal packages or availability
+  alerts on WhatsApp.
+- Guests can stop messages at any time by replying STOP.
+
+HOW IT IS SET UP
+- Testing first on a WhatsApp test number, using free-tier tools, so nothing is spent or risked.
+- Then we connect the resort's own WhatsApp Business number and approve the message templates.
+- Razorpay is connected with test keys first, then the resort's live account.
+
+WHAT WE NEED FROM THE CLIENT
+- Room types for each property, how many people each room fits, and photos
+- Rates, including weekday, weekend and season prices, and whether GST is included
+- Advance payment amount (or full payment) and cancellation and refund policy
+- Check-in and check-out times
+- Staff WhatsApp numbers for each property
+- Razorpay account details
+- WhatsApp Business account access for the final number

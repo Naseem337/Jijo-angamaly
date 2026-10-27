@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head %}
+{% block title %}Settings · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("Settings", "Which connections are set up. Values are never shown here.") %}{% endcall %}
+<div class="cards">{% for name, vars in rows %}
+<section class="card"><h3>{{ name }}</h3>
+{% for v, ok in vars %}<div class="row"><code>{{ v }}</code><span class="pill {{ 'paid' if ok else 'cancelled' }}">{{ 'Set' if ok else 'Missing' }}</span></div>{% endfor %}</section>{% endfor %}</div>
+{% endblock %}

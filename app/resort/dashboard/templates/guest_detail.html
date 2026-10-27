@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, pill, field, area, csrf_field, empty %}
+{% block title %}{{ g.name or g.phone }} · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head(g.name or g.phone, g.phone) %}<a class="btn" href="{{ BASE }}/conversations/{{ g.phone|urlq }}">Open chat</a>{% endcall %}
+<div class="grid2">
+<form method="post" action="{{ BASE }}/guests/{{ g.phone|urlq }}" class="card form">{{ csrf_field(csrf) }}<h3>Profile</h3>
+  {{ field("Name", "name", g.name) }}
+  <label class="field"><span>Language</span><select name="language">{% for code, label in [('en','English'),('ml','Malayalam'),('ta','Tamil'),('hi','Hindi')] %}<option value="{{ code }}" {{ 'selected' if g.language == code }}>{{ label }}</option>{% endfor %}</select></label>
+  <label class="check"><input type="checkbox" name="offers_consent" {{ 'checked' if g.offers_consent }}> Agreed to receive offers</label>
+  {{ area("Notes", "notes", g.notes, 3) }}<button class="btn primary">Save</button></form>
+<section class="card"><h3>Stay history</h3>
+  {% for b in stays %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.check_in.strftime('%d %b %Y') }} · {{ b.nights }} night(s)</b><span>{{ props[b.property_id].name }} · {{ rooms[b.room_type_id].name }} {{ pill(b.status) }}</span></a>
+  {% else %}{{ empty("No bookings yet") }}{% endfor %}</section></div>
+<section class="card"><h3>Recent chat</h3><div class="chat small">{% for m in chat %}<div class="bubble {{ 'in' if m.direction == 'in' else 'out' }}">{{ m.text }}<small>{{ m.at.strftime('%d %b %H:%M') }}{% if m.source == 'staff' %} · staff{% endif %}</small></div>{% else %}{{ empty("No messages") }}{% endfor %}</div></section>
+{% endblock %}

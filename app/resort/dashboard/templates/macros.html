@@ -1,0 +1,37 @@
+{% macro icon(name) -%}
+<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if name == 'home' %}<path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/>
+{%- elif name == 'book' %}<path d="M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3z"/><path d="M8 8h7M8 12h7"/>
+{%- elif name == 'cal' %}<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>
+{%- elif name == 'building' %}<path d="M4 21V5a2 2 0 012-2h8a2 2 0 012 2v16"/><path d="M16 9h2a2 2 0 012 2v10M2 21h20M8 7h4M8 11h4M8 15h4"/>
+{%- elif name == 'users' %}<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0113 0"/><path d="M16 4.5a3.5 3.5 0 010 7M18 20a6 6 0 00-3-5.2"/>
+{%- elif name == 'chat' %}<path d="M4 5h16a1 1 0 011 1v10a1 1 0 01-1 1h-9l-5 4v-4H4a1 1 0 01-1-1V6a1 1 0 011-1z"/>
+{%- elif name == 'key' %}<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>
+{%- elif name == 'gear' %}<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>
+{%- elif name == 'menu' %}<path d="M4 7h16M4 12h16M4 17h16"/>
+{%- elif name == 'search' %}<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>
+{%- elif name == 'plus' %}<path d="M12 5v14M5 12h14"/>
+{%- elif name == 'download' %}<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>
+{%- endif %}</svg>
+{%- endmacro %}
+
+{% macro pill(status) -%}
+<span class="pill {{ status }}">{{ status|capitalize }}</span>
+{%- endmacro %}
+
+{% macro csrf_field(csrf) -%}<input type="hidden" name="csrf" value="{{ csrf }}">{%- endmacro %}
+
+{% macro page_head(title, sub='') -%}
+<div class="page-head"><div><h1>{{ title }}</h1>{% if sub %}<p class="muted">{{ sub }}</p>{% endif %}</div><div class="actions">{{ caller() if caller else '' }}</div></div>
+{%- endmacro %}
+
+{% macro field(label, name, value='', type='text', hint='', required=False, attrs='') -%}
+<label class="field"><span>{{ label }}{% if required %} <i class="req">*</i>{% endif %}</span>
+<input type="{{ type }}" name="{{ name }}" value="{{ value }}" {{ attrs|safe }} {{ 'required' if required }}>{% if hint %}<small>{{ hint }}</small>{% endif %}</label>
+{%- endmacro %}
+
+{% macro area(label, name, value='', rows=3, hint='') -%}
+<label class="field"><span>{{ label }}</span><textarea name="{{ name }}" rows="{{ rows }}">{{ value }}</textarea>{% if hint %}<small>{{ hint }}</small>{% endif %}</label>
+{%- endmacro %}
+
+{% macro empty(text) -%}<div class="empty">{{ text }}</div>{%- endmacro %}

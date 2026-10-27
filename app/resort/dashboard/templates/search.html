@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, pill, empty %}
+{% block title %}Search · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("Search", '“' ~ q ~ '”') %}{% endcall %}
+<div class="grid2">
+<section class="card"><h3>Bookings</h3>{% for b in bookings %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.id }} · {{ b.guest_name or b.guest_phone }}</b><span>{{ props[b.property_id].name }} · {{ b.check_in.strftime('%d %b') }} {{ pill(b.status) }}</span></a>{% else %}{{ empty("No bookings found") }}{% endfor %}</section>
+<section class="card"><h3>Guests</h3>{% for g in guests %}<a class="row" href="{{ BASE }}/guests/{{ g.phone|urlq }}"><b>{{ g.name or g.phone }}</b><span>{{ g.phone }}</span></a>{% else %}{{ empty("No guests found") }}{% endfor %}</section></div>
+{% endblock %}

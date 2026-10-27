@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, csrf_field, empty %}
+{% block title %}Conversations · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("Conversations", "WhatsApp chats with guests") %}{% endcall %}
+<div class="inbox {{ 'open' if current }}">
+  <section class="card list-pane">
+    {% for c in convos %}<a class="convo {{ 'active' if c.phone == current }}" href="{{ BASE }}/conversations/{{ c.phone|urlq }}">
+      <span class="avatar">{{ (c.name or c.phone[-2:])[:1]|upper }}</span>
+      <span class="meta"><b>{{ c.name or c.phone }}</b>{% if c.paused %}<em class="flag">Human</em>{% endif %}<small>{{ ('You: ' if c.direction == 'out' else '') ~ c.text }}</small></span></a>
+    {% else %}{{ empty("No conversations yet") }}{% endfor %}
+  </section>
+  <section class="card chat-pane">
+    {% if current %}
+    <div class="chat-head"><a class="back" href="{{ BASE }}/conversations">‹</a><b>{{ (guest.name if guest and guest.name else current) }}</b><small>{{ current }}</small>
+      <form method="post" action="{{ BASE }}/conversations/{{ current|urlq }}/pause">{{ csrf_field(csrf) }}<input type="hidden" name="pause" value="{{ 0 if paused else 1 }}"><button class="btn {{ 'primary' if paused else '' }} sm">{{ 'Resume bot' if paused else 'Pause bot' }}</button></form></div>
+    <div class="chat" id="chat">{% for m in chat %}<div class="bubble {{ 'in' if m.direction == 'in' else 'out' }}">{{ m.text }}<small>{{ m.at.strftime('%d %b %H:%M') }}{% if m.source == 'staff' %} · staff{% elif m.source == 'voice' %} · voice{% endif %}</small></div>{% endfor %}</div>
+    <form method="post" action="{{ BASE }}/conversations/{{ current|urlq }}/send" class="composer">{{ csrf_field(csrf) }}<input name="text" placeholder="Reply as staff (pause the bot first)" autocomplete="off"><button class="btn primary">Send</button></form>
+    {% else %}{{ empty("Select a conversation") }}{% endif %}
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script>const c=document.getElementById('chat');if(c)c.scrollTop=c.scrollHeight;</script>{% endblock %}

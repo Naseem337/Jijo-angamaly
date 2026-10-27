@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Log in · Resort Desk{% endblock %}
+{% block bare %}
+<div class="login-wrap">
+  <form class="login-card" method="post" action="{{ BASE }}/login">
+    <div class="brand big"><span class="logo">R</span><span>Resort Desk</span></div>
+    <p class="muted">Sign in to manage your properties and bookings.</p>
+    {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+    <label class="field"><span>Email</span><input type="email" name="email" required autofocus></label>
+    <label class="field"><span>Password</span><input type="password" name="password" required></label>
+    <button class="btn primary block">Log in</button>
+  </form>
+</div>
+{% endblock %}

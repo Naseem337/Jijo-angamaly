@@ -23,6 +23,7 @@ class InboundMessage:
     media_id: str | None = None  # audio / image / document
     profile_name: str | None = None
     context_id: str | None = None  # the message this one replies to (e.g. an alert)
+    reply_id: str | None = None  # id of the tapped list row / reply button (interactive messages)
 
     @property
     def is_text(self) -> bool:
@@ -48,6 +49,14 @@ def _text_of(msg: dict[str, Any]) -> str:
         reply = inner.get("button_reply") or inner.get("list_reply") or {}
         return reply.get("title", "")
     return ""
+
+
+def _reply_id_of(msg: dict[str, Any]) -> str | None:
+    if msg.get("type") != "interactive":
+        return None
+    inner = msg.get("interactive") or {}
+    reply = inner.get("button_reply") or inner.get("list_reply") or {}
+    return reply.get("id")
 
 
 def parse_webhook(payload: dict[str, Any], phone_number_id: str) -> list[InboundMessage]:
@@ -77,5 +86,6 @@ def parse_webhook(payload: dict[str, Any], phone_number_id: str) -> list[Inbound
                     media_id=media.get("id"),
                     profile_name=names.get(msg.get("from")),
                     context_id=(msg.get("context") or {}).get("id"),
+                    reply_id=_reply_id_of(msg),
                 ))
     return found

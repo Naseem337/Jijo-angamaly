@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, field, csrf_field %}
+{% block title %}Users · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("Users", "Owners see everything. Managers see only the properties you tick.") %}{% endcall %}
+<div class="card table-wrap"><table class="list"><thead><tr><th>User</th><th>Role</th><th>Properties</th><th>Active</th><th></th></tr></thead><tbody>
+{% for u in users %}<tr><td><b>{{ u.name }}</b><small class="block">{{ u.email }}</small></td><td>{{ u.role|capitalize }}</td>
+<td>{% if not u.property_ids %}All{% else %}{% for pid in u.property_ids %}{% for p in props if p.id == pid %}{{ p.name }}{% if not loop.last %}, {% endif %}{% endfor %}{% endfor %}{% endif %}</td>
+<td>{{ 'Yes' if u.active else 'No' }}</td>
+<td>{% if u.email != user.email %}<form method="post" action="{{ BASE }}/users/delete">{{ csrf_field(csrf) }}<input type="hidden" name="email" value="{{ u.email }}"><button class="btn ghost sm" data-confirm="Delete {{ u.email }}?">Delete</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+<form method="post" action="{{ BASE }}/users" class="card form"><h3>Add or update a user</h3>{{ csrf_field(csrf) }}
+<p class="muted">Use an existing email to change that user. Leave the password empty to keep it.</p><div class="cols">
+{{ field("Email", "email", "", "email", required=True) }}{{ field("Name", "name") }}{{ field("Password", "password", "", "password", "At least 8 characters for a new user", attrs='autocomplete="new-password"') }}
+<label class="field"><span>Role</span><select name="role"><option value="manager">Manager</option><option value="owner">Owner</option></select></label></div>
+<div class="field"><span>Manager can see</span>{% for p in props %}<label class="check"><input type="checkbox" name="property_ids" value="{{ p.id }}"> {{ p.name }}</label>{% endfor %}</div>
+<label class="check"><input type="checkbox" name="active" checked> Active</label><button class="btn primary">Save user</button></form>
+{% endblock %}

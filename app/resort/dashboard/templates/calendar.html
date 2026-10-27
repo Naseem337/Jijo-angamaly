@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, empty %}
+{% block title %}Calendar · Resort Desk{% endblock %}
+{% block content %}
+{% if not prop %}{{ empty("Add a property first") }}{% else %}
+{% call page_head("Calendar", month) %}
+<form method="get" class="inline-form"><select name="property_id" onchange="this.form.submit()">{% for p in props %}<option value="{{ p.id }}" {{ 'selected' if p.id == prop.id }}>{{ p.name }}</option>{% endfor %}</select>
+<a class="btn" href="?property_id={{ prop.id }}&month={{ prev }}">‹</a><a class="btn" href="?property_id={{ prop.id }}&month={{ nxt }}">›</a></form>
+{% endcall %}
+<div class="legend"><span><i class="c free"></i>Free</span><span><i class="c held"></i>Held (unpaid)</span><span><i class="c booked"></i>Booked</span><span><i class="c full"></i>Sold out</span></div>
+<div class="card table-wrap cal">
+<table><thead><tr><th class="sticky">Room type</th>{% for d in days %}<th class="{{ 'today' if d == today }}{{ ' wk' if d.weekday() in (4,5) }}">{{ d.day }}<small>{{ d.strftime('%a')[:2] }}</small></th>{% endfor %}</tr></thead><tbody>
+{% for row in rows %}<tr><th class="sticky">{{ row.rt.name }}<small>{{ row.rt.units }} room(s)</small></th>
+{% for c in row.cells %}<td class="{{ 'full' if c.free == 0 else 'booked' if c.booked else 'held' if c.held else 'free' }}">
+<a href="{{ BASE }}/bookings?property_id={{ prop.id }}&room_type_id={{ row.rt.id }}&date={{ c.day }}" title="{{ c.booked }} booked, {{ c.held }} held, {{ c.free }} free">{{ c.free if not (c.booked or c.held) else c.booked + c.held }}</a></td>{% endfor %}</tr>
+{% else %}<tr><td>{{ empty("No room types yet") }}</td></tr>{% endfor %}</tbody></table></div>
+<p class="muted">Each cell shows rooms free (green) or rooms taken (amber / blue). Click a cell to see its bookings.</p>
+{% endif %}
+{% endblock %}

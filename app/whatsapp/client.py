@@ -58,6 +58,42 @@ class WhatsAppClient:
         log.info("WhatsApp text sent to %s (%s)", mask_phone(to), message_id)
         return message_id
 
+    def send_interactive_list(self, to: str, body: str, button_label: str,
+                              rows: list[tuple[str, str, str]], *, header: str | None = None,
+                              section_title: str = "Options") -> str:
+        """A tap-to-choose list (WhatsApp limits: 10 rows, title 24, description 72, button 20).
+        `rows` are (id, title, description). The tapped row comes back as an interactive list_reply."""
+        if not 1 <= len(rows) <= 10:
+            raise ValueError("a WhatsApp list needs 1 to 10 rows")
+        row_data = []
+        for row_id, title, description in rows:
+            row: dict[str, str] = {"id": row_id[:200], "title": title[:24]}
+            if description:
+                row["description"] = description[:72]
+            row_data.append(row)
+        interactive: dict[str, Any] = {
+            "type": "list", "body": {"text": body[:1024]},
+            "action": {"button": button_label[:20], "sections": [{"title": section_title[:24], "rows": row_data}]},
+        }
+        if header:
+            interactive["header"] = {"type": "text", "text": header[:60]}
+        data = self._post({"recipient_type": "individual", "to": to_wa_id(to), "type": "interactive",
+                           "interactive": interactive})
+        return data["messages"][0]["id"]
+
+    def send_reply_buttons(self, to: str, body: str, buttons: list[tuple[str, str]]) -> str:
+        """Up to 3 tap buttons (title max 20 chars). `buttons` are (id, title)."""
+        if not 1 <= len(buttons) <= 3:
+            raise ValueError("WhatsApp allows 1 to 3 reply buttons")
+        interactive = {
+            "type": "button", "body": {"text": body[:1024]},
+            "action": {"buttons": [{"type": "reply", "reply": {"id": bid[:256], "title": title[:20]}}
+                                   for bid, title in buttons]},
+        }
+        data = self._post({"recipient_type": "individual", "to": to_wa_id(to), "type": "interactive",
+                           "interactive": interactive})
+        return data["messages"][0]["id"]
+
     def upload_media(self, data: bytes, mime_type: str = "audio/ogg", filename: str = "voice.ogg") -> str:
         """Upload a file for sending; returns its media id (WhatsApp keeps it ~30 days)."""
         try:

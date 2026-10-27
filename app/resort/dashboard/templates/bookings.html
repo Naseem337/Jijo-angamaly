@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, pill, empty, icon %}
+{% block title %}Bookings · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("Bookings", items|length ~ " shown") %}
+<a class="btn" href="{{ BASE }}/bookings/export.csv?{{ query }}">{{ icon('download') }} CSV</a>
+<a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a>
+{% endcall %}
+<form class="filters" method="get">
+  <select name="property_id"><option value="">All properties</option>{% for p in my_props %}<option value="{{ p.id }}" {{ 'selected' if f.property_id == p.id }}>{{ p.name }}</option>{% endfor %}</select>
+  <select name="status"><option value="">Any status</option>{% for s in statuses %}<option value="{{ s }}" {{ 'selected' if f.status == s }}>{{ s|capitalize }}</option>{% endfor %}</select>
+  <input type="date" name="from" value="{{ f.get('from','') }}" title="Stay from"><input type="date" name="to" value="{{ f.get('to','') }}" title="Stay until">
+  <input name="q" placeholder="Name, phone or ID" value="{{ f.get('q','') }}">
+  <button class="btn">Filter</button><a class="btn ghost" href="{{ BASE }}/bookings">Clear</a>
+</form>
+<div class="card table-wrap">
+<table class="list"><thead><tr><th>Booking</th><th>Guest</th><th>Property</th><th>Stay</th><th>Rooms</th><th class="r">Total</th><th>Status</th></tr></thead><tbody>
+{% for b in items %}
+<tr class="click" data-href="{{ BASE }}/bookings/{{ b.id }}"><td><b>{{ b.id }}</b></td>
+<td>{{ b.guest_name or '—' }}<small class="block">{{ b.guest_phone }}</small></td>
+<td>{{ props[b.property_id].name }}<small class="block">{{ rooms[b.room_type_id].name }}</small></td>
+<td>{{ b.check_in.strftime('%d %b') }} → {{ b.check_out.strftime('%d %b') }}<small class="block">{{ b.nights }} night(s) · {{ b.adults }}A {{ b.children }}C</small></td>
+<td>{{ b.rooms }}</td><td class="r">{{ b.total|rupees }}</td><td>{{ pill(b.status) }}</td></tr>
+{% else %}<tr><td colspan="7">{{ empty("No bookings match these filters") }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

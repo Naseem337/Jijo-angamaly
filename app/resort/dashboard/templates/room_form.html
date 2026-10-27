@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, field, area, csrf_field, empty %}
+{% block title %}{{ rt.name or 'New room type' }} · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head(rt.name or "New room type", prop.name) %}{% endcall %}
+<form method="post" action="{{ BASE }}/properties/{{ prop.id }}/rooms/{{ 'new' if is_new else rt.id }}" class="form">{{ csrf_field(csrf) }}
+<section class="card"><h3>Room type</h3><div class="cols">
+  {{ field("Name", "name", rt.name, required=True, hint="e.g. Deluxe Cottage") }}{{ field("Number of rooms", "units", rt.units, "number", attrs='min="1"') }}
+  {{ field("Max adults per room", "max_adults", rt.max_adults, "number", attrs='min="1"') }}{{ field("Max children per room", "max_children", rt.max_children, "number", attrs='min="0"') }}
+  {{ field("Max guests per room (total)", "max_occupancy", rt.max_occupancy, "number", "The bot never offers more people than this per room", attrs='min="1"') }}
+</div></section>
+<section class="card"><h3>Price per room per night</h3><div class="cols">
+  {{ field("Base rate (₹)", "base_rate", rt.base_rate, "number", attrs='min="0"') }}
+  {{ field("Weekend rate (₹)", "weekend_rate", rt.weekend_rate if rt.weekend_rate is not none else '', "number", "Friday and Saturday nights. Leave empty to use the base rate.", attrs='min="0"') }}
+</div></section>
+<section class="card"><h3>Details</h3>
+  {{ area("Description", "description", rt.description, 3) }}{{ area("Amenities", "amenities", rt.amenities, 2, "e.g. AC, balcony, private pool") }}
+  {{ area("Photo links (one per line)", "photo_urls", rt.photo_urls|join('\n'), 3) }}
+  <label class="check"><input type="checkbox" name="active" {{ 'checked' if rt.active }}> Active (the bot offers this room)</label></section>
+<div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties/{{ prop.id }}">Back</a><button class="btn primary">Save</button></div>
+</form>
+{% if not is_new %}
+<section class="card"><h3>Season prices</h3><p class="muted">Peak seasons or festivals. A season price replaces the base and weekend rate on those nights.</p>
+  <table class="list"><thead><tr><th>From</th><th>To</th><th>Label</th><th class="r">Rate</th><th></th></tr></thead><tbody>
+  {% for r in rules %}<tr><td>{{ r.start.strftime('%d %b %Y') }}</td><td>{{ r.end.strftime('%d %b %Y') }}</td><td>{{ r.label }}</td><td class="r">{{ r.rate|rupees }}</td>
+  <td><form method="post" action="{{ BASE }}/properties/{{ prop.id }}/rooms/{{ rt.id }}/rates">{{ csrf_field(csrf) }}<input type="hidden" name="delete" value="{{ r.id }}"><button class="btn ghost sm">Remove</button></form></td></tr>
+  {% else %}<tr><td colspan="5">{{ empty("No season prices") }}</td></tr>{% endfor %}</tbody></table>
+  <form method="post" action="{{ BASE }}/properties/{{ prop.id }}/rooms/{{ rt.id }}/rates" class="inline-form wrap-row">{{ csrf_field(csrf) }}
+    <input type="date" name="start" required><input type="date" name="end" required><input name="label" placeholder="Label (Onam, Christmas…)"><input type="number" name="rate" placeholder="₹ per night" min="1" required><button class="btn">Add season price</button></form>
+  <div class="btn-row"><form method="post" action="{{ BASE }}/properties/{{ prop.id }}/rooms/{{ rt.id }}/delete">{{ csrf_field(csrf) }}<button class="btn danger" data-confirm="Delete this room type?">Delete room type</button></form></div>
+</section>
+{% endif %}
+{% endblock %}

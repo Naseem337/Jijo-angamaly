@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Resort Desk{% endblock %}</title>
+<link rel="stylesheet" href="{{ BASE }}/static/app.css">
+</head>
+<body>
+{% from "macros.html" import icon %}
+{% if user %}
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="{{ BASE }}/"><span class="logo">R</span><span>Resort Desk</span></a>
+    <nav>
+      {% set nav_items = [("home","Home","home",""),("bookings","Bookings","book","/bookings"),("calendar","Calendar","cal","/calendar"),
+        ("properties","Properties","building","/properties"),("guests","Guests","users","/guests"),("chats","Conversations","chat","/conversations")] %}
+      {% for key, label, ic, path in nav_items %}
+        <a href="{{ BASE }}{{ path or '/' }}" class="{{ 'active' if nav == key }}">{{ icon(ic) }}<span>{{ label }}</span></a>
+      {% endfor %}
+      {% if auth.is_owner %}
+        <div class="nav-sep">Admin</div>
+        <a href="{{ BASE }}/users" class="{{ 'active' if nav == 'users' }}">{{ icon('key') }}<span>Users</span></a>
+        <a href="{{ BASE }}/settings" class="{{ 'active' if nav == 'settings' }}">{{ icon('gear') }}<span>Settings</span></a>
+      {% endif %}
+    </nav>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Menu">{{ icon('menu') }}</button>
+      <form class="search" action="{{ BASE }}/search" method="get">
+        {{ icon('search') }}<input name="q" placeholder="Search booking, guest, phone" value="{{ q if nav == '' else '' }}">
+      </form>
+      <div class="user-menu">
+        <span class="avatar">{{ (user.name or user.email)[:1]|upper }}</span>
+        <div class="who"><b>{{ user.name or user.email }}</b><small>{{ user.role|capitalize }}</small></div>
+        <form method="post" action="{{ BASE }}/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn ghost sm">Log out</button></form>
+      </div>
+    </header>
+    <main class="content">{% block content %}{% endblock %}</main>
+  </div>
+</div>
+{% else %}
+{% block bare %}{% endblock %}
+{% endif %}
+<div id="toast" class="toast" data-msg="{{ toast }}"></div>
+<script src="{{ BASE }}/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

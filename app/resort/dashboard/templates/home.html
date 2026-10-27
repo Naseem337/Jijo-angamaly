@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, pill, empty %}
+{% block title %}Home · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("Home", today.strftime('%A, %d %B %Y')) %}
+<a class="btn primary" href="{{ BASE }}/bookings/new">+ New booking</a>
+{% endcall %}
+<div class="stats">
+  <a class="stat" href="{{ BASE }}/bookings?status=paid&date={{ today }}"><small>Check-ins today</small><b>{{ arrivals|length }}</b></a>
+  <div class="stat"><small>Check-outs today</small><b>{{ departures|length }}</b></div>
+  <a class="stat" href="{{ BASE }}/bookings?status=hold"><small>Payments pending</small><b>{{ holds|length }}</b></a>
+  <div class="stat"><small>Advance collected this month</small><b>{{ revenue_month|rupees }}</b><em>{{ revenue_all|rupees }} all time</em></div>
+  <a class="stat" href="{{ BASE }}/conversations"><small>Chats needing a human</small><b>{{ paused }}</b><em>{{ waiting }} awaiting reply</em></a>
+</div>
+<div class="grid2">
+  <section class="card"><h3>Arriving today</h3>
+    {% for b in arrivals %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ props[b.property_id].name }} · {{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
+    {% else %}{{ empty("No arrivals today") }}{% endfor %}</section>
+  <section class="card"><h3>Leaving today</h3>
+    {% for b in departures %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ props[b.property_id].name }} · {{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
+    {% else %}{{ empty("No departures today") }}{% endfor %}</section>
+</div>
+<section class="card"><h3>Occupancy, next 14 days</h3>
+  {% for p, days in occ %}
+  <div class="occ"><div class="occ-name">{{ p.name }}</div>
+    <div class="occ-bars">{% for d in days %}<a href="{{ BASE }}/bookings?property_id={{ p.id }}&date={{ d.day }}" title="{{ d.day.strftime('%d %b') }}: {{ d.used }}/{{ d.total }} rooms">
+      <i style="height:{{ [d.pct, 4]|max }}%" class="{{ 'full' if d.pct >= 90 else 'mid' if d.pct >= 50 }}"></i><small>{{ d.day.day }}</small></a>{% endfor %}</div></div>
+  {% else %}{{ empty("Add a property to see occupancy") }}{% endfor %}
+</section>
+{% endblock %}

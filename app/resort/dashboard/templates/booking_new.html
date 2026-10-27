@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, field, csrf_field %}
+{% block title %}New booking · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("New booking", "For walk-ins and phone bookings. Rooms are checked live.") %}{% endcall %}
+<form method="post" class="form" id="booking-form">{{ csrf_field(csrf) }}
+<section class="card"><h3>Stay</h3><div class="cols">
+  <label class="field"><span>Property</span><select id="property" required>{% for d in data %}<option value="{{ d.prop.id }}">{{ d.prop.name }}</option>{% endfor %}</select></label>
+  <label class="field"><span>Room type</span><select name="room_type_id" id="room_type" required>{% for d in data %}{% for rt in d.rooms %}<option value="{{ rt.id }}" data-property="{{ d.prop.id }}">{{ rt.name }} · {{ rt.base_rate|rupees }}</option>{% endfor %}{% endfor %}</select></label>
+  {{ field("Check-in", "check_in", today, "date", required=True, attrs='id="check_in"') }}
+  {{ field("Check-out", "check_out", tomorrow, "date", required=True, attrs='id="check_out"') }}
+  {{ field("Adults", "adults", 2, "number", attrs='id="adults" min="1" max="40"') }}
+  {{ field("Children", "children", 0, "number", attrs='id="children" min="0" max="40"') }}
+  <label class="field"><span>Rooms</span><select name="rooms" id="rooms"></select></label>
+</div><div id="preview" class="preview">Choose room type and dates</div></section>
+<section class="card"><h3>Guest</h3><div class="cols">
+  {{ field("Name", "guest_name") }}{{ field("Phone (WhatsApp)", "phone", "", "tel", "10-digit Indian number or with country code", True) }}
+  <label class="field"><span>Payment</span><select name="payment"><option value="paid">Advance already received</option><option value="hold">Hold for 1 hour, pay later</option></select></label>
+</div></section>
+<div class="savebar"><a class="btn ghost" href="{{ BASE }}/bookings">Cancel</a><button class="btn primary" id="save">Create booking</button></div>
+</form>
+{% endblock %}
+{% block scripts %}<script>
+const $ = id => document.getElementById(id);
+function filterRooms(){const p=$('property').value;let first=null;[...$('room_type').options].forEach(o=>{const ok=o.dataset.property===p;o.hidden=!ok;o.disabled=!ok;if(ok&&!first)first=o});
+  if($('room_type').selectedOptions[0]?.disabled&&first)$('room_type').value=first.value}
+async function refresh(){
+  const q=new URLSearchParams({room_type_id:$('room_type').value,check_in:$('check_in').value,check_out:$('check_out').value,adults:$('adults').value,children:$('children').value,rooms:$('rooms').value});
+  const r=await (await fetch('{{ BASE }}/api/quote?'+q)).json();const box=$('preview');
+  if(r.options&&r.options.length){const cur=$('rooms').value;$('rooms').innerHTML=r.options.map(n=>`<option ${String(n)===(cur||String(r.rooms))?'selected':''}>${n}</option>`).join('')}
+  else $('rooms').innerHTML='<option>1</option>';
+  box.className='preview '+(r.ok?'ok':'bad');
+  box.textContent=r.ok?`${r.nights} night(s) · ${r.free} room(s) free · Total ₹${r.total.toLocaleString('en-IN')} · Advance ₹${r.advance.toLocaleString('en-IN')}`:(r.error||'Check the details');
+  $('save').disabled=!r.ok}
+['property','room_type','check_in','check_out','adults','children','rooms'].forEach(id=>$(id).addEventListener('change',()=>{if(id==='property')filterRooms();refresh()}));
+filterRooms();refresh();
+</script>{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, empty, icon %}
+{% block title %}Properties · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("Properties", "Resorts and staycations") %}{% if auth.is_owner %}<a class="btn primary" href="{{ BASE }}/properties/new">{{ icon('plus') }} New property</a>{% endif %}{% endcall %}
+<div class="cards">
+{% for p, types in rows %}
+<a class="card prop" href="{{ BASE }}/properties/{{ p.id }}">
+  <h3>{{ p.name }} {% if not p.active %}<span class="pill cancelled">Inactive</span>{% endif %}</h3>
+  <p class="muted">{{ p.city or '—' }}</p>
+  <div class="chips">{% for t in types %}<span class="chip">{{ t.name }} · {{ t.units }}</span>{% else %}<span class="muted">No room types yet</span>{% endfor %}</div>
+  <small class="muted">Advance {{ p.advance_pct }}% · GST {{ p.gst_pct }}%</small>
+</a>
+{% else %}{{ empty("No properties yet") }}{% endfor %}
+</div>
+{% endblock %}
