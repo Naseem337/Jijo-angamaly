@@ -21,8 +21,8 @@
       </select>
     </div>
     <nav>
-      {% set nav_items = [("home","Home","home",""),("bookings","Bookings","book","/bookings"),("calendar","Calendar","cal","/calendar"),
-        ("properties","Properties","building","/properties"),("guests","Guests","users","/guests"),("chats","Conversations","chat","/conversations")] %}
+      {% set nav_items = [("home","Home","home",""),("bookings","Bookings","book","/bookings"),("calendar","Calendar","cal","/calendar"),("stay","Arrivals","door","/stay"),
+        ("properties","Properties","building","/properties"),("guests","Guests","users","/guests"),("chats","Conversations","chat","/conversations"),("reports","Reports","report","/reports/collections")] %}
       {% for key, label, ic, path in nav_items %}
         <a href="{{ BASE }}{{ path or '/' }}" class="{{ 'active' if nav == key }}">{{ icon(ic) }}<span>{{ label }}</span></a>
       {% endfor %}

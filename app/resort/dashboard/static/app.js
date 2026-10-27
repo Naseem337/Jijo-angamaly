@@ -132,3 +132,28 @@ var closeDrawer = function () {};
   });
   document.addEventListener('click', function (e) { if (e.target.closest('[data-drawer-close]')) closeDrawer(); });
 })();
+
+
+// Dialog helpers: ?open=checkin opens a dialog, quick-fill buttons, "reference needed" per method, quick extras.
+(function () {
+  var want = new URLSearchParams(location.search).get('open');
+  if (want) { var d = document.getElementById(want + '-dialog'); if (d && d.showModal) d.showModal(); }
+  document.addEventListener('click', function (e) {
+    var f = e.target.closest('[data-fill]');
+    if (f) { var inp = f.closest('form').querySelector('[name="' + f.dataset.fill + '"]'); if (inp) inp.value = f.dataset.amount; }
+    var x = e.target.closest('[data-extra]');
+    if (x) {
+      var form = document.getElementById('extra-form'); if (!form) return;
+      var parts = x.dataset.extra.split('|');
+      form.querySelector('[name="category"]').value = parts[0];
+      var desc = form.querySelector('[name="description"]'); desc.value = parts[1];
+      form.querySelector('[name="amount"]').focus();
+    }
+  });
+  document.querySelectorAll('select[data-needs]').forEach(function (sel) {
+    var need = sel.dataset.needs.split(',');
+    var ref = sel.closest('form').querySelector('[data-ref]');
+    function upd() { if (ref) ref.required = need.indexOf(sel.value) >= 0; }
+    sel.addEventListener('change', upd); upd();
+  });
+})();

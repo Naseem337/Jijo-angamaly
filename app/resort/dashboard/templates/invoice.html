@@ -1,0 +1,26 @@
+{% extends "print_base.html" %}
+{% block title %}Invoice {{ invoice_no }}{% endblock %}
+{% block baractions %}{% if not public %}<a href="{{ BASE }}/bookings/{{ b.id }}">Back to booking</a>{% endif %}{% endblock %}
+{% block sheet %}
+<header class="head"><div><h1>{{ prop.name if prop else 'Resort' }}</h1>
+  <p>{{ prop.address if prop and prop.address }}{% if prop and prop.city %}{{ ', ' if prop.address }}{{ prop.city }}{% endif %}</p>
+  {% if prop and prop.gstin %}<p><b>GSTIN:</b> {{ prop.gstin }}</p>{% endif %}</div>
+  <div class="right"><h2>{{ 'TAX INVOICE' if f.gst_pct else 'INVOICE' }}</h2><p><b>{{ invoice_no }}</b></p><p>Date: {{ issued|ist('%d %b %Y') }}</p><p>Booking: {{ b.id }}</p></div></header>
+<section class="two"><div><h4>Billed to</h4><p><b>{{ b.guest_name or 'Guest' }}</b></p><p>{{ b.guest_phone }}</p></div>
+  <div><h4>Stay</h4><p>{{ b.check_in.strftime('%a, %d %b %Y') }} to {{ b.check_out.strftime('%a, %d %b %Y') }} ({{ b.nights }} night{{ 's' if b.nights != 1 }})</p>
+  <p>{{ b.rooms }} × {{ rt.name if rt else 'Room' }} · {{ b.adults }} adults, {{ b.children }} children{% if b.room_numbers %} · room {{ b.room_numbers }}{% endif %}</p></div></section>
+<table class="items"><thead><tr><th>Description</th><th class="r">Amount</th></tr></thead><tbody>
+  {% for l in f.lines %}<tr><td><b>{{ l.label }}</b><br><span>{{ l.detail }}</span></td><td class="r">{{ l.amount|rupees if l.amount >= 0 else '− ' ~ ((-l.amount)|rupees) }}</td></tr>{% endfor %}
+</tbody><tfoot>
+  {% if f.gst_pct %}<tr><td class="r">Taxable value</td><td class="r">{{ f.subtotal|rupees }}</td></tr>
+  <tr><td class="r">CGST @ {{ (f.gst_pct / 2)|round(1) }}%</td><td class="r">{{ f.cgst|rupees }}</td></tr>
+  <tr><td class="r">SGST @ {{ (f.gst_pct / 2)|round(1) }}%</td><td class="r">{{ f.sgst|rupees }}</td></tr>{% endif %}
+  <tr class="grand"><td class="r">Total</td><td class="r">{{ f.bill_total|rupees }}</td></tr></tfoot></table>
+<section class="two"><div><h4>Payments received</h4>
+  {% for p in payments %}<p>{{ p.at|ist('%d %b %Y') if p.at }} · {{ p.method|method_label }} · {{ p.amount|rupees }}<br><span>Ref {{ p.ref }}</span></p>{% else %}<p>No payment received yet.</p>{% endfor %}
+  {% for r in refund_list %}<p>Refund {{ r.at|ist('%d %b %Y') }} · {{ r.amount|rupees }} <span>(ref {{ r.ref }})</span></p>{% endfor %}</div>
+  <div class="balance"><h4>Balance</h4><p class="big">{{ f.balance|rupees }}</p>{% if f.credit %}<p>Credit to the guest: {{ f.credit|rupees }}</p>{% endif %}
+  {% if b.status == 'cancelled' %}<p>This booking was cancelled.</p>{% endif %}</div></section>
+{% if prop and prop.policies %}<section><h4>Terms</h4><p class="terms">{{ prop.policies }}</p></section>{% endif %}
+<footer class="sign"><div><span></span>Guest signature</div><div><span></span>Authorised signatory</div></footer>
+{% endblock %}

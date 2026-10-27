@@ -9,20 +9,25 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from app.core.clock import IST
 from app.core.phone import try_normalize_phone
 from app.resort import availability as av
+from app.resort import billing, refunds, stay
 from app.resort.dashboard import integrations
 from app.resort.dashboard.deps import (BASE, COOKIE, HERE, Auth, current_property, form_of, get_repo,
                                        make_session, now_utc, page, require_owner, require_user, templates, toast_url)
 from app.resort.db import SoldOut, check_password, hash_password
 from app.resort.paying import DESK_METHODS, METHODS, PaymentError, apply_payment, history, method_label
-from app.resort.models import (Booking, ChatMessage, DashboardUser, Property, RateRule, RoomType)
+from app.resort.models import (Booking, Charge, ChatMessage, DashboardUser, Property, RateRule, RoomType)
+from app.settings import get_settings
 
 router = APIRouter(prefix=BASE)
+public_router = APIRouter(prefix="/resort")  # the signed invoice link a guest opens without logging in
 
-STATUSES = ["hold", "paid", "failed", "expired", "cancelled"]
+STATUSES = ["hold", "paid", "checked_in", "checked_out", "failed", "expired", "cancelled"]
+PAID = billing.PAID_STATES
 
 
 def today_ist() -> date:
@@ -135,11 +140,12 @@ def home(request: Request, auth: Auth = Depends(require_user)):
     props = auth.properties(repo)
     props_by_id, rooms = _names(repo)
     mine = _visible_bookings(repo, auth, limit=5000)
-    arrivals = [b for b in mine if b.status == "paid" and b.check_in == today]
-    departures = [b for b in mine if b.status == "paid" and b.check_out == today]
+    arrivals = stay.arrivals(mine, today)
+    departures = stay.departures(mine, today) or [b for b in mine if b.status == "paid" and b.check_out == today]
+    in_house = stay.in_house(mine)
     holds = [b for b in mine if b.status == "hold" and av.booking_blocks(b, now)]
     month_start = today.replace(day=1)
-    paid = [b for b in mine if b.status == "paid"]
+    paid = [b for b in mine if b.status in PAID]
     revenue_month = sum(b.paid_amount for b in paid if b.paid_at and b.paid_at.astimezone(IST).date() >= month_start)
     revenue_all = sum(b.paid_amount for b in paid)
     by_method: dict[str, int] = {}
@@ -152,7 +158,7 @@ def home(request: Request, auth: Auth = Depends(require_user)):
     waiting = [c for c in convos if c["direction"] == "in" and not c["paused"]]
     occ = [(p, occupancy(repo, p, today, 14, now)) for p in props if p.active]
     return page(request, "home.html", auth, nav="home", today=today, arrivals=arrivals, departures=departures,
-                holds=holds, revenue_month=revenue_month, revenue_all=revenue_all, paused=len(paused),
+                holds=holds, revenue_month=revenue_month, revenue_all=revenue_all, in_house=in_house, paused=len(paused),
                 waiting=len(waiting), occ=occ, props=props_by_id, rooms=rooms, paid_count=len(paid), methods=methods)
 
 
@@ -309,21 +315,52 @@ def redirect(url: str) -> HTTPException:
     return HTTPException(303, headers={"Location": url})
 
 
+def _folio(repo, b: Booking, prop: Property | None = None, rt: RoomType | None = None) -> billing.Folio:
+    prop = prop or repo.get_property(b.property_id)
+    rt = rt or repo.get_room_type(b.room_type_id)
+    return billing.folio(b, repo.list_charges(b.id), repo.list_refunds(b.id), prop, rt.name if rt else "")
+
+
+def _glance(repo, b: Booking) -> dict:
+    """Balance and ID state of one booking, for the chips on the arrivals page and the reports."""
+    return {"balance": _folio(repo, b).balance, "id": stay.id_summary(repo.list_id_proofs(b.id))}
+
+
+def _url(b: Booking) -> str:
+    return f"{BASE}/bookings/{b.id}"
+
+
 @router.get("/bookings/{booking_id}")
 def booking_detail(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
     repo = get_repo()
     b = _booking(repo, auth, booking_id)
     props, rooms = _names(repo)
+    prop, rt = props.get(b.property_id), rooms.get(b.room_type_id)
+    f = _folio(repo, b, prop, rt)
+    proofs = repo.list_id_proofs(b.id)
+    refund_list = repo.list_refunds(b.id)
     timeline = [(b.created_at, "Booking created (hold)")]
     if b.payment_link_url:
         timeline.append((None, "Payment link created"))
     if b.paid_at:
         timeline.append((b.paid_at, f"First payment received ({method_label(b.payment_method)})"))
+    if b.checked_in_at:
+        timeline.append((b.checked_in_at, "Checked in" + (f" · rooms {b.room_numbers}" if b.room_numbers else "")))
+    if b.checked_out_at:
+        timeline.append((b.checked_out_at, "Checked out"))
+    for r in refund_list:
+        timeline.append((r.at, f"Refund of ₹{r.amount:,} ({refunds.REFUND_METHODS.get(r.method, r.method)})"))
     if b.status in ("expired", "cancelled", "failed"):
-        timeline.append((None, f"Marked {b.status}"))
-    return page(request, "booking_detail.html", auth, nav="bookings", b=b, prop=props.get(b.property_id),
-                rt=rooms.get(b.room_type_id), timeline=timeline, guest=repo.get_guest(b.guest_phone),
-                pay_history=history(b), desk_methods=DESK_METHODS, source=_source(b))
+        timeline.append((None, f"Marked {b.status}" + (f": {b.cancel_reason}" if b.cancel_reason else "")))
+    pct, amount = refunds.suggested_refund(prop, b, today_ist(), refund_list)
+    return page(request, "booking_detail.html", auth, nav="bookings", b=b, prop=prop, rt=rt, timeline=timeline,
+                guest=repo.get_guest(b.guest_phone), pay_history=history(b), desk_methods=DESK_METHODS,
+                source=_source(b), f=f, charges=repo.list_charges(b.id), refund_list=refund_list, proofs=proofs,
+                id_state=stay.id_summary(proofs), id_types=stay.ID_TYPES, warnings=stay.check_in_warnings(b, f, proofs),
+                sugg_pct=pct, sugg_amount=amount, left_to_refund=refunds.refundable(b, refund_list),
+                refund_methods=refunds.REFUND_METHODS, categories=billing.CATEGORY_LABELS,
+                invoice_no=billing.invoice_number(b, prop), payments=billing.payments_of(b),
+                can_charge=b.status in ("paid", "checked_in"))
 
 
 def _source(b: Booking) -> str:
@@ -342,7 +379,7 @@ async def booking_action(booking_id: str, request: Request, auth: Auth = Depends
     f = await form_of(request, auth)
     repo = get_repo()
     b = _booking(repo, auth, booking_id)
-    url, action, now = f"{BASE}/bookings/{b.id}", f.get("action", ""), now_utc()
+    url, action, now = _url(b), f.get("action", ""), now_utc()
     if action in ("mark_paid", "record_payment"):
         if action == "mark_paid":  # the old one-click button: the advance, in cash
             if b.paid_amount:
@@ -355,18 +392,22 @@ async def booking_action(booking_id: str, request: Request, auth: Auth = Depends
         rt = repo.get_room_type(b.room_type_id)
         if first and not active_hold and rt and repo.free_rooms(rt, b.check_in, b.check_out, now) < b.rooms:
             raise redirect(toast_url(url, "!Those rooms are taken now; cannot record the payment"))
+        extra = sum(c.amount for c in repo.list_charges(b.id))
         try:
-            ref = apply_payment(b, method=f.get("method", ""), amount=_int(f, "amount", b.advance if first else b.balance),
-                                ref=f.get("ref", ""), note=f.get("note", ""), received_by=auth.user.email, now=now)
+            ref = apply_payment(b, method=f.get("method", ""),
+                                amount=_int(f, "amount", b.advance if first else _folio(repo, b).balance),
+                                ref=f.get("ref", ""), note=f.get("note", ""), received_by=auth.user.email, now=now,
+                                extra=extra)
         except PaymentError as exc:
             raise redirect(toast_url(url, f"!{exc}")) from None
         repo.save_booking(b)
         warning = integrations.announce_paid(b) if first else None
         raise redirect(toast_url(url, f"Payment recorded ({ref}). {warning}" if warning else f"Payment recorded ({ref})"))
-    if action == "cancel":
-        b.status = "cancelled"
-        b.notes = (b.notes + f"\nCancelled by {auth.user.email}").strip()
-        repo.save_booking(b)
+    if action == "cancel":  # the old one-click cancel; the dialog below is the normal way
+        try:
+            refunds.cancel_booking(repo, b, reason="Cancelled by staff", by=auth.user.email, now=now)
+        except refunds.RefundError as exc:
+            raise redirect(toast_url(url, f"!{exc}")) from None
         raise redirect(toast_url(url, "Booking cancelled"))
     if action == "resend_link":
         error = integrations.resend_payment_link(b)
@@ -378,6 +419,298 @@ async def booking_action(booking_id: str, request: Request, auth: Auth = Depends
             repo.save_booking(b)
         raise redirect(toast_url(url, "Note added"))
     raise redirect(toast_url(url, "!Unknown action"))
+
+
+# --------------------------------------------------------------------------- folio: extra charges
+
+
+@router.post("/bookings/{booking_id}/charges")
+async def charge_add(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
+    f = await form_of(request, auth)
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    url = _url(b)
+    category = f.get("category", "other")
+    description, amount = f.get("description", "").strip(), _int(f, "amount", 0, 0, 1_000_000)
+    if b.status not in ("paid", "checked_in"):
+        raise redirect(toast_url(url, "!Extras can be added once the booking is paid"))
+    if category not in billing.CATEGORY_LABELS or category == "discount":
+        category = "other"
+    if not description or amount < 1:
+        raise redirect(toast_url(url, "!Enter what it is and the amount"))
+    repo.add_charge(Charge(b.id, description, amount, now_utc(), category, auth.user.email))
+    raise redirect(toast_url(url, "Extra added to the bill"))
+
+
+@router.post("/bookings/{booking_id}/charges/{charge_id}/delete")
+async def charge_delete(booking_id: str, charge_id: str, request: Request, auth: Auth = Depends(require_user)):
+    await form_of(request, auth)
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    if b.status in ("checked_out", "cancelled"):
+        raise redirect(toast_url(_url(b), "!The bill is closed"))
+    if any(c.id == charge_id for c in repo.list_charges(b.id)):
+        repo.delete_charge(charge_id)
+    raise redirect(toast_url(_url(b), "Extra removed"))
+
+
+# --------------------------------------------------------------------------- cancellation and refunds
+
+
+@router.post("/bookings/{booking_id}/cancel")
+async def booking_cancel(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
+    f = await form_of(request, auth)
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    try:
+        refund = refunds.cancel_booking(repo, b, reason=f.get("reason", ""), refund_amount=_int(f, "refund_amount", 0),
+                                        method=f.get("method", "cash"), ref=f.get("ref", ""), note=f.get("note", ""),
+                                        by=auth.user.email, now=now_utc())
+    except refunds.RefundError as exc:
+        raise redirect(toast_url(_url(b), f"!{exc}")) from None
+    warning = integrations.announce_cancelled(b, refund.amount if refund else 0)
+    msg = "Booking cancelled" + (f" and ₹{refund.amount:,} refund recorded" if refund else "")
+    raise redirect(toast_url(_url(b), f"{msg}. {warning}" if warning else msg))
+
+
+@router.post("/bookings/{booking_id}/refund")
+async def booking_refund(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
+    f = await form_of(request, auth)
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    try:
+        refund = refunds.record_refund(repo, b, amount=_int(f, "refund_amount", 0), method=f.get("method", ""),
+                                       ref=f.get("ref", ""), note=f.get("note", ""), by=auth.user.email, now=now_utc())
+    except refunds.RefundError as exc:
+        raise redirect(toast_url(_url(b), f"!{exc}")) from None
+    raise redirect(toast_url(_url(b), f"Refund of ₹{refund.amount:,} recorded ({refund.ref})"))
+
+
+# --------------------------------------------------------------------------- check-in / check-out, ID proofs
+
+
+@router.post("/bookings/{booking_id}/checkin")
+async def booking_checkin(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
+    f = await form_of(request, auth)
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    try:
+        stay.check_in(repo, b, room_numbers=f.get("room_numbers", ""), by=auth.user.email, now=now_utc())
+    except stay.StayError as exc:
+        raise redirect(toast_url(_url(b), f"!{exc}")) from None
+    raise redirect(toast_url(_url(b), "Guest checked in"))
+
+
+@router.post("/bookings/{booking_id}/checkout")
+async def booking_checkout(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
+    f = await form_of(request, auth)
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    url, now = _url(b), now_utc()
+    try:
+        if f.get("pay_amount", "").strip() and _int(f, "pay_amount") > 0:  # the final payment, taken at the desk
+            apply_payment(b, method=f.get("pay_method", ""), amount=_int(f, "pay_amount"), ref=f.get("pay_ref", ""),
+                          note="At check-out", received_by=auth.user.email, now=now,
+                          extra=sum(c.amount for c in repo.list_charges(b.id)))
+            repo.save_booking(b)
+        folio = _folio(repo, b)
+        stay.check_out(repo, b, folio, waive=f.get("waive") == "on", note=f.get("note", ""), by=auth.user.email, now=now)
+    except (PaymentError, stay.StayError) as exc:
+        raise redirect(toast_url(url, f"!{exc}")) from None
+    integrations.announce_checked_out(b)
+    raise redirect(toast_url(url, "Guest checked out"))
+
+
+@router.post("/bookings/{booking_id}/id/in-person")
+async def id_in_person(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
+    f = await form_of(request, auth)
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    try:
+        stay.mark_shown_in_person(repo, b, id_type=f.get("id_type", ""), by=auth.user.email, now=now_utc())
+    except stay.StayError as exc:
+        raise redirect(toast_url(_url(b), f"!{exc}")) from None
+    raise redirect(toast_url(_url(b), "ID noted as shown in person"))
+
+
+def _proof(repo, b: Booking, proof_id: str):
+    proof = repo.get_id_proof(proof_id)
+    if proof is None or proof.booking_id != b.id:
+        raise HTTPException(404, "ID proof not found")
+    return proof
+
+
+@router.post("/bookings/{booking_id}/id/{proof_id}/status")
+async def id_status(booking_id: str, proof_id: str, request: Request, auth: Auth = Depends(require_user)):
+    f = await form_of(request, auth)
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    _proof(repo, b, proof_id)
+    try:
+        stay.set_proof_status(repo, proof_id, f.get("status", ""), auth.user.email)
+    except stay.StayError as exc:
+        raise redirect(toast_url(_url(b), f"!{exc}")) from None
+    raise redirect(toast_url(_url(b), "ID " + f["status"]))
+
+
+@router.get("/bookings/{booking_id}/id/{proof_id}/view")
+def id_view(booking_id: str, proof_id: str, request: Request, auth: Auth = Depends(require_user)):
+    """The ID photo. Only logged-in staff with access to this property; never cached, never run as a page."""
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    proof = _proof(repo, b, proof_id)
+    if not proof.data or proof.mime not in stay.IMAGE_TYPES:
+        raise HTTPException(415, "No image to show")
+    return Response(proof.data, media_type=proof.mime, headers={
+        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox",
+        "Content-Disposition": "inline"})
+
+
+# --------------------------------------------------------------------------- invoice and receipt
+
+
+def _invoice_ctx(repo, b: Booking) -> dict:
+    prop, rt = repo.get_property(b.property_id), repo.get_room_type(b.room_type_id)
+    return {"b": b, "prop": prop, "rt": rt, "f": _folio(repo, b, prop, rt), "payments": billing.payments_of(b),
+            "refund_list": repo.list_refunds(b.id), "invoice_no": billing.invoice_number(b, prop),
+            "guest": repo.get_guest(b.guest_phone), "issued": now_utc()}
+
+
+def _invoice_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(get_settings().session_secret, salt="resort-invoice")
+
+
+INVOICE_LINK_SECONDS = 7 * 24 * 3600
+
+
+def invoice_token(b: Booking) -> str:
+    return _invoice_serializer().dumps({"b": b.id})
+
+
+def _public_base(request: Request) -> str:
+    import os
+    configured = os.environ.get("RESORT_PUBLIC_URL", "").rstrip("/")
+    if configured:
+        return configured
+    base = str(request.base_url).rstrip("/")
+    return base.replace("http://", "https://") if "localhost" not in base and "127.0.0.1" not in base else base
+
+
+@router.get("/bookings/{booking_id}/invoice")
+def invoice_page(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    return templates.TemplateResponse(request, "invoice.html", {**_invoice_ctx(repo, b), "public": False,
+                                                                   "BASE": BASE, "csrf": auth.csrf})
+
+
+@router.get("/bookings/{booking_id}/receipt/{n}")
+def receipt_page(booking_id: str, n: int, request: Request, auth: Auth = Depends(require_user)):
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    ctx = _invoice_ctx(repo, b)
+    payment = next((p for p in ctx["payments"] if p.n == n), None)
+    if payment is None:
+        raise HTTPException(404, "Receipt not found")
+    return templates.TemplateResponse(request, "receipt.html", {**ctx, "payment": payment, "BASE": BASE})
+
+
+@router.post("/bookings/{booking_id}/send-invoice")
+async def invoice_send(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
+    await form_of(request, auth)
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    ctx = _invoice_ctx(repo, b)
+    f, link = ctx["f"], f"{_public_base(request)}/resort/invoice/{invoice_token(b)}"
+    text = (f"Hello{' ' + b.guest_name if b.guest_name else ''}, your invoice {ctx['invoice_no']} for "
+            f"{ctx['prop'].name if ctx['prop'] else 'your stay'} ({b.check_in:%d %b} to {b.check_out:%d %b}): "
+            f"total ₹{f.bill_total:,}, paid ₹{f.net_paid:,}, balance ₹{f.balance:,}.\nView or print it here "
+            f"(link works for 7 days): {link}")
+    error = integrations.send_staff_text(b.guest_phone, text)
+    if error:
+        raise redirect(toast_url(_url(b), f"!{error}"))
+    repo.add_chat(ChatMessage(b.guest_phone, "out", text, now_utc(), source="staff"))
+    raise redirect(toast_url(_url(b), "Invoice link sent on WhatsApp"))
+
+
+@public_router.get("/invoice/{token}")
+def public_invoice(token: str, request: Request):
+    try:
+        booking_id = _invoice_serializer().loads(token, max_age=INVOICE_LINK_SECONDS)["b"]
+    except (BadSignature, KeyError, TypeError):
+        raise HTTPException(404, "This invoice link is not valid or has expired") from None
+    repo = get_repo()
+    b = repo.get_booking(booking_id)
+    if b is None:
+        raise HTTPException(404, "Invoice not found")
+    resp = templates.TemplateResponse(request, "invoice.html", {**_invoice_ctx(repo, b), "public": True, "BASE": BASE,
+                                                                  "csrf": ""})
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["X-Robots-Tag"] = "noindex"
+    return resp
+
+
+# --------------------------------------------------------------------------- arrivals and departures
+
+
+@router.get("/stay")
+def stay_page(request: Request, auth: Auth = Depends(require_user)):
+    repo, today = get_repo(), today_ist()
+    scope = current_property(request, auth)
+    mine = _visible_bookings(repo, auth, property_id=scope or None, limit=5000)
+    sections = [("Arriving today", stay.arrivals(mine, today), "checkin"),
+                ("Arriving tomorrow", stay.arrivals(mine, today + timedelta(days=1)), ""),
+                ("Should have checked in", stay.overdue_arrivals(mine, today), "checkin"),
+                ("In the house", stay.in_house(mine), "checkout"),
+                ("Leaving today or overdue", stay.departures(mine, today), "checkout")]
+    shown = {b.id: b for _, items, _ in sections for b in items}
+    props, rooms = _names(repo)
+    return page(request, "stay.html", auth, nav="stay", today=today, sections=sections, props=props, rooms=rooms,
+                glance={bid: _glance(repo, b) for bid, b in shown.items()})
+
+
+# --------------------------------------------------------------------------- collection report
+
+
+def _report_range(q, today: date) -> tuple[date, date]:
+    start = _date(q.get("from"), today)
+    end = _date(q.get("to"), start)
+    return (start, end) if end >= start else (end, start)
+
+
+@router.get("/reports/collections")
+def report_collections(request: Request, auth: Auth = Depends(require_user)):
+    repo, q, today = get_repo(), request.query_params, today_ist()
+    start, end = _report_range(q, today)
+    prop_id = q.get("property_id") or current_property(request, auth)
+    mine = _visible_bookings(repo, auth, property_id=prop_id or None, limit=20000)
+    ids = {b.id for b in mine}
+    report = billing.collections(mine, [r for r in repo.list_refunds() if r.booking_id in ids], start, end)
+    owing = []
+    for b in mine:
+        if b.status in ("paid", "checked_in") and b.check_in <= end:
+            f = _folio(repo, b)
+            if f.balance > 0:
+                owing.append((b, f.balance))
+    owing.sort(key=lambda row: row[0].check_in)
+    if q.get("format") == "csv":
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(["Date (IST)", "Type", "Booking", "Guest", "Method", "Amount", "Reference", "By"])
+        for row in report.rows:
+            writer.writerow([row["at"].astimezone(IST).strftime("%Y-%m-%d %H:%M"), row["kind"], row["booking"],
+                             _csv_cell(row["guest"]), method_label(row["method"]), row["amount"], _csv_cell(row["ref"]),
+                             _csv_cell(row["by"])])
+        writer.writerow([])
+        writer.writerow(["Collected", "", "", "", "", report.collected])
+        writer.writerow(["Refunded", "", "", "", "", -report.refunded])
+        writer.writerow(["Net", "", "", "", "", report.net])
+        return Response(out.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="collections-{start}-{end}.csv"'})
+    props, _ = _names(repo)
+    return page(request, "report_collections.html", auth, nav="reports", r=report, start=start, end=end, f=q,
+                my_props=auth.properties(repo), prop_id=prop_id, owing=owing, props=props,
+                days=sorted(report.by_day, reverse=True), methods=METHODS, query=str(q))
 
 
 # --------------------------------------------------------------------------- calendar
@@ -413,10 +746,11 @@ def _month_weeks(repo, prop: Property, types: list[RoomType], rt_id: str, first:
         week = []
         for _ in range(7):
             on = [b for b in bookings if b.check_in <= day < b.check_out]
-            paid, held = sum(b.rooms for b in on if b.status == "paid"), sum(b.rooms for b in on if b.status == "hold")
+            paid, held = sum(b.rooms for b in on if b.status in PAID), sum(b.rooms for b in on if b.status == "hold")
+            in_h = sum(b.rooms for b in on if b.status == "checked_in")
             free = max(total - paid - held, 0)
             week.append({"day": day, "in_month": day.month == first.month, "today": day == today,
-                         "weekend": day.weekday() >= 5, "paid": paid, "held": held, "free": free, "total": total,
+                         "weekend": day.weekday() >= 5, "paid": paid, "held": held, "in_house": in_h, "free": free, "total": total,
                          "pct": round(100 * (paid + held) / total) if total else 0,
                          "state": "none" if not total else "full" if free == 0 else "busy" if paid + held else "free",
                          "past": day < today})
@@ -448,7 +782,7 @@ def calendar(request: Request, auth: Auth = Depends(require_user)):
             for day in days:
                 on = [b for b in bookings if b.room_type_id == rt.id and av.booking_blocks(b, now)
                       and b.check_in <= day < b.check_out]
-                booked, held = sum(b.rooms for b in on if b.status == "paid"), sum(b.rooms for b in on if b.status == "hold")
+                booked, held = sum(b.rooms for b in on if b.status in PAID), sum(b.rooms for b in on if b.status == "hold")
                 cells.append({"day": day, "booked": booked, "held": held, "free": max(rt.units - booked - held, 0)})
             rows.append({"rt": rt, "cells": cells})
         ctx.update(days=days, rows=rows)
@@ -467,9 +801,9 @@ def calendar_day(request: Request, auth: Auth = Depends(require_user)):
     chosen = [rt for rt in types if rt.id == rt_id] or types
     items = [b for b in _visible_bookings(repo, auth, property_id=prop.id, start=day, end=day + timedelta(days=1),
                                           limit=500)
-             if b.room_type_id in {rt.id for rt in chosen} and b.status in ("paid", "hold")
-             and (b.status == "paid" or av.booking_blocks(b, now))]
-    items.sort(key=lambda b: (b.status != "paid", b.check_in))
+             if b.room_type_id in {rt.id for rt in chosen} and b.status in (*PAID, "hold")
+             and (b.status in PAID or av.booking_blocks(b, now))]
+    items.sort(key=lambda b: (b.status not in PAID, b.check_in))
     total = sum(rt.units for rt in chosen)
     used = sum(b.rooms for b in items)
     return templates.TemplateResponse(request, "calendar_day.html", {
@@ -520,6 +854,12 @@ async def property_save(property_id: str, request: Request, auth: Auth = Depends
     p.advance_pct, p.gst_pct = _int(f, "advance_pct", 50, 1, 100), _int(f, "gst_pct", 0, 0, 40)
     p.staff_numbers, p.photo_urls = staff, [u for u in _lines(f.get("photo_urls", "").replace(",", "\n")) if u]
     p.highlights = _lines(f.get("highlights", ""))[:12]
+    p.gstin = f.get("gstin", "").strip().upper()[:20]
+    p.invoice_prefix = "".join(ch for ch in f.get("invoice_prefix", "INV").upper() if ch.isalnum())[:8] or "INV"
+    rows = [{"days_before": _int(f, f"cp_days_{i}", 0, 0, 365), "refund_pct": _int(f, f"cp_pct_{i}", 0, 0, 100)}
+            for i in (1, 2, 3) if f.get(f"cp_days_{i}", "").strip() and f.get(f"cp_pct_{i}", "").strip()]
+    if rows:
+        p.cancel_policy = sorted(rows, key=lambda r: -r["days_before"])
     p.active = f.get("active") == "on"
     repo.save_property(p)
     raise redirect(toast_url(f"{BASE}/properties/{p.id}", "Property saved"))
@@ -622,8 +962,9 @@ def guests_list(request: Request, auth: Auth = Depends(require_user)):
     if q:
         guests = [g for g in guests if q in g.phone.lower() or q in g.name.lower()]
     stays = {}
-    for b in _visible_bookings(repo, auth, status="paid", limit=5000):
-        stays[b.guest_phone] = stays.get(b.guest_phone, 0) + 1
+    for b in _visible_bookings(repo, auth, limit=5000):
+        if b.status in PAID:
+            stays[b.guest_phone] = stays.get(b.guest_phone, 0) + 1
     return page(request, "guests.html", auth, nav="guests", guests=guests, stays=stays, q=request.query_params.get("q", ""))
 
 

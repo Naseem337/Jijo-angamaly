@@ -34,6 +34,11 @@ class Property:
     staff_numbers: list[str] = field(default_factory=list)  # E.164, get the handoff / booking alerts
     highlights: list[str] = field(default_factory=list)  # short selling points: "Infinity pool", "Mountain view"
     policies: str = ""  # cancellation / refund / house rules, in the resort's own words
+    gstin: str = ""  # shown on invoices
+    invoice_prefix: str = "INV"
+    # Refund of the amount paid, by days left before check-in (first row whose days_before <= days left wins).
+    cancel_policy: list[dict] = field(default_factory=lambda: [
+        {"days_before": 7, "refund_pct": 100}, {"days_before": 3, "refund_pct": 50}, {"days_before": 0, "refund_pct": 0}])
     active: bool = True
     id: str = field(default_factory=lambda: new_id("P"))
 

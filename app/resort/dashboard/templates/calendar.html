@@ -21,7 +21,7 @@
   </form>
   <div class="seg"><a class="{{ 'on' if view == 'month' }}" href="?property_id={{ prop.id }}&room_type_id={{ rt_id }}&view=month&month={{ month_key }}">Month</a><a class="{{ 'on' if view == 'timeline' }}" href="?property_id={{ prop.id }}&room_type_id={{ rt_id }}&view=timeline&month={{ month_key }}">Timeline</a></div>
 </div>
-<div class="legend"><span><i class="dot paid"></i>Booked (paid)</span><span><i class="dot held"></i>Held, unpaid</span><span><i class="dot free"></i>Free room</span><span><i class="c full"></i>Sold out</span></div>
+<div class="legend"><span><i class="dot paid"></i>Booked (paid)</span><span><i class="tag in-house">In</i>Guests in the house</span><span><i class="dot held"></i>Held, unpaid</span><span><i class="dot free"></i>Free room</span><span><i class="c full"></i>Sold out</span></div>
 
 {% if view == 'month' %}
 <div class="cal-layout">
@@ -30,7 +30,7 @@
   {% for week in weeks %}{% for c in week %}
   <a class="cal-day s-{{ c.state }}{{ ' dim' if not c.in_month }}{{ ' today' if c.today }}{{ ' wk' if c.weekend }}{{ ' past' if c.past }}" href="{{ BASE }}/bookings?property_id={{ prop.id }}&date={{ c.day }}" data-date="{{ c.day }}"
      title="{{ c.day.strftime('%a %d %b') }}: {{ c.paid }} booked, {{ c.held }} held, {{ c.free }} free">
-    <span class="num">{{ c.day.day }}</span>
+    <span class="num">{{ c.day.day }}</span>{% if c.in_house %}<span class="tag in-house" title="{{ c.in_house }} room(s) checked in">{{ c.in_house }} in</span>{% endif %}
     {% if c.total %}<span class="dots">{% for _ in range([c.paid, 6]|min) %}<i class="dot paid"></i>{% endfor %}{% for _ in range([c.held, 6 - [c.paid, 6]|min]|min) %}<i class="dot held"></i>{% endfor %}{% for _ in range([c.free, 6 - [c.paid + c.held, 6]|min]|min) %}<i class="dot free"></i>{% endfor %}</span>
     <span class="occ-txt">{{ c.paid + c.held }}/{{ c.total }}<em> booked</em></span>
     <span class="meter"><i style="width:{{ c.pct }}%"></i></span>{% endif %}

@@ -12,12 +12,13 @@ children, room_type_id, rooms, ...}. All replies are text or interactive: this b
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from app.core.clock import ist_today
+from app.core.clock import ist_today, to_ist
 from app.core.language import is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import ChatMessage, LLMError, LLMProvider
@@ -25,6 +26,7 @@ from app.resort import availability as av
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo, SoldOut
 from app.resort.i18n import LANG_NAMES, LANGS, detect_script, status_name, t
+from app.resort.idproof import IdProofMixin
 from app.resort.models import Booking, ChatMessage as Chat, Property, RoomType
 from app.resort.paying import apply_payment, method_label
 from app.resort.payments import Payments, PaymentError
@@ -95,7 +97,7 @@ def _int_in(text: str, lo: int, hi: int) -> int | None:
 # --------------------------------------------------------------------------- the bot
 
 
-class BookingBot:
+class BookingBot(IdProofMixin):
     def __init__(self, config: ResortConfig, repo: ResortRepo, whatsapp: WhatsAppClient, payments: Payments,
                  clock: Any, *, llm: Callable[[], LLMProvider] | None = None,
                  voice_in: Callable[[], Any] | None = None) -> None:
@@ -148,6 +150,9 @@ class BookingBot:
         st = self.repo.get_state(phone)
         lang = st.get("lang", "en")
         guest = self.repo.touch_guest(phone, now, language=st.get("lang"))
+
+        if msg.type in ("image", "document") and st.get("idp"):  # a guest sending the ID photo we asked for
+            return self._id_media(phone, st, msg)
 
         text, source = msg.text.strip(), ("button" if msg.reply_id else "text")
         if msg.type == "audio":
@@ -232,6 +237,10 @@ class BookingBot:
             return self._show_menu(phone, st)
         if typed and GREETING.match(text):
             return self._show_menu(phone, st)
+        if st.get("idp") and (outcome := self._id_step(phone, st, text, rid, typed)):
+            return outcome
+        if st.get("fb") and (outcome := self._fb_step(phone, st, text, rid, typed)):
+            return outcome
 
         step = st.get("step", "menu")
         handler = getattr(self, f"_step_{step}", None)
@@ -685,25 +694,27 @@ class BookingBot:
 
     # ------------------------------------------------------------------ payment events and sweeps
 
-    def _notify_guest(self, booking: Booking, text: str, template_key: str, params: list[str]) -> None:
+    def _notify_guest(self, booking: Booking, text: str, template_key: str, params: list[str]) -> bool:
+        """Text inside the 24 h window, else the approved template. True only when the plain text went out."""
         phone = booking.guest_phone
         try:
             self.wa.send_text(phone, text)
             self._log(phone, text, "system")
-            return
+            return True
         except WhatsAppError as exc:
             if exc.code != 131047:  # 131047 = outside the 24 h window
                 log.error("Could not notify %s: %s", mask_phone(phone), exc)
-                return
-        name = getattr(self.config.templates, template_key, "")
+                return False
+        name = getattr(self.config.templates, template_key, "") or os.environ.get(f"RESORT_TPL_{template_key.upper()}", "")
         if not name:
             log.warning("Guest %s is outside the 24 h window and no %s template is set", mask_phone(phone), template_key)
-            return
+            return False
         try:
             self.wa.send_template(phone, name, booking.language if booking.language in LANGS else "en", params)
             self._log(phone, f"[template {name}] " + text, "system")
         except WhatsAppError as exc:
             log.error("Template %s to %s failed: %s", name, mask_phone(phone), exc)
+        return False
 
     def _params(self, b: Booking) -> list[str]:
         prop = self.repo.get_property(b.property_id)
@@ -740,7 +751,12 @@ class BookingBot:
         rt = self.repo.get_room_type(b.room_type_id)
         text = t("paid", b.language, id=b.id, property=prop.name if prop else "", check_in=fmt_date(b.check_in),
                  check_out=fmt_date(b.check_out), rooms=b.rooms, checkin_time=prop.checkin_time if prop else "")
-        self._notify_guest(b, text, "paid", self._params(b))
+        delivered = self._notify_guest(b, text, "paid", self._params(b))
+        try:  # ask for the ID proof once (only inside the 24 h window; the day-before reminder covers the rest)
+            if delivered:
+                self.start_id_request(b)
+        except Exception:
+            log.exception("ID request for %s failed", b.id)
         self.alert_staff(f"New booking {b.id} PAID: {prop.name if prop else ''}, {rt.name if rt else ''} x {b.rooms}, "
                          f"{fmt_date(b.check_in)} to {fmt_date(b.check_out)}, {b.adults}A {b.children}C. "
                          f"{b.guest_name} {b.guest_phone}. Paid Rs {b.paid_amount} of Rs {b.total} "
@@ -783,4 +799,25 @@ class BookingBot:
                 self._notify_guest(b, t("pending", b.language, id=b.id, minutes=mins, url=b.payment_link_url),
                                    "pending", self._params(b))
                 nudged += 1
-        return {"expired": len(expired), "reminded": nudged}
+        out = {"expired": len(expired), "reminded": nudged}
+        try:
+            if reminders := self.remind_ids(now):
+                out["id_reminders"] = reminders
+            if purged := self._purge_id_proofs(now):
+                out["id_purged"] = purged
+        except Exception:
+            log.exception("ID reminder / purge failed")
+        return out
+
+    def _purge_id_proofs(self, now: datetime) -> int:
+        """Once a day: delete ID photos whose delete_after date has passed."""
+        today = to_ist(now).date()
+        state = self.repo.get_state("__system__")
+        if state.get("id_purge_day") == today.isoformat():
+            return 0
+        state["id_purge_day"] = today.isoformat()
+        self.repo.set_state("__system__", state)
+        count = self.repo.delete_expired_id_proofs(today)
+        if count:
+            log.info("Deleted %d expired ID proof(s)", count)
+        return count

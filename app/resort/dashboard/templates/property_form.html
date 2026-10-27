@@ -45,10 +45,18 @@
   </div><small>Short selling points. Press Enter or Add after each one.</small></div>
 <label class="check"><input type="checkbox" name="active" {{ 'checked' if p.active }}> Active (the bot offers this property)</label></section>
 
-<section class="card" id="payment"><h3>Payment</h3><div class="cols">
+<section class="card" id="payment"><h3>Payment, invoices and cancellation</h3><div class="cols">
   {{ field("Advance to pay online (%)", "advance_pct", p.advance_pct, "number", attrs='min="1" max="100"') }}
-  {{ field("GST (%)", "gst_pct", p.gst_pct, "number", "0 means the rates already include GST", attrs='min="0" max="40"') }}
-</div></section>
+  {{ field("GST (%)", "gst_pct", p.gst_pct, "number", "Prices already include it. It is split into CGST and SGST on the invoice.", attrs='min="0" max="40"') }}
+  {{ field("GSTIN", "gstin", p.gstin, "text", "Shown on invoices", attrs='maxlength="20"') }}
+  {{ field("Invoice prefix", "invoice_prefix", p.invoice_prefix, "text", "e.g. PZR gives PZR-2026-AB12CD", attrs='maxlength="8"') }}
+</div>
+<div class="field"><span>Cancellation refund</span>
+  <div class="policy-rows">{% for i in (1, 2, 3) %}{% set row = p.cancel_policy[i - 1] if p.cancel_policy|length >= i else {} %}
+    <div class="policy-row">If cancelled
+      <input type="number" name="cp_days_{{ i }}" min="0" max="365" value="{{ row.days_before if row else '' }}" aria-label="Days before check-in"> or more days before check-in, refund
+      <input type="number" name="cp_pct_{{ i }}" min="0" max="100" value="{{ row.refund_pct if row else '' }}" aria-label="Refund percent"> % of what was paid</div>{% endfor %}</div>
+  <small>The dashboard suggests this refund when a booking is cancelled. Staff can change the amount. Leave a row empty to skip it.</small></div></section>
 
 <section class="card" id="staff"><h3>Staff &amp; policies</h3>
   <div class="field"><span>Staff WhatsApp numbers</span>

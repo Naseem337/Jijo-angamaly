@@ -35,17 +35,18 @@ def history(b: Booking) -> list[str]:
 
 
 def apply_payment(b: Booking, *, method: str, amount: int, ref: str = "", note: str = "", received_by: str = "",
-                  now: datetime) -> str:
+                  now: datetime, extra: int = 0) -> str:
     """Add a payment to `b` (not saved here). Returns the receipt / reference id stored for it.
 
     The first payment makes the booking paid; later ones (the balance) just add up. A blank cash
-    reference becomes a receipt number like RCPT-RB-AB12CD-1.
+    reference becomes a receipt number like RCPT-RB-AB12CD-1. `extra` is the total of the guest's extra charges,
+    so the final balance (room + extras) can be paid.
     """
     if method not in METHODS or method == "mixed":
         raise PaymentError("Choose how the money was received")
     if amount < 1:
         raise PaymentError("Enter the amount received")
-    remaining = b.total - b.paid_amount
+    remaining = b.total + extra - b.paid_amount
     if amount > remaining:
         raise PaymentError(f"Only ₹{remaining:,} is still due on this booking")
     ref = ref.strip()
@@ -65,6 +66,6 @@ def apply_payment(b: Booking, *, method: str, amount: int, ref: str = "", note: 
     b.payment_ref = ref
     if method != "online" and received_by:
         b.received_by = received_by
-    if b.status != "paid":
+    if b.status in ("hold", "expired", "failed"):  # a checked-in guest paying the balance stays checked in
         b.status, b.paid_at, b.hold_expires_at = "paid", now, None
     return ref

@@ -9,20 +9,22 @@
   <a href="{{ BASE }}/bookings/new">{{ icon('plus') }}<span>New booking</span></a>
   <a href="{{ BASE }}/properties">{{ icon('building') }}<span>Add room</span></a>
   <a href="{{ BASE }}/calendar">{{ icon('cal') }}<span>Open calendar</span></a>
+  <a href="{{ BASE }}/stay">{{ icon('door') }}<span>Arrivals &amp; departures</span></a>
+  <a href="{{ BASE }}/reports/collections">{{ icon('report') }}<span>Today's collections</span></a>
   <a href="{{ BASE }}/conversations">{{ icon('chat') }}<span>Open chats</span></a>
 </div>
 <div class="stats">
-  <a class="stat" href="{{ BASE }}/bookings?status=paid&date={{ today }}"><small>Check-ins today</small><b>{{ arrivals|length }}</b></a>
-  <div class="stat"><small>Check-outs today</small><b>{{ departures|length }}</b></div>
+  <a class="stat" href="{{ BASE }}/stay"><small>Check-ins today</small><b>{{ arrivals|length }}</b></a>
+  <a class="stat" href="{{ BASE }}/stay"><small>In the house</small><b>{{ in_house|length }}</b><em>{{ departures|length }} leaving today</em></a>
   <a class="stat" href="{{ BASE }}/bookings?status=hold"><small>Payments pending</small><b>{{ holds|length }}</b></a>
   <div class="stat"><small>Collected this month</small><b>{{ revenue_month|rupees }}</b><em>{{ revenue_all|rupees }} all time</em></div>
   <a class="stat" href="{{ BASE }}/conversations"><small>Chats needing a human</small><b>{{ paused }}</b><em>{{ waiting }} awaiting reply</em></a>
 </div>
 <div class="grid2">
-  <section class="card"><h3>Arriving today</h3>
+  <section class="card"><h3>Arriving today <a class="mini" href="{{ BASE }}/stay">Check in</a></h3>
     {% for b in arrivals %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ props[b.property_id].name }} · {{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
     {% else %}{{ empty("No arrivals today", "cal") }}{% endfor %}</section>
-  <section class="card"><h3>Leaving today</h3>
+  <section class="card"><h3>Leaving today <a class="mini" href="{{ BASE }}/stay">Check out</a></h3>
     {% for b in departures %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ props[b.property_id].name }} · {{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
     {% else %}{{ empty("No departures today", "cal") }}{% endfor %}</section>
 </div>

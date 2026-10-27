@@ -1,0 +1,19 @@
+{% extends "print_base.html" %}
+{% block title %}Receipt {{ b.id }}-{{ payment.n }}{% endblock %}
+{% block baractions %}<a href="{{ BASE }}/bookings/{{ b.id }}">Back to booking</a>{% endblock %}
+{% block sheet %}
+<header class="head"><div><h1>{{ prop.name if prop else 'Resort' }}</h1><p>{{ prop.address if prop and prop.address }}{% if prop and prop.city %}{{ ', ' if prop.address }}{{ prop.city }}{% endif %}</p>
+  {% if prop and prop.gstin %}<p><b>GSTIN:</b> {{ prop.gstin }}</p>{% endif %}</div>
+  <div class="right"><h2>PAYMENT RECEIPT</h2><p><b>{{ b.id }}-{{ payment.n }}</b></p><p>{{ payment.at|ist('%d %b %Y, %I:%M %p') if payment.at }}</p></div></header>
+<section class="two"><div><h4>Received from</h4><p><b>{{ b.guest_name or 'Guest' }}</b></p><p>{{ b.guest_phone }}</p></div>
+  <div><h4>For</h4><p>Booking {{ b.id }} · invoice {{ invoice_no }}</p><p>{{ b.check_in.strftime('%d %b') }} to {{ b.check_out.strftime('%d %b %Y') }} · {{ b.rooms }} × {{ rt.name if rt else 'Room' }}</p></div></section>
+<table class="items"><tbody>
+  <tr><td>Amount received</td><td class="r big">{{ payment.amount|rupees }}</td></tr>
+  <tr><td>Paid by</td><td class="r">{{ payment.method|method_label }}</td></tr>
+  <tr><td>Reference / transaction ID</td><td class="r">{{ payment.ref }}</td></tr>
+  {% if payment.by %}<tr><td>Received by</td><td class="r">{{ payment.by }}</td></tr>{% endif %}
+  {% if payment.note %}<tr><td>Note</td><td class="r">{{ payment.note }}</td></tr>{% endif %}
+  <tr><td>Balance after all payments</td><td class="r">{{ f.balance|rupees }}</td></tr>
+</tbody></table>
+<footer class="sign"><div><span></span>Received with thanks</div></footer>
+{% endblock %}

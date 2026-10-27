@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, pill, empty, icon, method_chip %}
+{% block title %}Collections · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("Collections", (start.strftime('%d %b %Y') if start == end else start.strftime('%d %b') ~ ' to ' ~ end.strftime('%d %b %Y')) ~ (' · ' ~ props[prop_id].name if prop_id and prop_id in props else '')) %}
+<a class="btn" href="{{ BASE }}/reports/collections?{{ query }}{{ '&' if query }}format=csv">{{ icon('download') }} CSV</a>
+<button class="btn" type="button" onclick="window.print()">{{ icon('doc') }} Print</button>
+{% endcall %}
+<form class="filters" method="get">
+  <input type="date" name="from" value="{{ start }}" title="From"><input type="date" name="to" value="{{ end }}" title="To">
+  <select name="property_id"><option value="">All properties</option>{% for p in my_props %}<option value="{{ p.id }}" {{ 'selected' if prop_id == p.id }}>{{ p.name }}</option>{% endfor %}</select>
+  <button class="btn">Show</button><a class="btn ghost" href="{{ BASE }}/reports/collections">Today</a>
+</form>
+<div class="stats">
+  <div class="stat"><small>Collected</small><b>{{ r.collected|rupees }}</b></div>
+  <div class="stat"><small>Refunded</small><b class="{{ 'cell-neg' if r.refunded }}">{{ ('− ' ~ (r.refunded|rupees)) if r.refunded else '₹0' }}</b></div>
+  <div class="stat"><small>Net</small><b>{{ r.net|rupees }}</b></div>
+  <div class="stat"><small>Still to collect</small><b>{{ owing|sum(attribute=1)|rupees }}</b><em>{{ owing|length }} booking(s)</em></div>
+</div>
+<div class="grid2">
+  <section class="card"><h3>By method</h3>
+    {% for key, amount in r.by_method.items() %}<div class="bar-row"><span>{{ method_chip(key) }}</span><b class="{{ 'cell-neg' if amount < 0 }}">{{ amount|rupees }}</b></div>
+    {% else %}{{ empty("No money moved in this period", "cash") }}{% endfor %}</section>
+  <section class="card"><h3>By staff member</h3>
+    {% for who, amount in r.by_staff.items() %}<div class="bar-row"><span>{{ who }}</span><b class="{{ 'cell-neg' if amount < 0 }}">{{ amount|rupees }}</b></div>
+    {% else %}{{ empty("Nothing recorded", "users") }}{% endfor %}</section>
+</div>
+{% if days|length > 1 %}
+<section class="card table-wrap"><h3>By day</h3><table class="list"><thead><tr><th>Day</th>{% for key in r.by_method %}<th class="r">{{ methods.get(key, key) }}</th>{% endfor %}<th class="r">Total</th></tr></thead><tbody>
+  {% for d in days %}<tr><td>{{ d.strftime('%a, %d %b') }}</td>{% for key in r.by_method %}<td class="r">{{ r.by_day[d].get(key, 0)|rupees }}</td>{% endfor %}<td class="r"><b>{{ r.by_day[d].values()|sum|rupees }}</b></td></tr>{% endfor %}
+</tbody></table></section>{% endif %}
+<section class="card table-wrap"><h3>Every payment and refund</h3><table class="list"><thead><tr><th>When</th><th>Booking</th><th>Guest</th><th>Method</th><th>Reference</th><th>By</th><th class="r">Amount</th></tr></thead><tbody>
+  {% for row in r.rows %}<tr class="click" data-href="{{ BASE }}/bookings/{{ row.booking }}"><td class="nowrap">{{ row.at|ist }}</td><td><b>{{ row.booking }}</b>{% if row.kind == 'refund' %} <span class="pill cancelled">Refund</span>{% endif %}</td><td>{{ row.guest }}</td><td>{{ method_chip(row.method) }}</td><td><code>{{ row.ref }}</code></td><td>{{ row.by }}</td><td class="r {{ 'cell-neg' if row.amount < 0 }}">{{ row.amount|rupees }}</td></tr>
+  {% else %}<tr><td colspan="7">{{ empty("No payments in this period", "cash") }}</td></tr>{% endfor %}
+</tbody></table></section>
+<section class="card table-wrap"><h3>Balances still to collect</h3><table class="list"><thead><tr><th>Booking</th><th>Guest</th><th>Stay</th><th>Status</th><th class="r">Due</th></tr></thead><tbody>
+  {% for b, due in owing %}<tr class="click" data-href="{{ BASE }}/bookings/{{ b.id }}"><td><b>{{ b.id }}</b></td><td>{{ b.guest_name or b.guest_phone }}</td><td>{{ b.check_in.strftime('%d %b') }} → {{ b.check_out.strftime('%d %b') }}</td><td>{{ pill(b.status) }}</td><td class="r"><b>{{ due|rupees }}</b></td></tr>
+  {% else %}<tr><td colspan="5">{{ empty("Everything is collected", "cash") }}</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

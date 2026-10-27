@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Invoice{% endblock %}</title>
+<link rel="stylesheet" href="{{ BASE }}/static/invoice.css"></head>
+<body><div class="bar no-print"><span>{% block barnote %}{% endblock %}</span><div>{% block baractions %}{% endblock %}<button onclick="window.print()">Print / Save as PDF</button></div></div>
+<main class="sheet">{% block sheet %}{% endblock %}</main></body></html>

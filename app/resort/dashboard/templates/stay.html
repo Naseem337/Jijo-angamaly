@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head, pill, empty, icon, id_chip %}
+{% block title %}Arrivals &amp; departures · Resort Desk{% endblock %}
+{% block content %}
+{% call page_head("Arrivals & departures", today.strftime('%A, %d %B %Y')) %}
+<a class="btn" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a>
+{% endcall %}
+<div class="stats">
+  {% for title, items, action in sections %}<div class="stat"><small>{{ title }}</small><b>{{ items|length }}</b></div>{% endfor %}
+</div>
+{% for title, items, action in sections %}
+<section class="card stay-group"><h3>{{ title }}</h3>
+  {% for b in items %}{% set g = glance[b.id] %}
+  <div class="stay-row">
+    <div><a href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b></a>
+      <small class="block">{{ props[b.property_id].name }} · {{ rooms[b.room_type_id].name }} × {{ b.rooms }} · {{ b.check_in.strftime('%d %b') }} → {{ b.check_out.strftime('%d %b') }} · {{ b.adults }}A {{ b.children }}C{% if b.room_numbers %} · room {{ b.room_numbers }}{% endif %}</small>
+      <div class="chips">{{ id_chip(g.id) }}{% if g.balance %}<span class="due-chip">{{ g.balance|rupees }} due</span>{% endif %}</div></div>
+    <div>{% if action == 'checkin' %}<a class="btn primary" href="{{ BASE }}/bookings/{{ b.id }}?open=checkin">Check in</a>
+      {% elif action == 'checkout' %}<a class="btn primary" href="{{ BASE }}/bookings/{{ b.id }}?open=checkout">Check out</a>
+      {% else %}<a class="btn" href="{{ BASE }}/bookings/{{ b.id }}">Open</a>{% endif %}</div>
+  </div>
+  {% else %}{{ empty("Nobody here", "door") }}{% endfor %}
+</section>
+{% endfor %}
+{% endblock %}
