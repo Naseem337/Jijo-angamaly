@@ -107,7 +107,8 @@ def seed(repo: ResortRepo) -> list[str]:
     owner = repo.get_user(email)
     if owner is None:
         password = given or secrets.token_urlsafe(9)
-        repo.save_user(DashboardUser(email, hash_password(password), name="Owner", role="owner"))
+        repo.save_user(DashboardUser(email, hash_password(password), role="owner",
+                                      name="Owner" if email == DEFAULT_OWNER_EMAIL else email.split("@")[0].capitalize()))
         out.append(f"Owner login: {email}  password: {'(from RESORT_OWNER_PASSWORD)' if given else password}"
                    "  (shown once; change it in the dashboard)")
     elif given and not check_password(given, owner.password_hash):  # the setting is the source of truth

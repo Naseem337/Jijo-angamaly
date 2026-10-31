@@ -2,15 +2,15 @@
 {% from "macros.html" import page_head, empty, icon %}
 {% block title %}Today · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head("Today", today.strftime('%A, %d %B %Y')) %}
+{% call page_head(greeting ~ ", " ~ ((user.name or user.email.split("@")[0])|capitalize) ~ " 👋", "Here is " ~ today.strftime('%A, %d %B') ~ " at a glance") %}
 <a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a>
 {% endcall %}
 <div class="stats">
-  <a class="stat" href="{{ BASE }}/stay"><small>Arrivals today</small><b>{{ arrivals|length }}</b></a>
-  <a class="stat" href="{{ BASE }}/stay"><small>Departures today</small><b>{{ departures|length }}</b></a>
-  <a class="stat" href="{{ BASE }}/stay"><small>In the house</small><b>{{ in_house|length }}</b></a>
-  <a class="stat" href="{{ BASE }}/calendar"><small>Occupancy tonight</small><b>{{ tonight_pct }}%</b><em>{{ tonight_used }} of {{ tonight_total }} rooms</em></a>
-  <a class="stat" href="{{ BASE }}/reports/collections"><small>Collected today</small><b>{{ collected|rupees }}</b></a>
+  <a class="stat" href="{{ BASE }}/stay"><span class="stat-ic c1">🛬</span><small>Arrivals today</small><b>{{ arrivals|length }}</b></a>
+  <a class="stat" href="{{ BASE }}/stay"><span class="stat-ic c2">🧳</span><small>Departures today</small><b>{{ departures|length }}</b></a>
+  <a class="stat" href="{{ BASE }}/stay"><span class="stat-ic c3">🏖️</span><small>In the house</small><b>{{ in_house|length }}</b></a>
+  <a class="stat" href="{{ BASE }}/calendar"><span class="stat-ic c4">🌙</span><small>Occupancy tonight</small><b>{{ tonight_pct }}%</b><em>{{ tonight_used }} of {{ tonight_total }} rooms</em></a>
+  <a class="stat" href="{{ BASE }}/reports/collections"><span class="stat-ic c5">💰</span><small>Collected today</small><b>{{ collected|rupees }}</b></a>
 </div>
 <div class="grid2">
   <section class="card"><h3>Arriving today</h3>

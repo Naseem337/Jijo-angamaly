@@ -5,14 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
 <title>{% block title %}Resort Desk{% endblock %}</title>
-<link rel="stylesheet" href="{{ BASE }}/static/app.css">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="{{ BASE }}/static/app.css?v={{ ASSET_V }}">
 </head>
 <body>
 {% from "macros.html" import icon %}
 {% if user %}
 <div class="shell">
   <aside class="sidebar" id="sidebar">
-    <a class="brand" href="{{ BASE }}/"><span class="logo">R</span><span>Resort Desk</span></a>
+    <a class="brand" href="{{ BASE }}/"><span class="logo">🌴</span><span>Resort Desk</span></a>
     <div class="scope">
       <label for="scope">Property</label>
       <select id="scope" data-scope="{{ cur_prop }}">
@@ -53,7 +55,7 @@
 {% block bare %}{% endblock %}
 {% endif %}
 <div id="toast" class="toast" data-msg="{{ toast }}"></div>
-<script src="{{ BASE }}/static/app.js"></script>
+<script src="{{ BASE }}/static/app.js?v={{ ASSET_V }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

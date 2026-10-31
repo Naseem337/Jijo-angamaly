@@ -153,3 +153,11 @@ def test_owner_login_comes_from_the_settings(tmp_path, monkeypatch):
     assert any("updated" in line for line in seed.seed(repo))
     assert check_password("5678", repo.get_user("manager@gmail.com").password_hash)
     assert "Owner user already exists." in seed.seed(repo)
+
+
+def test_pages_link_a_versioned_stylesheet_so_browsers_never_show_an_old_design(env):
+    _repo, app, _ = env
+    client, _ = login(app)
+    home = client.get(f"{BASE}/").text
+    assert "static/app.css?v=" in home and "static/app.js?v=" in home and "Good " in home and "🌴" in home
+    assert client.get(f"{BASE}/static/app.css").headers["cache-control"] == "no-cache"

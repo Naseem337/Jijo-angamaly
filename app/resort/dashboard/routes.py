@@ -85,7 +85,7 @@ def static_file(path: str):
     target = (root / path).resolve()
     if root not in target.parents or not target.is_file():
         raise HTTPException(404)
-    return FileResponse(target)
+    return FileResponse(target, headers={"Cache-Control": "no-cache"})  # always ask whether it changed
 
 
 @router.get("/login")
@@ -150,7 +150,9 @@ def home(request: Request, auth: Auth = Depends(require_user)):
     used, total = sum(days[0]["used"] for _, days in occ), sum(days[0]["total"] for _, days in occ)
     ids = {b.id for b in mine}
     collected = billing.collections(mine, [r for r in repo.list_refunds() if r.booking_id in ids], today, today).net
-    return page(request, "home.html", auth, nav="home", today=today, arrivals=arrivals, departures=departures,
+    hour = now.astimezone(IST).hour
+    greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
+    return page(request, "home.html", auth, nav="home", today=today, greeting=greeting, arrivals=arrivals, departures=departures,
                 holds=holds, in_house=in_house, occ=occ, props=props_by_id, rooms=rooms, collected=collected,
                 tonight_used=used, tonight_total=total, tonight_pct=round(100 * used / total) if total else 0)
 

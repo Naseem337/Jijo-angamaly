@@ -121,6 +121,15 @@ def ist(value: datetime | None, fmt: str = "%d %b %Y, %I:%M %p") -> str:
     return value.astimezone(IST).strftime(fmt).lstrip("0") + " IST" if value else ""
 
 
+def _asset_version() -> str:
+    """Changes whenever the stylesheet or script file changes (a new deploy), so browsers never show an old design."""
+    try:
+        return str(int(max((HERE / "static" / name).stat().st_mtime for name in ("app.css", "app.js"))))
+    except OSError:
+        return "1"
+
+
+templates.env.globals["ASSET_V"] = _asset_version()
 templates.env.filters["ist"] = ist
 templates.env.filters["method_label"] = method_label
 templates.env.globals["METHODS"] = METHODS
