@@ -43,10 +43,38 @@ STYLES = ("en", "ml", "manglish", "hi", "hinglish", "ta", "tanglish")
 STYLE_LANG = {"en": "en", "ml": "ml", "hi": "hi", "ta": "ta", "manglish": "mn", "hinglish": "en", "tanglish": "en"}
 INDIC = re.compile(r"[\u0900-\u097f\u0b80-\u0bff\u0d00-\u0d7f]")
 HELLO = re.compile(r"^\W*(hello+|hey+)", re.IGNORECASE)
-ACK_WORDS = frozenset("ok okay okk okey k kk kay thanks thank thankyou thx ty you fine cool noted got it sure alright "
-                      "right yes ya yep sheri sari shari shaari athe aah aha da bro sir madam ശരി ഓക്കെ ഓകെ താങ്ക്സ് നന്ദി "
-                      "ठीक है धन्यवाद शुक्रिया சரி நன்றி".split())
+ACK_WORDS = frozenset("""ok okay okk okey okie k kk kay thanks thank thankyou thanx thx tnx tq ty you so much lot a very fine cool
+    noted got it sure alright all right yes yeah yep ya yup haha hahaha lol hmm hm mm mmm oh ohh ah aah aha wow nice great good
+    super awesome perfect lovely beautiful excellent superb welcome then will see later now bro sir madam da dear anna chetta
+    chechi sheri sari shari shaari seri athe aanu nannayi kollam adipoli polichu mathi ശരി ഓക്കെ ഓകെ താങ്ക്സ് നന്ദി കൊള്ളാം
+    ठीक है धन्यवाद शुक्रिया अच्छा சரி நன்றி""".split())
+# Words a sentence cannot end on: the guest is still typing (a second message is about to arrive)
+DANGLING = frozenset("""oru and or the a an to for of in on at with my i we is are was will can about from if but because so
+    njan njangal enikku ente ningal nammal ee aa pinne allenkil athinu ennal avide evide ithinte athinte""".split())
+
 NO_REPLY = "[no reply]"
+LANG_NAMES = {"ml": "Malayalam", "ta": "Tamil", "hi": "Hindi"}
+SCRIPTS = {"ml": re.compile(r"[\u0d00-\u0d7f]"), "ta": re.compile(r"[\u0b80-\u0bff]"), "hi": re.compile(r"[\u0900-\u097f]")}
+# "there is no offer" / "I cannot reduce" in any of our languages: wrong when the guest only asked about offers
+NO_OFFER = re.compile(
+    r"\bno offers?\b|\bno discounts?\b|offers?\s+(?:\w+\s+)?(?:ഒന്നും|எதுவும்|kuch|nahi|nahin|illa|illai|ilya|ilai)\b|"
+    r"(?:ഓഫർ|ஆஃபர்|ऑफर|offers?)\s*(?:ഇപ്പോൾ\s*)?(?:ഒന്നും\s*)?(?:ഇല്ല|இல்ல|இல்லை|नहीं|illa|illai|nahi|ilya)|"
+    r"(?:cannot|can't|cant|not able to|unable to) (?:reduce|decrease|lower)|കുറയ്ക്കാൻ (?:പറ്റില്ല|കഴിയില്ല)|"
+    r"குறைக்க முடியாது|कम नहीं (?:कर सकते|हो सकता)|kurakkan pattilla|kuraikka mudiyaadhu|discount nahi", re.IGNORECASE)
+ASKS_REDUCE = re.compile(r"reduc|discount|lower|less|last price|final price|negotiat|bargain|best price|kurach|kurakk|kuraikk|"
+                         r"kam kar|chhoot|குறை|കുറ|कम कर|छूट|ഡിസ്കൗണ്ട്|തള്ള", re.IGNORECASE)
+
+
+def looks_unfinished(text: str) -> bool:
+    """A message that stops mid-sentence ('njan udheshikkunath oru', 'we are planning to', 'for 3 people,'): the next
+    message will finish it, so the bot gives the guest time before answering."""
+    s = text.strip().lower()
+    if not s or "?" in s or s.endswith(("!", "।")):
+        return False
+    if s.endswith(("...", "..", ",", ";", ":", "-", "…")):
+        return True
+    words = s.split()
+    return words[-1].strip(".,") in DANGLING and not s.endswith(".")
 
 
 def is_ack(text: str) -> bool:
@@ -56,8 +84,8 @@ def is_ack(text: str) -> bool:
         return False
     if not re.search(r"\w", s):  # emoji or punctuation only
         return True
-    words = [w.strip(".,!?;:()-'\"") for w in s.split()]  # not \w: it would cut Malayalam vowel signs
-    return 0 < len(words) <= 4 and all(w in ACK_WORDS for w in words)
+    words = [w.strip(".,!?;:()-'\"") for w in s.split() if re.search(r"\w", w)]  # not \w: it would cut Malayalam vowel signs
+    return 0 < len(words) <= 5 and all(w in ACK_WORDS for w in words)
 
 
 def display_phone(e164: str) -> str:
@@ -76,6 +104,7 @@ class _Turn:
     phone: str
     st: dict[str, Any]
     pay_message: str = ""
+    summary_message: str = ""
     handed_off: bool = False
 
 
@@ -93,7 +122,7 @@ TOOLS = [
             "check_in": {"type": "string", "description": "YYYY-MM-DD"},
             "check_out": {"type": "string", "description": "YYYY-MM-DD (or give nights instead)"},
             "nights": {"type": "integer"},
-            "adults": {"type": "integer", "description": "total persons if the guest did not split adults and children"},
+            "adults": {"type": "integer", "description": "total persons as the guest said them (never assume 1)"},
             "children": {"type": "integer", "description": "only when the guest mentioned children"},
             "rooms": {"type": "integer", "description": "rooms the guest asked for, if any"},
             "language": LANGUAGE_FIELD},
@@ -141,16 +170,9 @@ class ChatMixin:
 
     def _rooms_facts(self, p: Property) -> list[str]:
         lines = []
-        today = self._today()
         for rt in self.repo.list_room_types(p.id):
             line = (f"  ROOM TYPE '{rt.name}': {rt.units} room(s), max {rt.max_occupancy} guests per room "
-                    f"({rt.max_adults} adults, {rt.max_children} children). Rate per room per night {_money(rt.base_rate)}")
-            if rt.weekend_rate and rt.weekend_rate != rt.base_rate:
-                line += f", Fri and Sat nights {_money(rt.weekend_rate)}"
-            seasons = [r for r in self.repo.list_rate_rules(rt.id) if r.end >= today]
-            if seasons:
-                line += ". Special dates: " + "; ".join(
-                    f"{av.fmt_range(r.start, r.end)} {_money(r.rate)}" for r in seasons)
+                    f"({rt.max_adults} adults, {rt.max_children} children)")
             extras = " ".join(x for x in (rt.description, rt.amenities) if x and "PLACEHOLDER" not in x)
             lines.append(line + "." + (f" {extras}" if extras else ""))
         return lines
@@ -191,21 +213,29 @@ class ChatMixin:
             "'room undo', 'evide', 'ethra aaya') is Manglish: answer in Manglish, in English letters only, NEVER in "
             "Malayalam script. Malayalam script gets Malayalam script. English gets English. Never mix scripts or "
             "languages in one reply; plain English words like room, booking, check-in, payment and price are fine "
-            "inside Manglish. Example: guest 'Alleppey il room undo' -> 'Und bro, Alleppey il rooms und. Ethra "
+            "inside Manglish. Example: guest 'Alleppey il room undo' -> 'Und sir, Alleppey il rooms und. Ethra "
             "aalkkaar und, ethra divasam?'\n"
-            "- The booking summary in step 6 is the one exception: always write it in English, whatever the language "
-            "of the chat, so both sides can check the figures.\n"
+            "- The booking summary is sent automatically, always in English; your own lines stay in the guest's "
+            "language.\n"
             "- Pass the language style in the `language` field when you call check_availability.\n\n"
             "HOW TO TALK\n"
+            "- Call the guest \"sir\", now and then and never in every message (\"madam\" only if they are clearly a woman). "
+            "Never bro, dear, da, chetta, chechi, machane or their name.\n"
+            "- Keep messages tidy and easy to read: short lines, a blank line between separate points, each room type "
+            "on its own line when you list prices. Never one long paragraph.\n"
             "- Short, natural messages, like a real person on WhatsApp. One or two sentences. Ask at most one or two "
             "things at a time. No lists of options, no 'How may I assist you today', no emoji piles (one is fine).\n"
             "- Say only what was asked or what is needed next. Do not paste the property description. Do not mention "
             "offers, discounts or 'special' deals. Just state the price.\n"
             "- Never repeat details the guest already gave, except in the final summary.\n"
             "- Greet back in kind: 'hi' gets a short 'Hi!' and a light question about what they are looking for.\n"
-            "- Do not chase the guest. If their message needs no answer (just 'ok', 'thanks', a thumbs up, or a closing "
-            "remark) and you asked nothing, send no reply at all: answer with exactly [no reply]. If they want more, they "
+            "- Reply only when it is necessary: a question, a request, a booking detail, a payment problem, a complaint, "
+            "or an answer to something you asked. For anything else send no reply at all, answer with exactly "
+            "[no reply]: 'ok', 'thanks', a thumbs up, compliments, jokes, 'will tell my family', 'let me check and "
+            "tell you', 'will see', a closing remark. Do not chase the guest or fill the silence. If they want more, they "
             "will write. It is fine for the guest to have the last message in the chat.\n"
+            "- If the guest's message is cut off or you cannot tell what they mean (for example 'njan udheshikkunath "
+            "oru'), do not guess: ask them in a few words to go on, in their own language.\n"
             "- Messages that arrive one after another belong together. A short message (a place, a date, a number, "
             "'yes') answers your last question or continues what they said before: join them using the chat so far. "
             "If the guest wrote 'avde engane und' and then 'Alleppey', they are asking how Alleppey is: answer that, "
@@ -214,24 +244,27 @@ class ChatMixin:
             "1. Which place. If you have several places, ask which one (name them). If there is only one, don't ask.\n"
             "2. Check-in date, and how many nights or the check-out date. If the date has no year, use the next "
             "time it comes. Work from today's date.\n"
-            "3. How many persons.\n"
+            "3. How many persons. Never assume the number of persons, rooms or nights: if the guest has not said it, ask.\n"
             "4. How many rooms. Tell them how many rooms their group needs at least, and let them choose.\n"
-            "5. Call check_availability. Then offer what is free in plain words: each room type with its price for "
-            "THEIR dates (use the totals and rate breakdown from the tool, mention when the rate changes within the "
-            "stay). With more than one room type, give each with its price and let the guest pick.\n"
-            "6. When they choose, call prepare_booking. Then send a clear summary: place, room type, rooms, dates "
-            "and nights, persons, rate per night breakdown, total, the advance to pay now, the balance to pay at "
-            "the property, check-in and check-out time. Ask them to confirm. If you do not know their name yet, ask "
-            "for it in the same message, and in the same line ask which city they are coming from (optional: "
+            "5. Call check_availability. Then offer what is free in plain words: each room type with the total for "
+            "THEIR dates (and price_per_night when the tool gives it). With more than one room type, put each on its "
+            "own line and let the guest pick.\n"
+            "6. When they choose, call prepare_booking. The full English booking summary is then sent automatically; "
+            "do not write it. You only add one or two short lines asking them to confirm. If you do not know their name "
+            "yet, ask for it in the same message, and in the same line ask which city they are coming from (optional: "
             "never insist, pass from_city to create_booking only if they tell you).\n"
-            "7. Only after they confirm in a later message, call create_booking. Then tell them briefly to "
-            "complete the payment to confirm the booking; the payment link follows. Do not write the link or the "
+            "7. Only after they confirm in a later message, call create_booking. Then, WITHOUT starting with 'Done' or "
+            "'All set', tell them in one short line to complete the payment to confirm the booking; the payment link follows. Do not write the link or the "
             "advance amount yourself, it is sent automatically.\n"
             "- Before the payment is received, NEVER say the room or booking is booked, confirmed, reserved or done. "
             "Say it will be confirmed once the payment is complete. The confirmation message arrives on its own.\n"
             "- If the party does not fit or the dates are sold out, say so and suggest another date, fewer rooms "
             "or the other place.\n\n"
             "MONEY AND FACTS\n"
+            "- Never tell the guest that rates change, that their dates are peak or high season, or that a price went "
+            "up. Give only the total for their stay, and a per-night price only when the tool provides one. Never "
+            "quote a price from memory: only from check_availability or prepare_booking. If they ask the price before "
+            "you know their dates, ask for the dates first.\n"
             "- Every price, date, room count and availability you state must come from the tool results or the "
             "FACTS below. Never calculate your own totals. Never invent amenities or policies. If you do not "
             "know something, say the owner will tell them and give the owner's number.\n"
@@ -251,7 +284,11 @@ class ChatMixin:
             "- You cannot cancel or change a booking or promise a refund. Politely ask them to call the owner and give "
             "the owner's number(s) of the place they booked.\n\n"
             "NEGOTIATION\n"
-            "- If the guest asks for a lower price, be warm and confident: the price is fair for what they get "
+            "- Asking about offers, deals or the price is only a question, NOT a request to reduce. Just answer: the "
+            "price for their dates (ask the dates if you do not have them yet). Never say there is no offer, never "
+            "say you cannot reduce, never mention discounts, unless they ask for a lower price themselves.\n"
+            "- Only when the guest asks for a lower price (reduce, discount, last price, 'kurachu tharamo', 'koodiyo'), "
+            "be warm and confident: the price is fair for what they get "
             "(use the real good points of the place from the FACTS) and you cannot reduce it. Never offer a "
             "discount. If they push again, hold the price once more with a different reason.\n"
             "- Only if they still keep pushing after that, say the owner can talk to them directly and give the "
@@ -285,23 +322,48 @@ class ChatMixin:
         self._text(phone, t("greet_ask", lang, hi=word, places=f" {t('or', lang)} ".join(places)))
         return "greeting"
 
-    def _only_latin_fix(self, llm, system: str, messages: list[ChatMessage], reply: str, guest_text: str) -> str:
-        """A guest writing in English letters (English or Manglish) must not get Malayalam, Tamil or Hindi script:
-        one rewrite, and if it still has script it is sent as it is."""
-        if INDIC.search(guest_text) or not INDIC.search(reply):
+    @staticmethod
+    def _reply_problem(reply: str, guest_text: str, st: dict[str, Any]) -> str:
+        """What is wrong with the AI's reply, as an instruction for one rewrite ('' = nothing)."""
+        own = st.get("gs", "")  # ml / ta / hi when the guest writes in that script, else English letters
+        present = {k for k, rx in SCRIPTS.items() if rx.search(reply)}
+        if own not in LANG_NAMES:
+            if present:
+                return ("Rewrite that reply using only English letters (Manglish or English). Do not use Malayalam, "
+                        "Tamil or Hindi script.")
+        elif present - {own}:
+            others = " or ".join(LANG_NAMES[k] for k in sorted(present - {own}))
+            return f"Rewrite that reply in {LANG_NAMES[own]} only (English words are fine). Do not use {others} script."
+        if NO_OFFER.search(reply) and not ASKS_REDUCE.search(guest_text):
+            return ("Rewrite that reply without saying there is no offer or discount and without saying you cannot "
+                    "reduce anything: the guest only asked. Just give the price for their dates, or ask for the dates.")
+        return ""
+
+    def _fix_reply(self, llm, system: str, messages: list[ChatMessage], reply: str, guest_text: str,
+                   st: dict[str, Any]) -> str:
+        """One rewrite when the reply mixes scripts or says 'no offer'; if the rewrite is no better it is sent as it is."""
+        problem = self._reply_problem(reply, guest_text, st)
+        if not problem:
             return reply
-        ask = ChatMessage.user("Rewrite that reply using only English letters (Manglish or English). Do not use "
-                               "Malayalam, Tamil or Hindi script. Keep the meaning and the same short style.")
+        ask = ChatMessage.user(problem + " Keep the meaning and the same short style.")
         try:
-            fixed = llm.complete(system, [*messages, ChatMessage("assistant", reply), ask], None,
-                                 MAX_REPLY_TOKENS).text.strip()
+            fixed = llm.complete(system, [*messages, ChatMessage("assistant", reply), ask], None, MAX_REPLY_TOKENS).text.strip()
         except LLMError:
             return reply
-        return fixed if fixed and not INDIC.search(fixed) else reply
+        return fixed if fixed and not self._reply_problem(fixed, guest_text, st) else reply
+
+    def _ease_sir(self, phone: str, reply: str) -> str:
+        """'sir' now and then: when our last message already had it, drop a leading or trailing one."""
+        previous = self.repo.last_outbound_text(phone) or ""
+        if not re.search(r"\b(sir|madam)\b", previous, re.IGNORECASE):
+            return reply
+        eased = re.sub(r"^\s*(sir|madam)[,.]?\s+", "", reply, flags=re.IGNORECASE)
+        eased = re.sub(r",?\s*\b(sir|madam)\b(?=[.!?]?\s*$)", "", eased, flags=re.IGNORECASE)
+        return eased[:1].upper() + eased[1:] if eased != reply and eased else reply
 
     def _converse(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0) -> str:
-        if self.debounce_s and in_id:  # a quick second message may follow: wait, and let the newest one answer
-            time.sleep(self.debounce_s)
+        if self.debounce_s and in_id:  # a second message may follow: wait, and let the newest one answer
+            time.sleep(self.patience_s if looks_unfinished(text) else self.debounce_s)
             if self.repo.last_chat_id(phone, "in") != in_id:
                 return "superseded"
         st["turn"] = st.get("turn", 0) + 1
@@ -323,7 +385,7 @@ class ChatMixin:
                     messages.append(ChatMessage.tool_result(call.id, content, is_error=is_error))
                 response = llm.complete(system, messages, TOOLS, MAX_REPLY_TOKENS)
             if not response.tool_calls:
-                reply = self._only_latin_fix(llm, system, messages, response.text.strip(), text)
+                reply = self._fix_reply(llm, system, messages, response.text.strip(), text, st)
         except LLMError as exc:
             log.warning("AI answer failed: %s", exc)
         except Exception as exc:  # a missing key or a bad tool must never leave the guest unanswered
@@ -337,7 +399,11 @@ class ChatMixin:
             self._text(phone, t("ai_down", st.get("lang", "en")))
             self.alert_staff(f"Bot could not answer a message from {phone}: {text[:200]}", st.get("bk", {}).get("property_id"))
             return "ai_down"
-        self._text(phone, reply.replace("—", "-").replace("**", "*"))
+        if ctx.summary_message:  # the English summary first, then the AI's one short line asking to confirm
+            self._text(phone, ctx.summary_message)
+        guest = self.repo.get_guest(phone)
+        clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
+        self._text(phone, self._ease_sir(phone, clean))
         if ctx.pay_message:
             self._text(phone, ctx.pay_message)
             return "payment_link"
@@ -390,11 +456,27 @@ class ChatMixin:
         return out
 
     @staticmethod
+    def _without_name(text: str, name: str) -> str:
+        """'Rahul sir' / 'sir, Rahul' / ', Rahul' -> 'sir' (any script): the guest is addressed as sir, never by name."""
+        for part in (x for x in re.split(r"[\s,.]+", name or "") if len(x) >= 2):
+            q = re.escape(part)
+            text = re.sub(rf"(?<!\S){q}\s+(sir|madam)\b", r"\1", text, flags=re.IGNORECASE)
+            text = re.sub(rf"\b(sir|madam),?\s+{q}(?=[\s,.!?]|$)", r"\1", text, flags=re.IGNORECASE)
+            text = re.sub(rf",\s*{q}(?=[\s,.!?]|$)", "", text, flags=re.IGNORECASE)
+        return text
+
+    @staticmethod
     def _set_style(st: dict[str, Any], a: dict[str, Any]) -> None:
         """The AI reports the guest's language style; the fixed messages (payment link, confirmations) follow it."""
         style = a.get("language")
-        if style in STYLES:
-            st["lang"], st["style"] = STYLE_LANG[style], style
+        if style not in STYLES:
+            return
+        if st.get("gs") in LANG_NAMES:  # the guest writes in this script: that decides, whatever the AI called it
+            st["lang"], st["style"] = st["gs"], st["gs"]
+            return
+        if style in LANG_NAMES:  # a script label for a guest who writes in English letters
+            style = {"ml": "manglish", "ta": "tanglish", "hi": "hinglish"}[style]
+        st["lang"], st["style"] = STYLE_LANG[style], style
 
     def _tool_check(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st = ctx.st
@@ -408,7 +490,19 @@ class ChatMixin:
             co = date.fromisoformat(str(a["check_out"])) if a.get("check_out") else ci + timedelta(days=nights)
         except (ValueError, KeyError):
             return {"error": "check_in and check_out must be YYYY-MM-DD, or give nights"}
-        if problem := av.check_dates(ci, co, self._today()):
+        today = self._today()
+        year_note = ""
+        if (today - ci).days > 14:  # "25 Dec" given with a past year: a booking date is never in the past, take the next one
+            for years in (1, 2):
+                try:
+                    moved = ci.replace(year=ci.year + years)
+                except ValueError:
+                    continue
+                if moved >= today:
+                    co, ci = co + (moved - ci), moved
+                    year_note = f" The guest gave no future year, so the dates were taken as {ci.isoformat()} to {co.isoformat()}."
+                    break
+        if problem := av.check_dates(ci, co, today):
             return {"error": problem}
         adults, children = self._int(a, "adults"), self._int(a, "children")
         if adults < 1 or adults + children > av.MAX_GUESTS:
@@ -424,18 +518,22 @@ class ChatMixin:
         for rt, rooms_ok in self._fits(prop, bk):
             rooms = wanted if wanted in rooms_ok else rooms_ok[0]
             q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, rooms)
-            options.append({"room_type": rt.name, "rooms_possible": rooms_ok, "quoted_for_rooms": rooms,
-                            "rate_per_room_per_night": av.rate_summary(q.per_night), "total_for_stay": q.total,
-                            "advance_now": q.advance, "balance_at_property": q.total - q.advance})
+            option = {"room_type": rt.name, "rooms_possible": rooms_ok, "quoted_for_rooms": rooms,
+                      "total_for_stay": q.total, "advance_now": q.advance, "balance_at_property": q.total - q.advance}
+            if len({rate for _, rate in q.per_night}) == 1:
+                option["price_per_night"] = q.per_night[0][1]  # per room, only when every night costs the same
+            options.append(option)
         out: dict[str, Any] = {"place": self._place_label(prop), "check_in": ci.isoformat(),
                                "check_out": co.isoformat(), "nights": (co - ci).days, "adults": adults,
                                "children": children, "options": options}
+        out["note"] = ("Give the guest the total for their stay. Never mention that rates change, seasons, peak or high "
+                       "season dates, or a price increase." + year_note)
         if not options:
             out["available"] = False
             out["reason"] = "no room type is free for this many guests on these dates (sold out or too many guests)"
         elif wanted and not any(wanted in o["rooms_possible"] for o in options):
-            out["note"] = (f"{wanted} room(s) is not possible for {adults + children} guest(s); "
-                           "rooms_possible lists the counts that work")
+            out["note"] += (f" {wanted} room(s) is not possible for {adults + children} guest(s); "
+                            "rooms_possible lists the counts that work.")
         return out
 
     def _tool_prepare(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
@@ -467,16 +565,42 @@ class ChatMixin:
                         "advance": q.advance, "turn": st["turn"]}
         leads.save_lead(self.repo, ctx.phone, self.clock.now(), room_type=rt.name, rooms=rooms, stage="summary")
         guest = self.repo.get_guest(ctx.phone)
+        ctx.summary_message = self._summary_text(prop, rt, rooms, beds, ci, co, q, bk["adults"] + bk["children"])
         out = {"place": self._place_label(prop), "room_type": rt.name, "rooms": rooms, "extra_beds": beds,
-               "check_in": f"{ci.isoformat()} ({ci.strftime('%A')})", "check_out": f"{co.isoformat()} ({co.strftime('%A')})",
-               "nights": q.nights, "adults": bk["adults"], "children": bk["children"],
-               "rate_per_room_per_night": av.rate_summary(q.per_night), "total": q.total, "advance_now": q.advance,
-               "balance_at_property": q.total - q.advance, "check_in_time": prop.checkin_time,
-               "check_out_time": prop.checkout_time, "guest_name_known": bool(guest and guest.name),
-               "next_step": "show this summary and ask the guest to confirm"}
+               "nights": q.nights, "total": q.total, "advance_now": q.advance, "balance_at_property": q.total - q.advance,
+               "guest_name_known": bool(guest and guest.name),
+               "next_step": ("The English booking summary is sent to the guest automatically just before your reply. Do "
+                             "NOT write it or repeat its figures. In your reply, in the guest's language, in one or two "
+                             "short lines, ask them to confirm. If guest_name_known is false, also ask their name and "
+                             "which city they are coming from (optional)."),
+               }
         if beds:
             out["extra_bed_cost"] = beds * prop.extra_bed_rate * q.nights
         return out
+
+    @staticmethod
+    def _clock12(hhmm: str) -> str:
+        try:
+            hour, minute = (int(x) for x in hhmm.split(":")[:2])
+        except ValueError:
+            return hhmm
+        return f"{hour % 12 or 12}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
+
+    def _summary_text(self, prop: Property, rt: RoomType, rooms: int, beds: int, ci: date, co: date, q: av.Quote,
+                      guests: int) -> str:
+        """The booking summary, always English, one fact per line (a record both sides can check)."""
+        day = lambda d: f"{d.strftime('%a')}, {d.day} {d.strftime('%b %Y')}"  # noqa: E731
+        lines = ["*Booking summary*", "",
+                 f"Place: {self._place_label(prop)}",
+                 f"Room: {rt.name} x {rooms}" + (f" (+ {beds} extra bed{'s' if beds != 1 else ''})" if beds else ""),
+                 f"Check-in: {day(ci)}, from {self._clock12(prop.checkin_time)}",
+                 f"Check-out: {day(co)}, by {self._clock12(prop.checkout_time)}",
+                 f"Stay: {q.nights} night{'s' if q.nights != 1 else ''}, {guests} guest{'s' if guests != 1 else ''}", "",
+                 f"Total: {_money(q.total)}",
+                 f"Pay now (advance): {_money(q.advance)}"]
+        if q.total > q.advance:
+            lines.append(f"Pay at the property: {_money(q.total - q.advance)}")
+        return "\n".join(lines)
 
     def _tool_create(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st, phone = ctx.st, ctx.phone

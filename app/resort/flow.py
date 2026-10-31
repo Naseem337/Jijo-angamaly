@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from app.core.clock import ist_today, to_ist
-from app.core.language import is_opt_in, is_opt_out
+from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
 from app.resort.chat import GREETING, ChatMixin, is_ack
@@ -45,8 +45,9 @@ def fmt_date(d: date) -> str:
 class BookingBot(IdProofMixin, ChatMixin):
     def __init__(self, config: ResortConfig, repo: ResortRepo, whatsapp: WhatsAppClient, payments: Payments,
                  clock: Any, *, llm: Callable[[], LLMProvider] | None = None,
-                 voice_in: Callable[[], Any] | None = None, debounce_s: float = 0.0) -> None:
+                 voice_in: Callable[[], Any] | None = None, debounce_s: float = 0.0, patience_s: float = 0.0) -> None:
         self.debounce_s = debounce_s  # seconds to wait for a quick second message before answering
+        self.patience_s = patience_s or debounce_s  # the longer wait when the message stops mid-sentence
         self.config = config
         self.repo = repo
         self.wa = whatsapp
@@ -146,7 +147,9 @@ class BookingBot(IdProofMixin, ChatMixin):
                 self._text(phone, t("opt_out", st.get("lang", "en")))
                 return "opt_out"
             if INDIC.search(text):  # a script gives the language away at once
-                st["lang"] = detect_script(text, st.get("lang", "en"))
+                st["lang"] = st["gs"] = detect_script(text, st.get("lang", "en"))
+            elif not is_language_neutral(text):
+                st["gs"] = ""  # English letters (English or Manglish): "ok" and "hi" do not change this
         st.setdefault("lang", "en")
         if st["lang"] not in FIXED_LANGS:
             st["lang"] = "en"
@@ -298,8 +301,8 @@ class BookingBot(IdProofMixin, ChatMixin):
         is waiting for their confirmation, or we have not written to them yet."""
         if (st.get("bk") or {}).get("chosen"):
             return True
-        last = next((m for m in reversed(self.repo.list_chat(phone, limit=6)) if m.direction == "out"), None)
-        return last is None or "?" in last.text
+        last = self.repo.last_outbound_text(phone)
+        return last is None or "?" in last
 
     def check_payments(self) -> int:
         """Ask the payment provider about every unpaid hold. A paid link is confirmed exactly as the webhook would."""

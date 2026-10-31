@@ -180,7 +180,7 @@ def test_system_prompt_has_the_rules_and_facts(world):
     assert "9497861924" in system and "9995855789" in system and "https://maps.app.goo.gl/abc" in system
     assert "Never ask which language" in system and "Manglish" in system and "Hinglish" in system
     assert "call the owner" in system and "NEGOTIATION" in system and "Never offer a" in system
-    assert "₹4,000" in system and "Extra bed: ₹500" in system
+    assert "₹4,000" not in system and "Extra bed: ₹500" in system  # prices only ever come from the tools
     assert "Kanthalloor, Munnar" in system and "2026-11-02 (Monday)" in system
 
 
@@ -236,7 +236,8 @@ def test_season_rates_and_extra_bed(world):
     say(w, "3 nights from 10 Nov", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=3, adults=2), reply("ok"))
     deluxe = next(o for o in last_tool(w)["options"] if o["room_type"] == "Deluxe")
-    assert deluxe["rate_per_room_per_night"] == "1 night x Rs 4,000, 2 nights x Rs 5,000"
+    assert "price_per_night" not in deluxe and "rate_per_room_per_night" not in deluxe  # nights differ: only the total is given
+    assert "Never mention that rates change" in last_tool(w)["note"]
     assert deluxe["total_for_stay"] == 14000
     say(w, "deluxe with one extra bed", GUEST, tool("prepare_booking", room_type="Deluxe", rooms=1, extra_beds=1),
         reply("summary"))
@@ -710,7 +711,7 @@ def test_the_prompt_carries_the_language_summary_and_payment_rules(world):
     say(w, "hello there", GUEST, reply("Hi, what are you looking for?"))
     system = w.llm.calls[0].system
     assert "ONE language per reply" in system and "NEVER in Malayalam script" in system
-    assert "always write it in English" in system
+    assert "sent automatically, always in English" in system
     assert "NEVER say the room or booking is booked, confirmed, reserved or done" in system
     assert "[no reply]" in system and "belong together" in system
 
@@ -820,3 +821,218 @@ def test_razorpay_link_status_finds_a_failed_attempt_through_the_order():
     http = httpx.Client(transport=httpx.MockTransport(handler))
     assert RazorpayPayments("k", "s", http=http).link_status("plink_1") == {
         "paid": False, "payment_id": "", "failed_payment_id": "pay_b"}
+
+
+def test_casual_words_get_no_reply_but_real_talk_does(world):
+    w = world
+    say(w, "Alleppey il room undo?", GUEST, reply("Und bro. Ethra aalkkaar?"))
+    say(w, "2 per, 10 nu", GUEST, tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=1, adults=2,
+                                       language="manglish"), reply("Deluxe 4000 aanu. Ethu mathi."))
+    assert w.wa.texts()[-1].endswith(".")  # a statement: nothing is being asked now
+    before, calls = len(w.wa.to(GUEST)), len(w.llm.calls)
+    for casual in ("ok", "thanks a lot", "nice", "adipoli", "haha 😄", "okay then", "ok will see", "super bro", "kollam", "👍"):
+        assert say(w, casual) == "quiet", casual
+    assert len(w.wa.to(GUEST)) == before and len(w.llm.calls) == calls
+    # anything with real content goes to the AI, even when it starts with "ok"
+    assert say(w, "ok how much for 3 nights?", GUEST, reply("3 nights is ₹12,000.")) == "answered"
+    assert say(w, "ok book it", GUEST, reply("Sure, which room type?")) == "answered"
+
+
+def test_the_prompt_limits_replies_to_necessary_talk(world):
+    w = world
+    say(w, "what is the price?", GUEST, reply("Which dates?"))
+    system = w.llm.calls[0].system
+    assert "Reply only when it is necessary" in system and "will tell my family" in system and "[no reply]" in system
+
+
+# --------------------------------------------------------------------------- giving the guest time to finish
+
+
+def test_unfinished_messages_are_recognised():
+    from app.resort.chat import looks_unfinished
+    for open_ended in ("njan udheshikkunath oru", "we are planning to", "for 3 people,", "ente friends um...", "enikku", "I want a"):
+        assert looks_unfinished(open_ended), open_ended
+    for finished in ("25 dec aanu", "2 per", "Alleppey", "avde engane und", "how many rooms?", "ok", "10 nu varum.", "great!"):
+        assert not looks_unfinished(finished), finished
+
+
+def test_the_bot_waits_longer_for_a_cut_off_message_then_answers_both_together(world, monkeypatch):
+    from app.resort import chat
+    w = world
+    w.bot.debounce_s, w.bot.patience_s = 2.5, 8.0
+    waits = []
+
+    def sleeper(seconds):
+        waits.append(seconds)
+        if len(waits) == 1:  # while we wait, the guest finishes the thought in a second message
+            w.bot.debounce_s = w.bot.patience_s = 0
+            say(w, "25 dec aanu", GUEST, reply("25 Dec ethra divasam, ethra per?"))
+
+    monkeypatch.setattr(chat.time, "sleep", sleeper)
+    assert say(w, "njan udheshikkunath oru") == "superseded"
+    assert waits == [8.0]  # the long wait, because the first message stopped mid-sentence
+    assert w.wa.texts() == ["25 Dec ethra divasam, ethra per?"]  # answered once
+    assert w.llm.calls[0].messages[-1].content == "njan udheshikkunath oru\n25 dec aanu"
+
+
+def test_a_complete_message_waits_only_the_short_time(world, monkeypatch):
+    from app.resort import chat
+    w = world
+    w.bot.debounce_s, w.bot.patience_s = 2.5, 8.0
+    waits = []
+    monkeypatch.setattr(chat.time, "sleep", waits.append)
+    say(w, "25 dec aanu", GUEST, reply("Ethra divasam?"))
+    assert waits == [2.5]
+
+
+def test_if_nothing_follows_a_cut_off_message_the_bot_asks_them_to_go_on(world):
+    w = world
+    say(w, "njan udheshikkunath oru", GUEST, reply("Sheri bro, parayu, entha plan?"))
+    assert w.wa.texts() == ["Sheri bro, parayu, entha plan?"]
+    assert "cut off or you cannot tell what they mean" in w.llm.calls[0].system
+
+
+# --------------------------------------------------------------------------- "sir", and an offers question is not a haggle
+
+
+def test_the_prompt_says_sir_and_treats_an_offers_question_as_a_plain_question(world):
+    w = world
+    say(w, "offer undo?", GUEST, reply("Which dates, sir?"))
+    system = w.llm.calls[0].system
+    assert 'Call the guest "sir"' in system and "Never bro" in system and "Und sir," in system and "Und bro" not in system
+    assert "Asking about offers, deals or the price is only a question, NOT a request to reduce" in system
+    assert "Never say there is no offer, never say you cannot reduce" in system
+    assert "Only when the guest asks for a lower price" in system
+
+
+# --------------------------------------------------------------------------- the summary, and never a price-hike story
+
+
+def test_the_summary_is_built_in_english_laid_out_line_by_line_and_sent_before_the_ai_line(world):
+    w = world
+    say(w, "Alleppey il 10 nu 2 divasam, 2 per", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="manglish"),
+        reply("Deluxe 8000 aanu sir."))
+    say(w, "deluxe mathi", GUEST, tool("prepare_booking", room_type="Deluxe", rooms=1, language="manglish"),
+        reply("Confirm cheyyatte sir? Name-um city-um parayamo?"))
+    texts = w.wa.texts()
+    assert texts[-1] == "Confirm cheyyatte sir? Name-um city-um parayamo?"  # the AI's own short line comes last
+    assert texts[-2] == "\n".join([
+        "*Booking summary*", "",
+        "Place: Pozhiyoram, Alleppey",
+        "Room: Deluxe x 1",
+        "Check-in: Tue, 10 Nov 2026, from 2:00 PM",
+        "Check-out: Thu, 12 Nov 2026, by 11:00 AM",
+        "Stay: 2 nights, 2 guests", "",
+        "Total: ₹8,000",
+        "Pay now (advance): ₹4,000",
+        "Pay at the property: ₹4,000"])
+    assert "next_step" in last_tool(w) and "Do NOT write it" in last_tool(w)["next_step"]
+
+
+def test_extra_bed_shows_in_the_summary(world):
+    w = world
+    to_summary(w, beds=1, adults=2)
+    summary = next(t for t in w.wa.texts() if t.startswith("*Booking summary*"))
+    assert "Room: Deluxe x 1 (+ 1 extra bed)" in summary and "Stay: 2 nights, 2 guests" in summary and "Total: ₹9,000" in summary
+
+
+def test_a_per_night_price_is_given_only_when_every_night_costs_the_same(world):
+    w = world
+    say(w, "2 nights from 10 Nov", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2), reply("ok"))
+    deluxe = next(o for o in last_tool(w)["options"] if o["room_type"] == "Deluxe")
+    assert deluxe["price_per_night"] == 4000 and deluxe["total_for_stay"] == 8000
+
+
+def test_the_prompt_hides_rates_and_forbids_a_price_hike_story(world):
+    w = world
+    say(w, "price entha?", GUEST, reply("Dates parayamo sir?"))
+    system = w.llm.calls[0].system
+    assert "rate" not in system.lower().split("facts")[-1].replace("rated", "")  # no rate table among the facts
+    assert "Never tell the guest that rates change" in system and "peak or high season" in system
+    assert "Never quote a price from memory" in system
+    assert "Keep messages tidy and easy to read" in system and "each room type on its own line" in system
+
+
+# --------------------------------------------------------------------------- found by playing the bot against the real AI
+
+
+def test_a_date_with_a_year_that_has_passed_rolls_to_the_next_time_it_comes(world):
+    w = world  # today in these tests is 2 Nov 2026
+    say(w, "25 December, 2 nights", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2025-12-25", nights=2, adults=2), reply("ok"))
+    res = last_tool(w)
+    assert (res["check_in"], res["check_out"]) == ("2026-12-25", "2026-12-27") and "error" not in res
+    assert "taken as 2026-12-25 to 2026-12-27" in res["note"]
+    assert w.repo.get_state(GUEST)["bk"]["check_in"] == "2026-12-25"
+
+
+def test_yesterday_is_still_refused_not_moved_a_year(world):
+    w = world
+    say(w, "yesterday", GUEST, tool("check_availability", place="Alleppey", check_in="2026-11-01", nights=1, adults=2), reply("?"))
+    assert "past" in last_tool(w)["error"]
+
+
+def test_the_guest_is_never_called_by_name(world):
+    from app.resort.chat import ChatMixin
+    clean = ChatMixin._without_name
+    assert clean("Please confirm, Rahul sir.", "Rahul Menon") == "Please confirm, sir."
+    assert clean("Sure, sir Rahul, one moment", "Rahul") == "Sure, sir, one moment"
+    assert clean("Thank you, Rahul. Sir, the link follows.", "Rahul") == "Thank you. Sir, the link follows."
+    assert clean("Hello sir", "") == "Hello sir" and clean("Rahul is the owner", "") == "Rahul is the owner"
+    w = world
+    w.repo.touch_guest(GUEST, w.clock.now(), name="Rahul")
+    say(w, "hello there", GUEST, reply("Hi Rahul sir, how can I help?"))
+    assert w.wa.texts()[-1] == "Hi sir, how can I help?"
+
+
+def test_the_guests_own_script_decides_the_fixed_language_whatever_the_ai_calls_it(world):
+    w = world
+    say(w, "ஆலப்புழாவில் ரூம் இருக்கா? டிசம்பர் 25, 2 பேர்", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-12-25", nights=2, adults=2, language="ml"),
+        reply("கிடைக்கும் sir."))
+    assert w.repo.get_state(GUEST)["lang"] == "ta" and w.repo.get_state(GUEST)["style"] == "ta"
+    say(w, "ok", "+919847000021", tool("check_availability", place="Alleppey", check_in="2026-12-25", nights=2,
+                                       adults=2, language="ml"), reply("ok"))  # neutral first word, AI says script
+    assert w.repo.get_state("+919847000021")["lang"] == "mn"  # an English-letters guest never gets script messages
+
+
+def test_a_foreign_script_inside_a_reply_gets_one_rewrite(world):
+    w = world
+    say(w, "ஆலப்புழாவில் ரூம் இருக்கா?", GUEST, reply("அതെ sir, ரூம் இருக்கு."), reply("ஆமா sir, ரூம் இருக்கு."))
+    assert w.wa.texts() == ["ஆமா sir, ரூம் இருக்கு."]
+    assert "Rewrite that reply in Tamil only" in w.llm.calls[1].messages[-1].content
+    assert "Do not use Malayalam script" in w.llm.calls[1].messages[-1].content
+
+
+def test_a_plain_offers_question_never_gets_a_no_offer_answer(world):
+    w = world
+    say(w, "offer undo?", GUEST, reply("Sorry sir, no offers right now."), reply("Dates parayamo sir? Appol price parayam."))
+    assert w.wa.texts() == ["Dates parayamo sir? Appol price parayam."]
+    assert "without saying there is no offer" in w.llm.calls[1].messages[-1].content
+    say(w, "can you reduce the price a little?", GUEST, reply("Sir, the price is fair for a beachfront stay; I cannot reduce it."))
+    assert w.wa.texts()[-1].endswith("I cannot reduce it.") and len(w.llm.calls) == 3  # a real haggle: no rewrite
+
+
+def test_sir_is_used_now_and_then_not_in_every_message(world):
+    w = world
+    say(w, "alleppey und?", GUEST, reply("Sir, und. Ethra divasam?"))
+    say(w, "2 divasam", GUEST, reply("Sir, ethra per?"))
+    say(w, "2 per", GUEST, reply("Sheri, 2 per. Ok sir."))
+    assert w.wa.texts() == ["Sir, und. Ethra divasam?", "Ethra per?", "Sheri, 2 per. Ok sir."]  # every other message
+
+
+def test_the_guest_is_never_called_by_name_in_any_script():
+    from app.resort.chat import ChatMixin
+    clean = ChatMixin._without_name
+    assert clean("അനു sir, ശരി", "അനു Menon") == "sir, ശരി"
+    assert clean("நன்றி, கார்த்திக் sir", "கார்த்திக்") == "நன்றி, sir"
+    assert clean("ठीक है, राहुल, link भेज रहा हूँ", "राहुल") == "ठीक है, link भेज रहा हूँ"
+
+
+def test_the_prompt_never_lets_the_ai_assume_the_guest_count(world):
+    w = world
+    say(w, "room und?", GUEST, reply("Und sir. Ethra per?"))
+    assert "Never assume the number of persons, rooms or nights" in w.llm.calls[0].system
+    assert "never assume 1" in str(w.llm.calls[0].tools[0].parameters)

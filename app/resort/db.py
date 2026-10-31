@@ -330,6 +330,11 @@ class ResortRepo:
                                    (m.phone, m.direction, m.text, _iso(m.at), m.source))
             return int(cur.lastrowid)
 
+    def last_outbound_text(self, phone: str) -> str | None:
+        """The newest message we sent this guest (None if we never wrote to them)."""
+        row = self._one("SELECT text FROM chat WHERE phone=? AND direction='out' ORDER BY id DESC LIMIT 1", (phone,))
+        return row["text"] if row else None
+
     def last_chat_id(self, phone: str, direction: str) -> int:
         row = self._one("SELECT MAX(id) AS i FROM chat WHERE phone=? AND direction=?", (phone, direction))
         return int(row["i"] or 0) if row else 0
