@@ -7,9 +7,21 @@
 <button class="btn" type="button" onclick="window.print()">{{ icon('doc') }} Print</button>
 {% endcall %}
 <form class="filters" method="get">
-  <input type="date" name="from" value="{{ start }}" title="From"><input type="date" name="to" value="{{ end }}" title="To">
+  <div class="range" data-range data-today="{{ today }}">
+    <input type="hidden" name="from" value="{{ start }}"><input type="hidden" name="to" value="{{ end }}">
+    <button type="button" class="range-btn" aria-haspopup="dialog">{{ icon('cal') }}<span data-range-label>{{ start }} to {{ end }}</span></button>
+    <div class="range-pop" hidden>
+      <div class="range-presets">
+        <button type="button" data-preset="today">Today</button><button type="button" data-preset="yesterday">Yesterday</button>
+        <button type="button" data-preset="week">Last 7 days</button><button type="button" data-preset="month">This month</button>
+        <button type="button" data-preset="lastmonth">Last month</button>
+      </div>
+      <div class="range-cal"><div class="range-nav"><button type="button" data-nav="-1" aria-label="Earlier">&lsaquo;</button><button type="button" data-nav="1" aria-label="Later">&rsaquo;</button></div>
+        <div class="range-months"></div><p class="range-hint">Pick the first day, then the last day.</p></div>
+    </div>
+  </div>
   <select name="property_id"><option value="">All properties</option>{% for p in my_props %}<option value="{{ p.id }}" {{ 'selected' if prop_id == p.id }}>{{ p.name }}</option>{% endfor %}</select>
-  <button class="btn">Show</button><a class="btn ghost" href="{{ BASE }}/reports/collections">Today</a>
+  <a class="btn ghost" href="{{ BASE }}/reports/collections">Today</a>
 </form>
 <div class="stats">
   <div class="stat"><small>Collected</small><b>{{ r.collected|rupees }}</b></div>

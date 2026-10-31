@@ -1,11 +1,28 @@
 {% extends "base.html" %}
-{% from "macros.html" import page_head, empty %}
-{% block title %}Guests · Resort Desk{% endblock %}
+{% from "macros.html" import page_head, empty, icon %}
+{% block title %}Guests &amp; leads · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head("Guests", guests|length ~ " saved") %}{% endcall %}
-<form class="filters" method="get"><input name="q" placeholder="Search name or phone" value="{{ q }}"><button class="btn">Search</button></form>
-<div class="card table-wrap"><table class="list"><thead><tr><th>Guest</th><th>Language</th><th>Stays</th><th>Offers</th><th>Last seen</th></tr></thead><tbody>
-{% for g in guests %}<tr class="click" data-href="{{ BASE }}/guests/{{ g.phone|urlq }}"><td><b>{{ g.name or '—' }}</b><small class="block">{{ g.phone }}</small></td><td>{{ g.language }}</td>
-<td>{{ stays.get(g.phone, 0) }}</td><td>{{ 'Yes' if g.offers_consent else '—' }}</td><td>{{ g.last_seen.strftime('%d %b %Y') if g.last_seen else '—' }}</td></tr>
-{% else %}<tr><td colspan="5">{{ empty("No guests yet. They appear when someone messages the bot.") }}</td></tr>{% endfor %}</tbody></table></div>
+{% call page_head("Guests & leads", rows|length ~ " people who messaged on WhatsApp") %}
+<a class="btn" href="{{ BASE }}/guests?{{ query }}{{ '&' if query }}format=csv">{{ icon('download') }} Export</a>
+{% endcall %}
+<form class="filters" method="get">
+  <input name="q" placeholder="Search name, phone or city" value="{{ q }}">
+  <select name="stage" onchange="this.form.submit()">
+    <option value="">Everyone</option>
+    <option value="interested" {{ 'selected' if stage == 'interested' }}>Interested ({{ counts.interested }})</option>
+    <option value="pending" {{ 'selected' if stage == 'pending' }}>Payment pending ({{ counts.pending }})</option>
+    <option value="booked" {{ 'selected' if stage == 'booked' }}>Booked ({{ counts.booked }})</option>
+    <option value="new" {{ 'selected' if stage == 'new' }}>Just chatting ({{ counts.new }})</option>
+  </select>
+  <button class="btn">Search</button>
+</form>
+<div class="card table-wrap"><table class="list"><thead><tr><th>Guest</th><th>Looking for</th><th>Status</th><th>Coming from</th><th>Last message</th></tr></thead><tbody>
+{% for r in rows %}{% set g = r.g %}{% set ld = r.lead %}
+<tr class="click" data-href="{{ BASE }}/guests/{{ g.phone|urlq }}">
+  <td><b>{{ g.name or '—' }}</b><small class="block">{{ g.phone }}</small></td>
+  <td>{% if ld and ld.check_in %}<b>{{ r.place or '—' }}</b><small class="block">{{ ld.check_in[8:10] }}/{{ ld.check_in[5:7] }} to {{ ld.check_out[8:10] }}/{{ ld.check_out[5:7] }} · {{ ld.adults + ld.children }} guest{{ 's' if ld.adults + ld.children != 1 }}{% if ld.rooms %} · {{ ld.rooms }} room{{ 's' if ld.rooms != 1 }}{% endif %}</small>{% else %}—{% endif %}</td>
+  <td><span class="pill {{ r.cls }}">{{ r.label }}</span></td>
+  <td>{{ ld.from_city if ld and ld.from_city else '—' }}</td>
+  <td>{{ g.last_seen.strftime('%d %b %Y') if g.last_seen else '—' }}</td></tr>
+{% else %}<tr><td colspan="5">{{ empty("No guests yet. They are saved here as soon as someone messages the bot.") }}</td></tr>{% endfor %}</tbody></table></div>
 {% endblock %}

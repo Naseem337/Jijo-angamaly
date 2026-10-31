@@ -157,3 +157,80 @@ var closeDrawer = function () {};
     sel.addEventListener('change', upd); upd();
   });
 })();
+
+
+// Date range picker: one field, two months, pick the first and last day (like a flight search).
+(function () {
+  var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var DOW = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function iso(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function parse(s) { var p = s.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function fmt(d, year) { return d.getDate() + ' ' + MON[d.getMonth()] + (year ? ' ' + d.getFullYear() : ''); }
+  document.querySelectorAll('[data-range]').forEach(function (root) {
+    var from = root.querySelector('[name=from]'), to = root.querySelector('[name=to]');
+    var btn = root.querySelector('.range-btn'), pop = root.querySelector('.range-pop');
+    var months = root.querySelector('.range-months'), label = root.querySelector('[data-range-label]');
+    var today = parse(root.dataset.today), a = parse(from.value), b = parse(to.value), picking = false;
+    var view = new Date(a.getFullYear(), a.getMonth(), 1);
+    function text() {
+      label.textContent = iso(a) === iso(b) ? fmt(a, true) : fmt(a, a.getFullYear() !== b.getFullYear()) + ' – ' + fmt(b, true);
+    }
+    function month(first) {
+      var y = first.getFullYear(), m = first.getMonth(), lead = (first.getDay() + 6) % 7, days = new Date(y, m + 1, 0).getDate();
+      var h = '<div class="range-month"><b>' + FULL[m] + ' ' + y + '</b><div class="range-grid">';
+      DOW.forEach(function (w) { h += '<span>' + w + '</span>'; });
+      for (var i = 0; i < lead; i++) h += '<i></i>';
+      for (var d = 1; d <= days; d++) {
+        var dt = new Date(y, m, d), k = iso(dt), cls = '';
+        if (k === iso(a)) cls += ' start';
+        if (k === iso(b)) cls += ' end';
+        if (dt > a && dt < b) cls += ' mid';
+        if (k === iso(today)) cls += ' today';
+        h += '<button type="button" data-day="' + k + '" class="' + cls.trim() + '">' + d + '</button>';
+      }
+      return h + '</div></div>';
+    }
+    function draw() { months.innerHTML = month(view) + month(new Date(view.getFullYear(), view.getMonth() + 1, 1)); }
+    function apply() { from.value = iso(a); to.value = iso(b); text(); pop.hidden = true; root.closest('form').submit(); }
+    function preset(name) {
+      var y = today.getFullYear(), m = today.getMonth();
+      if (name === 'today') { a = b = today; }
+      else if (name === 'yesterday') { a = b = new Date(y, m, today.getDate() - 1); }
+      else if (name === 'week') { a = new Date(y, m, today.getDate() - 6); b = today; }
+      else if (name === 'month') { a = new Date(y, m, 1); b = today; }
+      else if (name === 'lastmonth') { a = new Date(y, m - 1, 1); b = new Date(y, m, 0); }
+      apply();
+    }
+    btn.addEventListener('click', function () {
+      pop.hidden = !pop.hidden; picking = false;
+      if (!pop.hidden) { view = new Date(a.getFullYear(), a.getMonth(), 1); draw(); }
+    });
+    pop.addEventListener('click', function (e) {
+      var nav = e.target.closest('[data-nav]'), day = e.target.closest('[data-day]'), pre = e.target.closest('[data-preset]');
+      if (nav) { view = new Date(view.getFullYear(), view.getMonth() + (+nav.dataset.nav), 1); draw(); }
+      else if (pre) { preset(pre.dataset.preset); }
+      else if (day) {
+        var d = parse(day.dataset.day);
+        if (!picking) { a = b = d; picking = true; draw(); }
+        else { if (d < a) { b = a; a = d; } else { b = d; } picking = false; apply(); }
+      }
+    });
+    document.addEventListener('click', function (e) { if (!root.contains(e.target)) pop.hidden = true; });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') pop.hidden = true; });
+    text();
+  });
+})();
+
+// Phones: every list table row becomes a small card, so label each cell with its column heading.
+(function () {
+  document.querySelectorAll('table.list').forEach(function (t) {
+    var heads = [].map.call(t.querySelectorAll('thead th'), function (x) { return x.textContent.trim(); });
+    t.querySelectorAll('tbody tr').forEach(function (tr) {
+      [].forEach.call(tr.children, function (td, i) {
+        if (heads[i] && td.colSpan === 1) td.setAttribute('data-label', heads[i]);
+      });
+    });
+  });
+})();

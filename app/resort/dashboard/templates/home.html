@@ -1,41 +1,33 @@
 {% extends "base.html" %}
-{% from "macros.html" import page_head, pill, empty, icon, method_chip %}
-{% block title %}Home · Resort Desk{% endblock %}
+{% from "macros.html" import page_head, empty, icon %}
+{% block title %}Today · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head("Home", today.strftime('%A, %d %B %Y')) %}
+{% call page_head("Today", today.strftime('%A, %d %B %Y')) %}
 <a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a>
 {% endcall %}
-<div class="quick">
-  <a href="{{ BASE }}/bookings/new">{{ icon('plus') }}<span>New booking</span></a>
-  <a href="{{ BASE }}/properties">{{ icon('building') }}<span>Add room</span></a>
-  <a href="{{ BASE }}/calendar">{{ icon('cal') }}<span>Open calendar</span></a>
-  <a href="{{ BASE }}/stay">{{ icon('door') }}<span>Arrivals &amp; departures</span></a>
-  <a href="{{ BASE }}/reports/collections">{{ icon('report') }}<span>Today's collections</span></a>
-  <a href="{{ BASE }}/conversations">{{ icon('chat') }}<span>Open chats</span></a>
-</div>
 <div class="stats">
-  <a class="stat" href="{{ BASE }}/stay"><small>Check-ins today</small><b>{{ arrivals|length }}</b></a>
-  <a class="stat" href="{{ BASE }}/stay"><small>In the house</small><b>{{ in_house|length }}</b><em>{{ departures|length }} leaving today</em></a>
-  <a class="stat" href="{{ BASE }}/bookings?status=hold"><small>Payments pending</small><b>{{ holds|length }}</b></a>
-  <div class="stat"><small>Collected this month</small><b>{{ revenue_month|rupees }}</b><em>{{ revenue_all|rupees }} all time</em></div>
-  <a class="stat" href="{{ BASE }}/conversations"><small>Chats needing a human</small><b>{{ paused }}</b><em>{{ waiting }} awaiting reply</em></a>
+  <a class="stat" href="{{ BASE }}/stay"><small>Arrivals today</small><b>{{ arrivals|length }}</b></a>
+  <a class="stat" href="{{ BASE }}/stay"><small>Departures today</small><b>{{ departures|length }}</b></a>
+  <a class="stat" href="{{ BASE }}/stay"><small>In the house</small><b>{{ in_house|length }}</b></a>
+  <a class="stat" href="{{ BASE }}/calendar"><small>Occupancy tonight</small><b>{{ tonight_pct }}%</b><em>{{ tonight_used }} of {{ tonight_total }} rooms</em></a>
+  <a class="stat" href="{{ BASE }}/reports/collections"><small>Collected today</small><b>{{ collected|rupees }}</b></a>
 </div>
 <div class="grid2">
-  <section class="card"><h3>Arriving today <a class="mini" href="{{ BASE }}/stay">Check in</a></h3>
-    {% for b in arrivals %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ props[b.property_id].name }} · {{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
+  <section class="card"><h3>Arriving today</h3>
+    {% for b in arrivals %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
     {% else %}{{ empty("No arrivals today", "cal") }}{% endfor %}</section>
-  <section class="card"><h3>Leaving today <a class="mini" href="{{ BASE }}/stay">Check out</a></h3>
-    {% for b in departures %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ props[b.property_id].name }} · {{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
+  <section class="card"><h3>Leaving today</h3>
+    {% for b in departures %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
     {% else %}{{ empty("No departures today", "cal") }}{% endfor %}</section>
 </div>
 <div class="grid2">
-  <section class="card"><h3>Money collected, by how it was paid</h3>
-    {% set top = methods[0][1] if methods else 1 %}
-    {% for key, amount in methods %}<div class="bar-row"><span>{{ method_chip(key) }}</span><div class="bar"><i class="m-{{ key }}" style="width:{{ (100 * amount / top)|round|int }}%"></i></div><b>{{ amount|rupees }}</b></div>
-    {% else %}{{ empty("No payments yet", "cash") }}{% endfor %}</section>
-  <section class="card"><h3>Occupancy, next 14 days</h3>
+  <section class="card"><h3>Waiting for payment</h3>
+    {% for b in holds[:6] %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ b.check_in.strftime('%d %b') }} · {{ b.advance|rupees }} advance</span></a>
+    {% else %}{{ empty("Nothing waiting for payment", "cash") }}{% endfor %}
+    {% if holds|length > 6 %}<a class="mini" href="{{ BASE }}/bookings?status=hold">See all {{ holds|length }}</a>{% endif %}</section>
+  <section class="card"><h3>Next 14 days</h3>
   {% for p, days in occ %}
-  <div class="occ"><div class="occ-name">{{ p.name }}</div>
+  <div class="occ">{% if occ|length > 1 %}<div class="occ-name">{{ p.name }}</div>{% endif %}
     <div class="occ-bars">{% for d in days %}<a href="{{ BASE }}/bookings?property_id={{ p.id }}&date={{ d.day }}" title="{{ d.day.strftime('%d %b') }}: {{ d.used }}/{{ d.total }} rooms">
       <i style="height:{{ [d.pct, 4]|max }}%" class="{{ 'full' if d.pct >= 90 else 'mid' if d.pct >= 50 }}"></i><small>{{ d.day.day }}</small></a>{% endfor %}</div></div>
   {% else %}{{ empty("Add a property to see occupancy", "building", BASE ~ "/properties", "Go to properties") }}{% endfor %}

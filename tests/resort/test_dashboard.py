@@ -264,4 +264,4 @@ def test_csv_and_filter_have_payment_fields(env):
     unpaid = client.get(f"{BASE}/bookings", params={"method": "unpaid"}).text
     assert other.id in unpaid and b.id not in unpaid
     home = client.get(f"{BASE}/").text
-    assert "Cash" in home and "4,000" in home
+    assert "Collected today" in home and "Arrivals today" in home and "Chats needing" not in home

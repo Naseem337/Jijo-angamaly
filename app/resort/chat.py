@@ -24,6 +24,7 @@ from typing import Any
 from app.core.clock import to_ist
 from app.providers.llm import ChatMessage, LLMError, ToolCall, ToolSpec
 from app.resort import availability as av
+from app.resort import leads
 from app.resort.db import SoldOut
 from app.resort.i18n import status_name, t
 from app.resort.models import Booking, Property, RoomType
@@ -91,7 +92,8 @@ TOOLS = [
         "Create the booking and the payment link. Only after the guest has seen the summary from prepare_booking "
         "and replied that they confirm. The payment link is sent automatically right after your reply.",
         {"type": "object", "properties": {
-            "guest_name": {"type": "string", "description": "name for the booking, if not already known"}}}),
+            "guest_name": {"type": "string", "description": "name for the booking, if not already known"},
+            "from_city": {"type": "string", "description": "the city they are coming from, only if they said it"}}}),
     ToolSpec(
         "send_payment_link",
         "Send the guest their payment link again (they lost it, it did not open, or they ask for it). Only works "
@@ -182,7 +184,8 @@ class ChatMixin:
             "6. When they choose, call prepare_booking. Then send a clear summary: place, room type, rooms, dates "
             "and nights, persons, rate per night breakdown, total, the advance to pay now, the balance to pay at "
             "the property, check-in and check-out time. Ask them to confirm. If you do not know their name yet, ask "
-            "for it in the same message.\n"
+            "for it in the same message, and in the same line ask which city they are coming from (optional: "
+            "never insist, pass from_city to create_booking only if they tell you).\n"
             "7. Only after they confirm in a later message, call create_booking. Then tell them briefly that the "
             "rooms are held and the payment link follows. Do not write the link or the advance amount yourself, it "
             "is sent automatically.\n"
@@ -347,6 +350,9 @@ class ChatMixin:
               "adults": adults, "children": children}
         st["bk"] = bk
         wanted = self._int(a, "rooms")
+        leads.save_lead(self.repo, ctx.phone, self.clock.now(), property_id=prop.id, check_in=ci.isoformat(),
+                        check_out=co.isoformat(), adults=adults, children=children, rooms=wanted, room_type="",
+                        stage="asked", booking_id="")
         options = []
         for rt, rooms_ok in self._fits(prop, bk):
             rooms = wanted if wanted in rooms_ok else rooms_ok[0]
@@ -391,6 +397,7 @@ class ChatMixin:
         q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, rooms, beds)
         bk["chosen"] = {"room_type_id": rt.id, "rooms": rooms, "extra_beds": beds, "total": q.total,
                         "advance": q.advance, "turn": st["turn"]}
+        leads.save_lead(self.repo, ctx.phone, self.clock.now(), room_type=rt.name, rooms=rooms, stage="summary")
         guest = self.repo.get_guest(ctx.phone)
         out = {"place": self._place_label(prop), "room_type": rt.name, "rooms": rooms, "extra_beds": beds,
                "check_in": f"{ci.isoformat()} ({ci.strftime('%A')})", "check_out": f"{co.isoformat()} ({co.strftime('%A')})",
@@ -453,6 +460,8 @@ class ChatMixin:
         self.repo.save_booking(booking)
         st["booking_id"] = booking.id
         st.pop("bk", None)
+        leads.save_lead(self.repo, phone, now, stage="held", booking_id=booking.id,
+                        from_city=(a.get("from_city") or "").strip()[:60] or None)
         ctx.pay_message = t("pay", lang, id=booking.id, minutes=self.config.hold_minutes,
                             advance=f"{booking.advance:,}", url=link.url)
         return {"ok": True, "booking_id": booking.id, "rooms_held_minutes": self.config.hold_minutes,

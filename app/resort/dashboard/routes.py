@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 from calendar import monthrange
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -136,6 +136,8 @@ def occupancy(repo, prop: Property, start: date, days: int, now: datetime) -> li
 
 @router.get("/")
 def home(request: Request, auth: Auth = Depends(require_user)):
+    """The front-desk view: today's arrivals, departures and house count, tonight's occupancy, money in today, and
+    the bookings waiting for payment. Everything else lives in its own page."""
     repo, today, now = get_repo(), today_ist(), now_utc()
     props = auth.properties(repo)
     props_by_id, rooms = _names(repo)
@@ -143,23 +145,14 @@ def home(request: Request, auth: Auth = Depends(require_user)):
     arrivals = stay.arrivals(mine, today)
     departures = stay.departures(mine, today) or [b for b in mine if b.status == "paid" and b.check_out == today]
     in_house = stay.in_house(mine)
-    holds = [b for b in mine if b.status == "hold" and av.booking_blocks(b, now)]
-    month_start = today.replace(day=1)
-    paid = [b for b in mine if b.status in PAID]
-    revenue_month = sum(b.paid_amount for b in paid if b.paid_at and b.paid_at.astimezone(IST).date() >= month_start)
-    revenue_all = sum(b.paid_amount for b in paid)
-    by_method: dict[str, int] = {}
-    for b in paid:
-        key = b.payment_method or "online"
-        by_method[key] = by_method.get(key, 0) + b.paid_amount
-    methods = sorted(by_method.items(), key=lambda kv: -kv[1])
-    convos = repo.list_conversations()
-    paused = [c for c in convos if c["paused"]]
-    waiting = [c for c in convos if c["direction"] == "in" and not c["paused"]]
+    holds = sorted((b for b in mine if b.status == "hold" and av.booking_blocks(b, now)), key=lambda b: b.check_in)
     occ = [(p, occupancy(repo, p, today, 14, now)) for p in props if p.active]
+    used, total = sum(days[0]["used"] for _, days in occ), sum(days[0]["total"] for _, days in occ)
+    ids = {b.id for b in mine}
+    collected = billing.collections(mine, [r for r in repo.list_refunds() if r.booking_id in ids], today, today).net
     return page(request, "home.html", auth, nav="home", today=today, arrivals=arrivals, departures=departures,
-                holds=holds, revenue_month=revenue_month, revenue_all=revenue_all, in_house=in_house, paused=len(paused),
-                waiting=len(waiting), occ=occ, props=props_by_id, rooms=rooms, paid_count=len(paid), methods=methods)
+                holds=holds, in_house=in_house, occ=occ, props=props_by_id, rooms=rooms, collected=collected,
+                tonight_used=used, tonight_total=total, tonight_pct=round(100 * used / total) if total else 0)
 
 
 # --------------------------------------------------------------------------- bookings
@@ -708,7 +701,7 @@ def report_collections(request: Request, auth: Auth = Depends(require_user)):
         return Response(out.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="collections-{start}-{end}.csv"'})
     props, _ = _names(repo)
-    return page(request, "report_collections.html", auth, nav="reports", r=report, start=start, end=end, f=q,
+    return page(request, "report_collections.html", auth, nav="reports", r=report, start=start, end=end, f=q, today=today,
                 my_props=auth.properties(repo), prop_id=prop_id, owing=owing, props=props,
                 days=sorted(report.by_day, reverse=True), methods=METHODS, query=str(q))
 
@@ -953,22 +946,70 @@ async def rate_save(property_id: str, room_id: str, request: Request, auth: Auth
 # --------------------------------------------------------------------------- guests
 
 
+LEAD_STAGES = {"booked": ("Booked", "paid"), "hold": ("Payment pending", "hold"), "summary": ("Checking the price", "hold"),
+               "asked": ("Asked for dates", ""), "new": ("Just chatting", "")}
+STAGE_FILTERS = {"interested": ("asked", "summary"), "pending": ("hold",), "booked": ("booked",), "new": ("new",)}
+
+
+def _lead_rows(repo, auth, q: str = "", stage: str = "") -> list[dict]:
+    """One row per WhatsApp guest: who they are, what they asked for, and how far they got."""
+    from app.resort import leads as leads_mod
+    lead_map = leads_mod.list_leads(repo)
+    mine = _visible_bookings(repo, auth, limit=5000)
+    by_id = {b.id: b for b in mine}
+    latest: dict = {}
+    for b in mine:
+        if b.guest_phone not in latest or b.created_at > latest[b.guest_phone].created_at:
+            latest[b.guest_phone] = b
+    guests = repo.list_guests(2000)
+    if auth.user.property_ids:  # a manager sees guests who booked or asked about their properties
+        visible = set(latest) | {p for p, ld in lead_map.items() if ld["property_id"] and auth.can_see(ld["property_id"])}
+        guests = [g for g in guests if g.phone in visible]
+    q = q.strip().lower()
+    if q:
+        guests = [g for g in guests if q in g.phone.lower() or q in g.name.lower()
+                  or q in (lead_map.get(g.phone, {}).get("from_city") or "").lower()]
+    props, _ = _names(repo)
+    rows = []
+    for g in guests:
+        lead = lead_map.get(g.phone)
+        booking = by_id.get(lead["booking_id"]) if lead and lead.get("booking_id") else (None if lead else latest.get(g.phone))
+        if booking is not None and booking.status in PAID:
+            key = "booked"
+        elif booking is not None and booking.status == "hold":
+            key = "hold"
+        elif lead:
+            key = lead["stage"] if lead["stage"] in ("asked", "summary") else "asked"
+        else:
+            key = "new"
+        if stage and key not in STAGE_FILTERS.get(stage, ()):
+            continue
+        label, cls = LEAD_STAGES[key]
+        rows.append({"g": g, "lead": lead, "key": key, "label": label, "cls": cls,
+                     "place": props[lead["property_id"]].name if lead and lead["property_id"] in props else ""})
+    rows.sort(key=lambda r: r["g"].last_seen or r["g"].first_seen or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return rows
+
+
 @router.get("/guests")
 def guests_list(request: Request, auth: Auth = Depends(require_user)):
-    repo, q = get_repo(), (request.query_params.get("q") or "").strip().lower()
-    guests = repo.list_guests(2000)
-    if not auth.user.property_ids:
-        pass
-    else:  # managers see guests who booked or chatted; keep it to guests with a booking at their properties
-        mine = {b.guest_phone for b in _visible_bookings(repo, auth, limit=5000)}
-        guests = [g for g in guests if g.phone in mine]
-    if q:
-        guests = [g for g in guests if q in g.phone.lower() or q in g.name.lower()]
-    stays = {}
-    for b in _visible_bookings(repo, auth, limit=5000):
-        if b.status in PAID:
-            stays[b.guest_phone] = stays.get(b.guest_phone, 0) + 1
-    return page(request, "guests.html", auth, nav="guests", guests=guests, stays=stays, q=request.query_params.get("q", ""))
+    repo, params = get_repo(), request.query_params
+    q, stage = (params.get("q") or "").strip(), params.get("stage") or ""
+    rows = _lead_rows(repo, auth, q, stage)
+    if params.get("format") == "csv":
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(["Name", "Phone", "Language", "Place", "Check-in", "Check-out", "Adults", "Children", "Rooms",
+                         "Room type", "Coming from", "Stage", "Last message (IST)"])
+        for r in rows:
+            g, ld = r["g"], r["lead"] or {}
+            writer.writerow([_csv_cell(g.name), g.phone, g.language, _csv_cell(r["place"]), ld.get("check_in") or "",
+                             ld.get("check_out") or "", ld.get("adults") or "", ld.get("children") or "", ld.get("rooms") or "",
+                             _csv_cell(ld.get("room_type") or ""), _csv_cell(ld.get("from_city") or ""), r["label"],
+                             g.last_seen.astimezone(IST).strftime("%Y-%m-%d %H:%M") if g.last_seen else ""])
+        return Response(out.getvalue(), media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="guests-and-leads.csv"'})
+    return page(request, "guests.html", auth, nav="guests", rows=rows, q=q, stage=stage, query=str(params),
+                counts={k: sum(1 for r in _lead_rows(repo, auth) if r["key"] in v) for k, v in STAGE_FILTERS.items()})
 
 
 @router.get("/guests/{phone}")
@@ -981,8 +1022,9 @@ def guest_detail(phone: str, request: Request, auth: Auth = Depends(require_user
     stays = _visible_bookings(repo, auth, phone=phone, limit=500)
     if auth.user.property_ids and not stays:
         raise HTTPException(404, "Guest not found")
+    from app.resort import leads as leads_mod
     return page(request, "guest_detail.html", auth, nav="guests", g=guest, stays=stays, props=props, rooms=rooms,
-                chat=repo.list_chat(phone, 60))
+                chat=repo.list_chat(phone, 60), lead=leads_mod.get_lead(repo, phone))
 
 
 @router.post("/guests/{phone}")
@@ -1083,8 +1125,8 @@ INTEGRATIONS = [
     ("WhatsApp", ["RESORT_WHATSAPP_PHONE_NUMBER_ID", "RESORT_WHATSAPP_ACCESS_TOKEN", "RESORT_WHATSAPP_APP_SECRET",
                   "RESORT_WHATSAPP_VERIFY_TOKEN"]),
     ("Razorpay", ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"]),
-    ("AI model", ["GEMINI_API_KEY", "GROQ_API_KEY", "SARVAM_API_KEY", "OPENROUTER_API_KEY", "DEEPSEEK_API_KEY"]),
-    ("Dashboard", ["SESSION_SECRET", "RESORT_DB_PATH"]),
+    ("AI model", ["GEMINI_API_KEY", "GROQ_API_KEY", "SARVAM_API_KEY"]),
+    ("Dashboard", ["SESSION_SECRET"]),
 ]
 
 

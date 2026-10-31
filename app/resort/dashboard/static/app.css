@@ -274,3 +274,70 @@ tr.click:hover td{background:var(--soft)}
 @media(max-width:860px){
 .content{padding:18px 14px 90px}.topbar{padding:10px 14px}h1{font-size:24px}.stat b{font-size:26px}
 .kv{grid-template-columns:130px 1fr}.cal-day{min-height:46px}.btn{padding:12px 18px}}
+
+/* ---- v4: one date-range field, every screen size ---- */
+.range{position:relative}
+.range-btn{display:inline-flex;align-items:center;gap:10px;min-width:260px;justify-content:flex-start;background:#fff;border:1px solid var(--line-2);border-radius:8px;padding:10px 16px;font:inherit;font-size:16px;font-weight:600;color:var(--ink);cursor:pointer}
+.range-btn:hover{border-color:var(--brand)}.range-btn .ic{color:var(--brand)}
+.range-pop{position:absolute;z-index:40;top:calc(100% + 8px);left:0;display:flex;gap:18px;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);padding:18px}
+.range-presets{display:grid;gap:4px;align-content:start;min-width:132px}
+.range-presets button{text-align:left;border:0;background:none;font:inherit;font-size:15px;padding:9px 12px;border-radius:8px;cursor:pointer;color:var(--ink)}
+.range-presets button:hover{background:var(--brand-soft);color:var(--brand-d)}
+.range-cal{position:relative}.range-nav{position:absolute;inset:0 0 auto 0;display:flex;justify-content:space-between;pointer-events:none}
+.range-nav button{pointer-events:auto;width:36px;height:36px;border:1px solid var(--line);background:#fff;border-radius:50%;font-size:22px;line-height:1;cursor:pointer;color:var(--ink)}
+.range-nav button:hover{background:var(--hover)}
+.range-months{display:flex;gap:28px}.range-month{width:288px}.range-month>b{display:block;text-align:center;font-size:16px;margin:6px 0 12px}
+.range-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}.range-grid span{text-align:center;font-size:12px;font-weight:700;color:var(--muted);padding:4px 0}
+.range-grid button{height:40px;border:0;background:none;border-radius:8px;font:inherit;font-size:15px;cursor:pointer;color:var(--ink)}
+.range-grid button:hover{background:var(--hover)}.range-grid button.mid{background:var(--brand-soft);border-radius:0}
+.range-grid button.start,.range-grid button.end{background:var(--brand);color:#fff;font-weight:700}
+.range-grid button.today{box-shadow:inset 0 0 0 2px var(--brand-soft);font-weight:700}
+.range-hint{margin:10px 0 0;text-align:center;font-size:13.5px;color:var(--muted)}
+
+/* wide screens: keep the page centred */
+@media(min-width:1500px){.content{margin-inline:auto}}
+
+/* tablets and small laptops: the menu slides in, cards stack */
+@media(max-width:1024px){
+.sidebar{position:fixed;left:0;top:0;z-index:30;transform:translateX(-100%);transition:transform .2s;width:290px;box-shadow:0 0 40px rgba(0,0,0,.2);overflow-y:auto}
+.sidebar.open{transform:none}.menu-btn{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:8px}.menu-btn:hover{background:var(--hover)}
+.scrim.show{display:block;position:fixed;inset:0;background:rgba(10,15,20,.45);z-index:25}
+.who{display:none}.topbar{padding:10px 16px;gap:10px}.content{padding:22px 20px 80px}
+.grid2{grid-template-columns:1fr}.inbox{grid-template-columns:1fr}
+}
+
+/* touch screens: comfortable tap targets */
+@media(pointer:coarse){
+.btn,input:not([type=checkbox]),select{min-height:46px}.btn.sm{min-height:40px}
+.sidebar nav a{min-height:48px}.range-grid button{height:44px}.chip button{width:26px;height:26px}
+}
+
+/* phones */
+@media(max-width:640px){
+h1{font-size:23px}.page-head{align-items:flex-start}.page-head .actions{width:100%}.page-head .actions .btn{flex:1;justify-content:center}
+.stats{grid-template-columns:1fr 1fr;gap:10px}.stat{padding:14px}.stat b{font-size:26px}
+.filters>*{flex:1 1 100%;width:100%!important;min-width:0!important}.filters .btn{justify-content:center}
+.cols{grid-template-columns:1fr}.cards{grid-template-columns:1fr}.card{padding:16px}
+.kv{grid-template-columns:1fr;gap:2px 0}.kv dt{margin-top:10px;font-size:13px}
+.search kbd{display:none}.topbar .btn.ghost{padding:8px}.user-menu{gap:6px}
+.savebar{flex-wrap:wrap}.savebar .btn{flex:1;justify-content:center}
+.extra-form,.inline-form{grid-template-columns:1fr}.inline-form input,.inline-form select{width:100%;min-width:0}
+.money-strip{grid-template-columns:1fr}.modal{width:calc(100vw - 20px)}
+.toast{width:calc(100vw - 28px);text-align:center;bottom:calc(14px + env(safe-area-inset-bottom))}
+/* list tables turn into one card per row */
+.card.table-wrap{border:0;background:none;padding:0;overflow:visible;max-height:none}
+table.list:not(.bill),table.list:not(.bill) tbody,table.list:not(.bill) tr,table.list:not(.bill) td{display:block;width:100%}
+table.list:not(.bill) thead{display:none}
+table.list:not(.bill) tr{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:12px;padding:6px 16px}
+table.list:not(.bill) td{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border:0;padding:10px 0;text-align:right;font-size:16px}
+table.list:not(.bill) td+td{border-top:1px solid var(--line)}
+table.list:not(.bill) td[data-label]:before{content:attr(data-label);flex:none;color:var(--muted);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;text-align:left;padding-top:3px}
+table.list:not(.bill) td[colspan]{display:block;text-align:center}
+.range-btn{min-width:0;width:100%}
+.range-pop{position:fixed;left:0;right:0;bottom:0;top:auto;max-height:88vh;overflow:auto;flex-direction:column;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+.range-presets{grid-template-columns:repeat(3,1fr)}.range-presets button{text-align:center;border:1px solid var(--line)}
+.range-months{display:block}.range-month{width:100%}.range-month+.range-month{display:none}
+.range-nav{top:0}
+}
+@media(max-width:1024px){.sidebar{box-shadow:none}.sidebar.open{box-shadow:0 0 40px rgba(0,0,0,.2)}}
+@media(max-width:640px){.stats>:last-child:nth-child(odd){grid-column:1/-1}}

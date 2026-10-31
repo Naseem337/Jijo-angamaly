@@ -1,9 +1,9 @@
-"""Create the two starter properties (PLACEHOLDER rooms and rates) and the owner login.
+"""Create the starter properties (Alleppey ready to book, Kanthalloor switched off) and the owner login.
 
     .venv\Scripts\python.exe scripts\seed_resort.py
 
-Safe to run twice: it does nothing for data that already exists. Replace every placeholder in the
-dashboard once the client sends the real data. The owner password comes from RESORT_OWNER_PASSWORD,
+Safe to run twice: it does nothing for data that already exists. Enter Kanthalloor's real rooms and rates
+in the dashboard when the client sends them, then switch the property on. The owner password comes from RESORT_OWNER_PASSWORD,
 or is generated and printed ONCE.
 """
 

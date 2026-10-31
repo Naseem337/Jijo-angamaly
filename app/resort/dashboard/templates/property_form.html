@@ -43,7 +43,7 @@
     <textarea name="highlights" hidden>{{ p.highlights|join('\n') }}</textarea>
     <div class="chip-list"></div>
     <div class="chip-add"><input type="text" maxlength="40" placeholder="e.g. Infinity pool, Mountain view, Campfire"><button type="button" class="btn">Add</button></div>
-  </div><small>Short selling points. Press Enter or Add after each one.</small></div>
+  </div></div>
 <label class="check"><input type="checkbox" name="active" {{ 'checked' if p.active }}> Active (the bot offers this property)</label></section>
 
 <section class="card" id="payment"><h3>Payment, invoices and cancellation</h3><div class="cols">
@@ -66,14 +66,14 @@
       <textarea name="staff_numbers" hidden>{{ p.staff_numbers|join('\n') }}</textarea>
       <div class="chip-list"></div>
       <div class="chip-add"><span class="prefix">+91</span><input type="tel" inputmode="numeric" placeholder="98xxxxxxxx" maxlength="16"><button type="button" class="btn primary">{{ icon('plus') }} Add number</button></div>
-    </div><small>These numbers get booking and "talk to a person" alerts on WhatsApp. For another country, type the full number starting with +.</small></div>
+    </div></div>
   <div class="field"><span>Owner contact numbers (given to guests)</span>
     <div class="chipbox" data-chips="contact_numbers" data-kind="phone" data-max="5">
       <textarea name="contact_numbers" hidden>{{ p.contact_numbers|join('
 ') }}</textarea>
       <div class="chip-list"></div>
       <div class="chip-add"><span class="prefix">+91</span><input type="tel" inputmode="numeric" placeholder="98xxxxxxxx" maxlength="16"><button type="button" class="btn primary">{{ icon('plus') }} Add number</button></div>
-    </div><small>The bot gives these to guests who want to cancel or still want to negotiate the price.</small></div>
+    </div></div>
   {{ area("Policies (cancellation, refund, house rules)", "policies", p.policies, 4) }}
   {{ area("Photo links (one per line)", "photo_urls", p.photo_urls|join('\n'), 3) }}
 </section>

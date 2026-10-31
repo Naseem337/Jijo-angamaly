@@ -9,6 +9,12 @@
   <label class="field"><span>Language</span><select name="language">{% for code, label in [('en','English'),('ml','Malayalam'),('ta','Tamil'),('hi','Hindi')] %}<option value="{{ code }}" {{ 'selected' if g.language == code }}>{{ label }}</option>{% endfor %}</select></label>
   <label class="check"><input type="checkbox" name="offers_consent" {{ 'checked' if g.offers_consent }}> Agreed to receive offers</label>
   {{ area("Notes", "notes", g.notes, 3) }}<button class="btn primary">Save</button></form>
+{% if lead %}<section class="card"><h3>Latest enquiry</h3><dl class="kv">
+  <dt>Place</dt><dd>{{ props[lead.property_id].name if lead.property_id in props else '—' }}</dd>
+  <dt>Dates</dt><dd>{% if lead.check_in %}{{ lead.check_in }} to {{ lead.check_out }}{% else %}—{% endif %}</dd>
+  <dt>Guests</dt><dd>{{ lead.adults + lead.children if lead.adults else '—' }}{% if lead.children %} ({{ lead.children }} children){% endif %}</dd>
+  <dt>Rooms</dt><dd>{{ lead.rooms or '—' }}{% if lead.room_type %} · {{ lead.room_type }}{% endif %}</dd>
+  <dt>Coming from</dt><dd>{{ lead.from_city or '—' }}</dd></dl></section>{% endif %}
 <section class="card"><h3>Stay history</h3>
   {% for b in stays %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.check_in.strftime('%d %b %Y') }} · {{ b.nights }} night(s)</b><span>{{ props[b.property_id].name }} · {{ rooms[b.room_type_id].name }} {{ pill(b.status) }}</span></a>
   {% else %}{{ empty("No bookings yet") }}{% endfor %}</section></div>

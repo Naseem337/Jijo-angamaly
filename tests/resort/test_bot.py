@@ -582,3 +582,29 @@ def test_razorpay_link_takes_all_methods_and_returns_the_guest_to_whatsapp():
     body = seen[0]
     assert body["amount"] == 400000 and body["callback_url"] == "https://wa.me/919800000000"
     assert body["callback_method"] == "get" and "upi_link" not in body  # not UPI-only: cards and net banking too
+
+
+# --------------------------------------------------------------------------- leads saved from the chat
+
+
+def test_the_chat_saves_a_lead_at_every_step(world):
+    from app.resort import leads
+    w = world
+    say(w, "Alleppey 10 Nov 2 nights for 2", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, rooms=1),
+        reply("Deluxe or Family Suite?"))
+    lead = leads.get_lead(w.repo, GUEST)
+    assert (lead["stage"], lead["check_in"], lead["check_out"], lead["adults"], lead["rooms"]) == (
+        "asked", "2026-11-10", "2026-11-12", 2, 1)
+    assert lead["property_id"] == w.p1.id and lead["booking_id"] == ""
+    say(w, "deluxe", GUEST, tool("prepare_booking", room_type="Deluxe", rooms=1), reply("Summary. Confirm?"))
+    assert leads.get_lead(w.repo, GUEST)["stage"] == "summary" and leads.get_lead(w.repo, GUEST)["room_type"] == "Deluxe"
+    say(w, "yes, Asha Menon from Kochi", GUEST, tool("create_booking", guest_name="Asha Menon", from_city="Kochi"),
+        reply("Held."))
+    booking = w.repo.list_bookings(phone=GUEST)[0]
+    lead = leads.get_lead(w.repo, GUEST)
+    assert (lead["stage"], lead["booking_id"], lead["from_city"]) == ("held", booking.id, "Kochi")
+    say(w, "another stay 1 Dec 1 night", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-12-01", nights=1, adults=2), reply("ok"))
+    lead = leads.get_lead(w.repo, GUEST)
+    assert (lead["stage"], lead["booking_id"], lead["check_in"], lead["from_city"]) == ("asked", "", "2026-12-01", "Kochi")
