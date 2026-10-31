@@ -10,7 +10,10 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.runtime import Runtime
 from app.scheduler import start_background_jobs
@@ -49,6 +52,29 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
         app.include_router(dashboard_router)
     except ImportError:
         pass
+
+    if os.environ.get("RESORT_WHATSAPP_PHONE_NUMBER_ID"):  # the resort service: the plain address opens the dashboard
+        @app.get("/", include_in_schema=False)
+        @app.get("/resort", include_in_schema=False)
+        @app.get("/resort/", include_in_schema=False)
+        def resort_home() -> RedirectResponse:
+            return RedirectResponse("/resort/admin/")
+
+    @app.exception_handler(StarletteHTTPException)
+    async def friendly_404(request: Request, exc: StarletteHTTPException):
+        """A browser that opens a dead dashboard page (an old link after the free host reset its data) gets a page
+        with a way back, not raw JSON. Webhooks and API calls keep the JSON error."""
+        if (exc.status_code == 404 and request.url.path.startswith("/resort/admin")
+                and "text/html" in request.headers.get("accept", "")):
+            return HTMLResponse(
+                '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                "<title>Page not found</title><body style=\"font:18px/1.6 system-ui,sans-serif;max-width:480px;margin:18vh auto;"
+                'padding:0 20px;color:#1f2937"><h1 style="font-size:28px">This page is not available</h1>'
+                "<p>The booking, guest or room in this link may have been removed or the page moved.</p>"
+                '<p><a style="display:inline-block;background:#2490ef;color:#fff;padding:12px 20px;border-radius:8px;'
+                'text-decoration:none;font-weight:600" href="/resort/admin/">Go to the dashboard</a></p></body>',
+                status_code=404)
+        return await http_exception_handler(request, exc)
 
     @app.get("/health")
     def health() -> dict[str, object]:
