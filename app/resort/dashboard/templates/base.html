@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>{% block title %}Resort Desk{% endblock %}</title>
 <link rel="stylesheet" href="{{ BASE }}/static/app.css">
 </head>
@@ -21,8 +21,8 @@
       </select>
     </div>
     <nav>
-      {% set nav_items = [("home","Home","home",""),("bookings","Bookings","book","/bookings"),("calendar","Calendar","cal","/calendar"),("stay","Arrivals","door","/stay"),
-        ("properties","Properties","building","/properties"),("guests","Guests","users","/guests"),("chats","Conversations","chat","/conversations"),("reports","Reports","report","/reports/collections")] %}
+      {% set nav_items = [("home","Home","home",""),("bookings","Bookings","book","/bookings"),("calendar","Calendar","cal","/calendar"),("stay","Arrivals & departures","door","/stay"),
+        ("properties","Properties","building","/properties"),("guests","Guests","users","/guests"),("chats","WhatsApp chats","chat","/conversations"),("reports","Reports","report","/reports/collections")] %}
       {% for key, label, ic, path in nav_items %}
         <a href="{{ BASE }}{{ path or '/' }}" class="{{ 'active' if nav == key }}">{{ icon(ic) }}<span>{{ label }}</span></a>
       {% endfor %}
