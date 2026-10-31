@@ -746,7 +746,7 @@ def test_razorpay_link_status_reads_paid_and_the_payment_id():
         return httpx.Response(200, json={"id": "plink_1", "status": "paid", "payments": [{"payment_id": "pay_9"}]})
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    assert RazorpayPayments("k", "s", http=http).link_status("plink_1") == {"paid": True, "payment_id": "pay_9"}
+    assert RazorpayPayments("k", "s", http=http).link_status("plink_1") == {"paid": True, "payment_id": "pay_9", "failed_payment_id": ""}
 
 
 def test_manglish_texts_keep_the_placeholders_of_the_english_ones():
@@ -762,3 +762,61 @@ def test_no_book_again_template_is_left_in_the_guest_messages():
     for key, table in S.items():
         for lang, text in table.items():
             assert "Send Hi" not in text and "Hi അയക്കൂ" not in text, (key, lang)
+
+
+# --------------------------------------------------------------------------- the guest is told when a payment fails
+
+
+def test_a_failed_attempt_is_found_and_the_guest_is_told_once_without_any_webhook(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    before = len(w.wa.texts())
+    w.pay.failed_links[b.payment_link_id] = "pay_bad1"
+    assert w.bot.sweep() == {"expired": 0, "reminded": 0}
+    told = w.wa.texts()[before:]
+    assert len(told) == 1 and "didn't go through" in told[0] and b.payment_link_url in told[0]
+    assert w.repo.get_booking(b.id).status == "hold"  # still held: they can try again with the same link
+    w.bot.sweep()
+    assert len(w.wa.texts()) == before + 1  # not told again for the same attempt
+    w.pay.failed_links[b.payment_link_id] = "pay_bad2"  # a second failed attempt is news again
+    w.bot.sweep()
+    assert len(w.wa.texts()) == before + 2
+
+
+def test_webhook_and_our_own_check_do_not_both_tell_the_guest(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    before = len(w.wa.texts())
+    assert w.bot.payment_failed(booking_id=b.id, payment_id="pay_bad1") == "notified"  # the webhook arrives first
+    w.pay.failed_links[b.payment_link_id] = "pay_bad1"
+    w.bot.sweep()  # our own check sees the same attempt
+    assert len(w.wa.texts()) == before + 1
+
+
+def test_a_failed_attempt_followed_by_a_good_payment_only_confirms(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    before = len(w.wa.texts())
+    w.pay.failed_links[b.payment_link_id] = "pay_bad1"
+    w.pay.paid_links[b.payment_link_id] = "pay_ok"
+    w.bot.sweep()
+    new = w.wa.texts()[before:]
+    assert w.repo.get_booking(b.id).status == "paid" and any("confirmed" in t for t in new)
+    assert not any("didn't go through" in t for t in new)
+
+
+def test_razorpay_link_status_finds_a_failed_attempt_through_the_order():
+    from app.resort.payments import RazorpayPayments
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/payment_links/plink_1"):
+            return httpx.Response(200, json={"id": "plink_1", "status": "created", "order_id": "order_1", "payments": []})
+        assert request.url.path.endswith("/orders/order_1/payments")
+        return httpx.Response(200, json={"items": [{"id": "pay_a", "status": "failed"}, {"id": "pay_b", "status": "failed"}]})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    assert RazorpayPayments("k", "s", http=http).link_status("plink_1") == {
+        "paid": False, "payment_id": "", "failed_payment_id": "pay_b"}

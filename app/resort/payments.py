@@ -81,8 +81,17 @@ class RazorpayPayments:
             raise PaymentError(f"Razorpay HTTP {resp.status_code}: {resp.text[:200]}")
         data = resp.json()
         payments = data.get("payments") or []
-        return {"paid": data.get("status") == "paid",
-                "payment_id": (payments[0].get("payment_id", "") if payments else "")}
+        out = {"paid": data.get("status") == "paid", "payment_id": (payments[0].get("payment_id", "") if payments else ""),
+               "failed_payment_id": ""}
+        if not out["paid"] and data.get("order_id"):  # every attempt, good or bad, hangs off the link's order
+            try:
+                tries = self._http.get(f"{API}/orders/{data['order_id']}/payments", auth=self._auth)
+                failed = [p for p in (tries.json().get("items") or []) if p.get("status") == "failed"] if tries.status_code == 200 else []
+            except (httpx.HTTPError, ValueError):
+                failed = []
+            if failed:
+                out["failed_payment_id"] = failed[-1].get("id", "")
+        return out
 
 
 class MockPayments:
@@ -91,9 +100,11 @@ class MockPayments:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self.paid_links: dict[str, str] = {}  # link id -> payment id, for tests
+        self.failed_links: dict[str, str] = {}  # link id -> failed payment id, for tests
 
     def link_status(self, link_id: str) -> dict[str, Any]:
-        return {"paid": link_id in self.paid_links, "payment_id": self.paid_links.get(link_id, "")}
+        return {"paid": link_id in self.paid_links, "payment_id": self.paid_links.get(link_id, ""),
+                "failed_payment_id": self.failed_links.get(link_id, "")}
 
     def create_payment_link(self, amount_rupees: int, booking_id: str, name: str, phone: str,
                             description: str, expire_by: int) -> PaymentLink:

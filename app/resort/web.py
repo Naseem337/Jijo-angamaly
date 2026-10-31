@@ -73,7 +73,7 @@ def handle_payment_event(services: ResortServices, event: PaymentEvent) -> str:
     if event.kind == "paid":
         return bot.mark_paid(**ids, payment_id=event.payment_id)
     if event.kind == "failed":
-        return bot.payment_failed(**ids)
+        return bot.payment_failed(**ids, payment_id=event.payment_id)
     return bot.payment_expired(**ids)  # expired / cancelled
 
 

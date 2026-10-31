@@ -266,11 +266,18 @@ class BookingBot(IdProofMixin, ChatMixin):
                          f"{b.guest_name} {b.guest_phone}. Paid Rs {b.paid_amount} of Rs {b.total} "
                          f"({method_label(b.payment_method)}).", b.property_id)
 
-    def payment_failed(self, *, booking_id: str = "", link_id: str = "") -> str:
+    def payment_failed(self, *, booking_id: str = "", link_id: str = "", payment_id: str = "") -> str:
         b = (self.repo.get_booking(booking_id) if booking_id else None) or (
             self.repo.find_booking_by_link(link_id) if link_id else None)
         if b is None or b.status == "paid":
             return "ignored"
+        mark = f"[failed:{payment_id}]"
+        if payment_id:
+            if mark in b.notes:  # the webhook and our own check both saw it: the guest hears once
+                return "ignored"
+            fresh = self.repo.get_booking(b.id) or b
+            fresh.notes = (fresh.notes + " " + mark).strip()
+            self.repo.save_booking(fresh)
         text = t("failed", b.language, id=b.id)
         if b.status == "hold" and b.payment_link_url:
             text += "\n" + t("retry_link", b.language, url=b.payment_link_url)
@@ -308,8 +315,11 @@ class BookingBot(IdProofMixin, ChatMixin):
             except Exception as exc:  # the provider being slow must never stop the sweep
                 log.warning("Payment check for %s failed: %s", b.id, exc)
                 continue
-            if status.get("paid") and self.mark_paid(booking_id=b.id, payment_id=status.get("payment_id", "")) == "paid":
-                found += 1
+            if status.get("paid"):
+                if self.mark_paid(booking_id=b.id, payment_id=status.get("payment_id", "")) == "paid":
+                    found += 1
+            elif status.get("failed_payment_id"):  # an attempt failed and the link is still unpaid: tell the guest once
+                self.payment_failed(booking_id=b.id, payment_id=status["failed_payment_id"])
         return found
 
     def sweep(self, now: datetime | None = None) -> dict[str, int]:
