@@ -416,7 +416,7 @@ def test_failed_payment_message_has_retry_link_and_template_fallback(world):
     hold(w, rooms=1)
     b = w.repo.list_bookings(phone=GUEST)[0]
     assert w.bot.payment_failed(booking_id=b.id) == "notified"
-    assert "did not go through" in w.wa.texts()[-1] and b.payment_link_url in w.wa.texts()[-1]
+    assert "didn't go through" in w.wa.texts()[-1] and b.payment_link_url in w.wa.texts()[-1]
     w.wa.text_error = WhatsAppError("outside window", status=400, code=131047)
     w.bot.config.templates.paid = "resort_paid"
     assert w.bot.mark_paid(booking_id=b.id) == "paid"
@@ -429,10 +429,11 @@ def test_hold_expiry_sweep_releases_rooms_and_messages_guest(world):
     b = w.repo.list_bookings(phone=GUEST)[0]
     w.clock.advance(minutes=11)
     assert w.bot.sweep() == {"expired": 0, "reminded": 1}  # nudge 4 minutes before the end
-    assert "waiting for payment" in w.wa.texts()[-1]
+    assert "still open for 4 more minutes" in w.wa.texts()[-1] and "Booking RB-" not in w.wa.texts()[-1]
     w.clock.advance(minutes=5)
+    texts_before = list(w.wa.texts())
     assert w.bot.sweep() == {"expired": 1, "reminded": 0}
-    assert w.repo.get_booking(b.id).status == "expired" and "expired" in w.wa.texts()[-1]
+    assert w.repo.get_booking(b.id).status == "expired" and w.wa.texts() == texts_before  # released quietly, no message
     assert w.repo.free_rooms(w.deluxe, date(2026, 11, 10), date(2026, 11, 12), w.clock.now()) == 2
 
 
@@ -754,3 +755,10 @@ def test_manglish_texts_keep_the_placeholders_of_the_english_ones():
         if "mn" in table:
             names = lambda text: {f for _, f, _, _ in string.Formatter().parse(text) if f}  # noqa: E731
             assert names(table["mn"]) <= names(table["en"]), key
+
+
+def test_no_book_again_template_is_left_in_the_guest_messages():
+    assert "expired" not in S  # a hold that runs out is released without a message
+    for key, table in S.items():
+        for lang, text in table.items():
+            assert "Send Hi" not in text and "Hi അയക്കൂ" not in text, (key, lang)

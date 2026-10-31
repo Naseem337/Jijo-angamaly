@@ -282,9 +282,8 @@ class BookingBot(IdProofMixin, ChatMixin):
             self.repo.find_booking_by_link(link_id) if link_id else None)
         if b is None or b.status != "hold":
             return "ignored"
-        b.status = "expired"
+        b.status = "expired"  # the rooms go back on sale; the guest is not chased, they write if they still want it
         self.repo.save_booking(b)
-        self._notify_guest(b, t("expired", b.language, id=b.id), "failed", self._params(b))
         return "expired"
 
     def _bot_asked_something(self, phone: str, st: dict[str, Any]) -> bool:
@@ -318,9 +317,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         guests), nudge holds about to expire."""
         now = now or self.clock.now()
         found = self.check_payments()
-        expired = self.repo.expire_holds(now)
-        for b in expired:
-            self._notify_guest(b, t("expired", b.language, id=b.id), "failed", self._params(b))
+        expired = self.repo.expire_holds(now)  # released quietly: no "expired" message to the guest
         nudged = 0
         for b in self.repo.list_bookings(status="hold", limit=200):
             if (b.hold_expires_at and b.payment_link_url and "[reminded]" not in b.notes
