@@ -71,12 +71,29 @@ class RazorpayPayments:
         data = resp.json()
         return PaymentLink(data["id"], data["short_url"])
 
+    def link_status(self, link_id: str) -> dict[str, Any]:
+        """Ask Razorpay whether this link has been paid, so a missed webhook never leaves a guest unconfirmed."""
+        try:
+            resp = self._http.get(f"{API}/payment_links/{link_id}", auth=self._auth)
+        except httpx.HTTPError as exc:
+            raise PaymentError(f"Razorpay request failed: {exc!r}") from exc
+        if resp.status_code != 200:
+            raise PaymentError(f"Razorpay HTTP {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        payments = data.get("payments") or []
+        return {"paid": data.get("status") == "paid",
+                "payment_id": (payments[0].get("payment_id", "") if payments else "")}
+
 
 class MockPayments:
     """Local testing: a fake link, no money."""
 
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
+        self.paid_links: dict[str, str] = {}  # link id -> payment id, for tests
+
+    def link_status(self, link_id: str) -> dict[str, Any]:
+        return {"paid": link_id in self.paid_links, "payment_id": self.paid_links.get(link_id, "")}
 
     def create_payment_link(self, amount_rupees: int, booking_id: str, name: str, phone: str,
                             description: str, expire_by: int) -> PaymentLink:

@@ -268,7 +268,7 @@ def test_language_style_is_remembered_for_fixed_messages(world):
     say(w, "Alleppey il 10 nu room venam", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=1, adults=2, language="manglish"),
         reply("Deluxe 4000 aanu."))
-    assert w.repo.get_state(GUEST)["lang"] == "en" and w.repo.get_state(GUEST)["style"] == "manglish"
+    assert w.repo.get_state(GUEST)["lang"] == "mn" and w.repo.get_state(GUEST)["style"] == "manglish"
     say(w, "இரண்டு பேர்", GUEST, reply("சரி"))
     assert w.repo.get_state(GUEST)["lang"] == "ta"
 
@@ -340,9 +340,9 @@ def test_script_detection():
 
 def test_every_string_exists_in_all_four_languages():
     for key, table in S.items():
-        assert set(table) == {"en", "ml", "ta", "hi"}, key
+        assert {"en", "ml", "ta", "hi"} <= set(table) <= {"en", "ml", "ta", "hi", "mn"}, key
         assert all(v.strip() for v in table.values()), key
-    assert t("greet_ask", "xx", places="x") == "Hi! Where are you looking to stay: x?"  # unknown language: English
+    assert t("greet_ask", "xx", hi="Hi", places="x") == "Hi! Where are you looking to stay: x?"  # unknown language: English
 
 
 def test_voice_note_is_transcribed_and_used(world):
@@ -608,3 +608,149 @@ def test_the_chat_saves_a_lead_at_every_step(world):
         tool("check_availability", place="Alleppey", check_in="2026-12-01", nights=1, adults=2), reply("ok"))
     lead = leads.get_lead(w.repo, GUEST)
     assert (lead["stage"], lead["booking_id"], lead["check_in"], lead["from_city"]) == ("asked", "", "2026-12-01", "Kochi")
+
+
+# --------------------------------------------------------------------------- tester feedback: language, flow, payment wording
+
+
+def test_manglish_guest_gets_manglish_fixed_messages_and_no_booked_before_payment(world):
+    w = world
+    say(w, "Alleppey il room undo, 10 nu 2 divasam, 2 per", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="manglish"),
+        reply("Und bro. Deluxe 4000, Family Suite 8000. Ethu mathi?"))
+    say(w, "deluxe mathi", GUEST, tool("prepare_booking", room_type="Deluxe", rooms=1, language="manglish"), reply("Summary"))
+    say(w, "ok confirm, Asha", GUEST, tool("create_booking", guest_name="Asha", language="manglish"),
+        reply("Payment complete cheythaal booking confirm aakum."))
+    pay_text = w.wa.texts()[-1]
+    assert "payment complete cheyyuka" in pay_text and "UPI" in pay_text and w.repo.get_state(GUEST)["lang"] == "mn"
+    for banned in ("held", "booked", "reserved"):
+        assert banned not in pay_text.lower()
+    assert "Booking RB-" not in w.wa.texts()[-2]  # the AI's own line does not claim a confirmed booking either
+
+
+def test_english_payment_message_asks_to_complete_payment_not_to_trust_a_hold(world):
+    w = world
+    hold(w, rooms=1)
+    text = w.wa.texts()[-1]
+    assert "complete the payment" in text and "confirm your booking" in text
+    for banned in ("held", "is booked", "reserved"):
+        assert banned not in text.lower()
+
+
+def test_hi_for_hi_and_it_asks_if_they_are_looking_for_a_stay_when_only_one_place_is_open(world):
+    w = world
+    w.repo.save_property(Property(**{**w.p2.__dict__, "active": False}))  # Kanthalloor switched off
+    assert say(w, "hi") == "greeting"
+    assert w.wa.texts()[-1] == "Hi! Are you looking for a stay at Pozhiyoram, Alleppey?"
+    say(w, "Hello", "+919847000011")
+    assert w.wa.texts("+919847000011")[-1].startswith("Hello! Are you looking")
+    w.repo.set_state("+919847000012", {"lang": "mn"})
+    say(w, "hi", "+919847000012")
+    assert w.wa.texts("+919847000012")[-1] == "Hi! Pozhiyoram, Alleppey-il stay aanu nokkunnath alle?"
+    assert w.llm.calls == []  # greetings never cost an AI call
+
+
+def test_manglish_guest_never_gets_malayalam_script(world):
+    w = world
+    say(w, "avde engane und", GUEST, reply("അവിടെ നല്ലതാണ്, ബീച്ച് ഉണ്ട്"), reply("Avde nalla rasam und bro, beach um und."))
+    assert w.wa.texts() == ["Avde nalla rasam und bro, beach um und."]
+    assert "Rewrite that reply using only English letters" in w.llm.calls[1].messages[-1].content
+
+
+def test_malayalam_script_guest_is_not_rewritten(world):
+    w = world
+    say(w, "അവിടെ എങ്ങനെയുണ്ട്", GUEST, reply("അവിടെ നല്ലതാണ്, ബീച്ച് ഉണ്ട്"))
+    assert w.wa.texts() == ["അവിടെ നല്ലതാണ്, ബീച്ച് ഉണ്ട്"] and len(w.llm.calls) == 1
+
+
+def test_ok_after_a_statement_gets_no_reply_but_ok_after_a_question_does(world):
+    w = world
+    hold(w, rooms=1)  # the last message to the guest is the payment link: nothing is being asked
+    before = len(w.wa.to(GUEST))
+    calls = len(w.llm.calls)
+    for ack in ("ok", "Okay thanks", "👍", "sheri", "ശരി"):
+        assert say(w, ack) == "quiet", ack
+    assert len(w.wa.to(GUEST)) == before and len(w.llm.calls) == calls  # no spam, no AI cost
+    say(w, "any pool nearby?", GUEST, reply("Not sure about that. Want me to check?"))  # a question from us
+    assert say(w, "ok", GUEST, reply("Sure, I will ask the owner.")) == "answered"
+
+
+def test_ok_is_an_answer_while_a_booking_summary_waits_for_confirmation(world):
+    w = world
+    to_summary(w)
+    assert say(w, "ok", GUEST, tool("create_booking", guest_name="Asha"), reply("Please complete the payment.")) == "payment_link"
+
+
+def test_the_ai_can_choose_to_stay_quiet(world):
+    w = world
+    say(w, "what a lovely place, thanks for the info", GUEST, reply("Glad you like it?"))
+    before = len(w.wa.to(GUEST))
+    assert say(w, "will tell my wife", GUEST, reply("[no reply]")) == "quiet"
+    assert len(w.wa.to(GUEST)) == before
+
+
+def test_a_quick_second_message_is_answered_once_with_both_in_view(world, monkeypatch):
+    from app.resort import chat
+    w = world
+    w.bot.debounce_s = 1.0
+
+    def second_message_arrives(seconds):
+        w.bot.debounce_s = 0
+        say(w, "Alleppey", GUEST, reply("Avde nalla rasam bro, beach view und."))
+
+    monkeypatch.setattr(chat.time, "sleep", second_message_arrives)
+    assert say(w, "avde engane und") == "superseded"  # the newer message answers
+    assert w.wa.texts() == ["Avde nalla rasam bro, beach view und."]
+    assert w.llm.calls[0].messages[-1].content == "avde engane und\nAlleppey"
+
+
+def test_the_prompt_carries_the_language_summary_and_payment_rules(world):
+    w = world
+    say(w, "hello there", GUEST, reply("Hi, what are you looking for?"))
+    system = w.llm.calls[0].system
+    assert "ONE language per reply" in system and "NEVER in Malayalam script" in system
+    assert "always write it in English" in system
+    assert "NEVER say the room or booking is booked, confirmed, reserved or done" in system
+    assert "[no reply]" in system and "belong together" in system
+
+
+def test_missed_webhook_is_caught_by_asking_razorpay(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    assert w.bot.sweep().get("paid_found") is None  # nothing paid yet
+    w.pay.paid_links[b.payment_link_id] = "pay_77"
+    assert w.bot.sweep()["paid_found"] == 1
+    paid = w.repo.get_booking(b.id)
+    assert paid.status == "paid" and paid.razorpay_payment_id == "pay_77"
+    assert any("confirmed" in text for text in w.wa.texts())
+    assert "paid_found" not in w.bot.sweep()  # only once
+
+
+def test_guest_saying_i_paid_is_confirmed_through_my_bookings(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    w.pay.paid_links[b.payment_link_id] = "pay_88"
+    say(w, "paid bro", GUEST, tool("my_bookings"), reply("[no reply]"))
+    assert w.repo.get_booking(b.id).status == "paid"
+    assert "do not repeat" in last_tool(w)["note"] and last_tool(w)["bookings"][0]["status"] == "confirmed"
+
+
+def test_razorpay_link_status_reads_paid_and_the_payment_id():
+    from app.resort.payments import RazorpayPayments
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/payment_links/plink_1")
+        return httpx.Response(200, json={"id": "plink_1", "status": "paid", "payments": [{"payment_id": "pay_9"}]})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    assert RazorpayPayments("k", "s", http=http).link_status("plink_1") == {"paid": True, "payment_id": "pay_9"}
+
+
+def test_manglish_texts_keep_the_placeholders_of_the_english_ones():
+    import string
+    for key, table in S.items():
+        if "mn" in table:
+            names = lambda text: {f for _, f, _, _ in string.Formatter().parse(text) if f}  # noqa: E731
+            assert names(table["mn"]) <= names(table["en"]), key

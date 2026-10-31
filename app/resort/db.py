@@ -323,9 +323,16 @@ class ResortRepo:
 
     # ------------------------------------------------------------------ chat
 
-    def add_chat(self, m: ChatMessage) -> None:
-        self._run("INSERT INTO chat(phone, direction, text, at, source) VALUES(?,?,?,?,?)",
-                  (m.phone, m.direction, m.text, _iso(m.at), m.source))
+    def add_chat(self, m: ChatMessage) -> int:
+        """Store a message and return its id (a later message always has a bigger one)."""
+        with self._lock:
+            cur = self._db.execute("INSERT INTO chat(phone, direction, text, at, source) VALUES(?,?,?,?,?)",
+                                   (m.phone, m.direction, m.text, _iso(m.at), m.source))
+            return int(cur.lastrowid)
+
+    def last_chat_id(self, phone: str, direction: str) -> int:
+        row = self._one("SELECT MAX(id) AS i FROM chat WHERE phone=? AND direction=?", (phone, direction))
+        return int(row["i"] or 0) if row else 0
 
     def list_chat(self, phone: str, limit: int = 100) -> list[ChatMessage]:
         rows = self._all("SELECT * FROM (SELECT * FROM chat WHERE phone=? ORDER BY id DESC LIMIT ?) ORDER BY id",

@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 
 LANGS = ("en", "ml", "ta", "hi")
+FIXED_LANGS = (*LANGS, "mn")  # "mn" = Manglish: fixed messages in Malayalam written in English letters
 LANG_NAMES = {"en": "English", "ml": "മലയാളം", "ta": "தமிழ்", "hi": "हिन्दी"}
 
 _SCRIPTS = (("ml", re.compile(r"[ഀ-ൿ]")), ("ta", re.compile(r"[஀-௿]")),
@@ -32,23 +33,19 @@ def _t(en: str, ml: str, ta: str, hi: str) -> dict[str, str]:
 
 S: dict[str, dict[str, str]] = {
     # ---- first message and payment
-    "greet_ask": _t("Hi! Where are you looking to stay: {places}?",
-                    "ഹായ്! എവിടെയാണ് താമസിക്കാൻ ഉദ്ദേശിക്കുന്നത്: {places}?",
-                    "வணக்கம்! எங்கே தங்க விரும்புகிறீர்கள்: {places}?",
-                    "नमस्ते! आप कहाँ ठहरना चाहते हैं: {places}?"),
-    "greet_one": _t('Hi! When would you like to check in at {place}?',
-                'ഹായ്! {place}-ൽ ചെക്ക്-ഇൻ എപ്പോഴാണ് വേണ്ടത്?',
-                'வணக்கம்! {place}-ல் எப்போது செக்-இன் செய்ய விரும்புகிறீர்கள்?',
-                'नमस्ते! आप {place} में चेक-इन कब करना चाहेंगे?'),
+    "greet_ask": _t('{hi}! Where are you looking to stay: {places}?',
+                'ഹായ്! എവിടെയാണ് താമസിക്കാൻ ഉദ്ദേശിക്കുന്നത്: {places}?',
+                'வணக்கம்! எங்கே தங்க விரும்புகிறீர்கள்: {places}?',
+                'नमस्ते! आप कहाँ ठहरना चाहते हैं: {places}?'),
+    "greet_one": _t('{hi}! Are you looking for a stay at {place}?',
+                'ഹായ്! {place}-ൽ താമസിക്കാനാണോ നോക്കുന്നത്?',
+                'வணக்கம்! {place}-ல் தங்க பார்க்கிறீர்களா?',
+                'नमस्ते! क्या आप {place} में ठहरने की सोच रहे हैं?'),
     "or": _t("or", "അല്ലെങ്കിൽ", "அல்லது", "या"),
-    "pay": _t("Your rooms are held for {minutes} minutes. Please pay the advance of ₹{advance} here to confirm. "
-              "UPI (GPay, PhonePe, Paytm), cards and net banking all work:\n{url}\n\nBooking ID: {id}",
-              "നിങ്ങളുടെ മുറികൾ {minutes} മിനിറ്റ് ഹോൾഡിലാണ്. ഉറപ്പിക്കാൻ അഡ്വാൻസ് ₹{advance} ഇവിടെ അടയ്ക്കൂ. "
-              "UPI (GPay, PhonePe, Paytm), കാർഡ്, നെറ്റ് ബാങ്കിംഗ് എല്ലാം ഉപയോഗിക്കാം:\n{url}\n\nബുക്കിംഗ് ID: {id}",
-              "உங்கள் அறைகள் {minutes} நிமிடங்கள் வைக்கப்பட்டுள்ளன. உறுதிசெய்ய முன்பணம் ₹{advance} இங்கே செலுத்துங்கள். "
-              "UPI (GPay, PhonePe, Paytm), கார்டு, நெட் பேங்கிங் அனைத்தும் பயன்படுத்தலாம்:\n{url}\n\nமுன்பதிவு ID: {id}",
-              "आपके कमरे {minutes} मिनट के लिए होल्ड पर हैं। कन्फर्म करने के लिए ₹{advance} एडवांस यहाँ दें। "
-              "UPI (GPay, PhonePe, Paytm), कार्ड और नेट बैंकिंग सब चलेगा:\n{url}\n\nबुकिंग ID: {id}"),
+    "pay": _t('Please complete the payment of ₹{advance} within {minutes} minutes to confirm your booking. UPI (GPay, PhonePe, Paytm), cards and net banking all work:\n{url}\n\nBooking ID: {id}',
+                'ബുക്കിംഗ് ഉറപ്പിക്കാൻ {minutes} മിനിറ്റിനുള്ളിൽ ₹{advance} പേയ്മെന്റ് പൂർത്തിയാക്കൂ. UPI (GPay, PhonePe, Paytm), കാർഡ്, നെറ്റ് ബാങ്കിംഗ് എല്ലാം ഉപയോഗിക്കാം:\n{url}\n\nബുക്കിംഗ് ID: {id}',
+                'முன்பதிவை உறுதிசெய்ய {minutes} நிமிடங்களுக்குள் ₹{advance} கட்டணத்தை முடிக்கவும். UPI (GPay, PhonePe, Paytm), கார்டு, நெட் பேங்கிங் அனைத்தும் பயன்படுத்தலாம்:\n{url}\n\nமுன்பதிவு ID: {id}',
+                'बुकिंग कन्फर्म करने के लिए {minutes} मिनट में ₹{advance} का पेमेंट पूरा करें। UPI (GPay, PhonePe, Paytm), कार्ड और नेट बैंकिंग सब चलेगा:\n{url}\n\nबुकिंग ID: {id}'),
     "pay_failed_link": _t("We could not create the payment link just now. Our team will contact you shortly.",
                           "പേയ്മെന്റ് ലിങ്ക് ഇപ്പോൾ ഉണ്ടാക്കാനായില്ല. ടീം ഉടൻ ബന്ധപ്പെടും.",
                           "கட்டண இணைப்பை இப்போது உருவாக்க முடியவில்லை. எங்கள் குழு விரைவில் தொடர்புகொள்ளும்.",
@@ -151,6 +148,38 @@ S.update({
     "fb_done": _t("Thank you for your feedback!", "അഭിപ്രായത്തിന് നന്ദി!", "உங்கள் கருத்துக்கு நன்றி!",
                   "आपकी प्रतिक्रिया के लिए धन्यवाद!"),
 })
+
+
+# Manglish (Malayalam in English letters) for the fixed messages. Keys not listed here fall back to English.
+MN = {
+    "greet_ask": "{hi}! Evide thaamasikkaan aanu nokkunnath: {places}?",
+    "greet_one": "{hi}! {place}-il stay aanu nokkunnath alle?",
+    "or": "allenkil",
+    "pay": "Booking confirm cheyyaan {minutes} minute-nullil ₹{advance} payment complete cheyyuka. "
+           "UPI (GPay, PhonePe, Paytm), card, net banking ellaam use cheyyam:\n{url}\n\nBooking ID: {id}",
+    "paid": "Payment kitti. Ningalude booking {id} confirmed aayi!\n{property}\n{check_in} to {check_out}, {rooms} room.\n"
+            "Check-in {checkin_time} muthal. Ningale kaanaan kaathirikkunnu.",
+    "failed": "Booking {id}-nte payment nadannilla. Rooms hold-il ullappol thazhe ulla link vech veendum try cheyyuka.",
+    "retry_link": "Veendum pay cheyyaan: {url}",
+    "pending": "Booking {id} payment-inu vendi wait cheyyunnu. {minutes} minute-nullil payment complete cheyyuka: {url}",
+    "expired": "Payment complete aakaathathinaal booking {id} expire aayi, rooms release cheythu. Veendum book cheyyaan Hi ayakkuka.",
+    "handoff": "Thanks. Njangalude team udan ivide message ayakkum.",
+    "ai_down": "Kshamikkanam, ippo answer tharaan pattiyilla. Njangalude team udan sahayikkum.",
+    "voice_problem": "Kshamikkanam, aa voice note manasilaayilla. Type cheyyamo?",
+    "unsupported": "Enikku text-um voice note-um maathrame vaayikkaan pattooo. Message type cheyyuka.",
+    "map_line": "Location: {url}",
+    "id_body_first": "Thanks! Check-in-nu ellaa adult guests-inteyum ID proof (Aadhaar, passport, driving licence allenkil voter ID) venam, "
+                     "niyamaprakaaram aavashyamaanu. Ath surakshithamaayi sookshikkum, stay kazhinju {days} divasam kazhiyumbol delete cheyyum.\n\n"
+                     "Guest {n}/{m}-nte ID-yude clear photo ivide ayakkuka. Check-in-nu kaanikkaanenkil athu paranjaal mathi.",
+    "id_body_next": "Kitti, thanks! Guest {n}/{m}-nte ID photo koodi ayakkuka, allenkil bakkiyullavar check-in-nu kaanikkum ennu paranjaal mathi.",
+    "id_later_ok": "Sheri, check-in-nu ID kaanichaal mathi.",
+    "id_done": "Ellaam ready, thanks! Ningale kaanaan kaathirikkunnu.",
+    "fb_thanks": "{property}-il thaamasichathinu thanks! Nalla samayam aayirunnu ennu karuthunnu.",
+    "fb_body": "Stay engane undaayirunnu? 1 (mosham) muthal 5 (ugran) vare oru rating ayakkuka, venamenkil oru comment-um.",
+    "fb_done": "Feedback-inu thanks!",
+}
+for _key, _text in MN.items():
+    S[_key]["mn"] = _text
 
 
 def t(key: str, lang: str, **values: object) -> str:

@@ -21,10 +21,10 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import GREETING, ChatMixin
+from app.resort.chat import GREETING, ChatMixin, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
-from app.resort.i18n import LANGS, detect_script, t
+from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
 from app.resort.idproof import IdProofMixin
 from app.resort.models import Booking, ChatMessage as Chat
 from app.resort.paying import apply_payment, method_label
@@ -45,7 +45,8 @@ def fmt_date(d: date) -> str:
 class BookingBot(IdProofMixin, ChatMixin):
     def __init__(self, config: ResortConfig, repo: ResortRepo, whatsapp: WhatsAppClient, payments: Payments,
                  clock: Any, *, llm: Callable[[], LLMProvider] | None = None,
-                 voice_in: Callable[[], Any] | None = None) -> None:
+                 voice_in: Callable[[], Any] | None = None, debounce_s: float = 0.0) -> None:
+        self.debounce_s = debounce_s  # seconds to wait for a quick second message before answering
         self.config = config
         self.repo = repo
         self.wa = whatsapp
@@ -99,7 +100,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             if msg.type not in ("reaction", "sticker"):
                 self._text(phone, t("unsupported", lang))
             return "unsupported"
-        self.repo.add_chat(Chat(phone, "in", text, now, source))
+        in_id = self.repo.add_chat(Chat(phone, "in", text, now, source))
 
         paused, since = self.repo.is_paused(phone)
         if paused:
@@ -111,7 +112,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             self.wa.mark_read(msg.id)
         except Exception:
             pass
-        return self._dispatch(phone, st, text, None if source != "button" else msg.reply_id, source, guest.name)
+        return self._dispatch(phone, st, text, None if source != "button" else msg.reply_id, source, guest.name, in_id)
 
     # ------------------------------------------------------------------ routing
 
@@ -125,7 +126,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         return ist_today(self.clock)
 
     def _dispatch(self, phone: str, st: dict[str, Any], text: str, rid: str | None, source: str,
-                  guest_name: str) -> str:
+                  guest_name: str, in_id: int = 0) -> str:
         typed = rid is None
         if typed:
             if st.get("opted_out") and is_opt_in(text):
@@ -144,10 +145,10 @@ class BookingBot(IdProofMixin, ChatMixin):
                 self.repo.upsert_guest(guest)
                 self._text(phone, t("opt_out", st.get("lang", "en")))
                 return "opt_out"
-            if INDIC.search(text):  # a script gives the language away at once; Latin styles are judged by the AI
+            if INDIC.search(text):  # a script gives the language away at once
                 st["lang"] = detect_script(text, st.get("lang", "en"))
         st.setdefault("lang", "en")
-        if st["lang"] not in LANGS:
+        if st["lang"] not in FIXED_LANGS:
             st["lang"] = "en"
 
         if not typed:  # a stale button from an old message
@@ -156,10 +157,12 @@ class BookingBot(IdProofMixin, ChatMixin):
             return outcome
         if st.get("fb") and (outcome := self._fb_step(phone, st, text)):
             return outcome
+        if is_ack(text) and not self._bot_asked_something(phone, st):
+            return "quiet"  # "ok" / "thanks" after a statement: no reply, the guest will write if they want more
         if GREETING.match(text) and not st.get("bk") and self._places():
             self._save(phone, st)
-            return self._greet(phone, st)
-        return self._converse(phone, st, text)
+            return self._greet(phone, st, text)
+        return self._converse(phone, st, text, in_id)
 
     # ------------------------------------------------------------------ staff handoff
 
@@ -284,9 +287,37 @@ class BookingBot(IdProofMixin, ChatMixin):
         self._notify_guest(b, t("expired", b.language, id=b.id), "failed", self._params(b))
         return "expired"
 
+    def _bot_asked_something(self, phone: str, st: dict[str, Any]) -> bool:
+        """True when our last message to this guest waits for an answer: it has a question in it, a booking summary
+        is waiting for their confirmation, or we have not written to them yet."""
+        if (st.get("bk") or {}).get("chosen"):
+            return True
+        last = next((m for m in reversed(self.repo.list_chat(phone, limit=6)) if m.direction == "out"), None)
+        return last is None or "?" in last.text
+
+    def check_payments(self) -> int:
+        """Ask the payment provider about every unpaid hold. A paid link is confirmed exactly as the webhook would."""
+        link_status = getattr(self.payments, "link_status", None)
+        if link_status is None:
+            return 0
+        found = 0
+        for b in self.repo.list_bookings(status="hold", limit=200):
+            if not b.payment_link_id:
+                continue
+            try:
+                status = link_status(b.payment_link_id)
+            except Exception as exc:  # the provider being slow must never stop the sweep
+                log.warning("Payment check for %s failed: %s", b.id, exc)
+                continue
+            if status.get("paid") and self.mark_paid(booking_id=b.id, payment_id=status.get("payment_id", "")) == "paid":
+                found += 1
+        return found
+
     def sweep(self, now: datetime | None = None) -> dict[str, int]:
-        """Run every minute or so: expire unpaid holds (and tell the guests), nudge holds about to expire."""
+        """Run every minute or so: confirm payments Razorpay has but we missed, expire unpaid holds (and tell the
+        guests), nudge holds about to expire."""
         now = now or self.clock.now()
+        found = self.check_payments()
         expired = self.repo.expire_holds(now)
         for b in expired:
             self._notify_guest(b, t("expired", b.language, id=b.id), "failed", self._params(b))
@@ -301,6 +332,8 @@ class BookingBot(IdProofMixin, ChatMixin):
                                    "pending", self._params(b))
                 nudged += 1
         out = {"expired": len(expired), "reminded": nudged}
+        if found:
+            out["paid_found"] = found
         try:
             if reminders := self.remind_ids(now):
                 out["id_reminders"] = reminders

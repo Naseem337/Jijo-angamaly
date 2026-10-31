@@ -54,7 +54,7 @@ class ResortServices:
     @cached_property
     def bot(self) -> BookingBot:
         return BookingBot(self.config, self.repo, self.whatsapp, self.payments, self.clock,
-                          llm=lambda: self.llm, voice_in=self._voice_in)
+                          llm=lambda: self.llm, voice_in=self._voice_in, debounce_s=2.5)
 
 
 def build_resort_services(settings: Settings | None = None) -> ResortServices:

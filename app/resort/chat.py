@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -39,7 +40,24 @@ GREETING = re.compile(r"^\W*((hi+|hello+|hey+|hai+|hlo|hola|namaste|namaskar\w*|
                       r"|നമസ്കാരം|ഹായ്|ഹലോ|வணக்கம்|ஹாய்|நமஸ்தே|नमस्ते|हाय|हेलो|हैलो)\W*$", re.IGNORECASE)
 # Styles the AI may report. Fixed messages (payment, ID) use the script language; Latin-script styles get English.
 STYLES = ("en", "ml", "manglish", "hi", "hinglish", "ta", "tanglish")
-STYLE_LANG = {"en": "en", "ml": "ml", "hi": "hi", "ta": "ta", "manglish": "en", "hinglish": "en", "tanglish": "en"}
+STYLE_LANG = {"en": "en", "ml": "ml", "hi": "hi", "ta": "ta", "manglish": "mn", "hinglish": "en", "tanglish": "en"}
+INDIC = re.compile(r"[\u0900-\u097f\u0b80-\u0bff\u0d00-\u0d7f]")
+HELLO = re.compile(r"^\W*(hello+|hey+)", re.IGNORECASE)
+ACK_WORDS = frozenset("ok okay okk okey k kk kay thanks thank thankyou thx ty you fine cool noted got it sure alright "
+                      "right yes ya yep sheri sari shari shaari athe aah aha da bro sir madam ശരി ഓക്കെ ഓകെ താങ്ക്സ് നന്ദി "
+                      "ठीक है धन्यवाद शुक्रिया சரி நன்றி".split())
+NO_REPLY = "[no reply]"
+
+
+def is_ack(text: str) -> bool:
+    """Only an acknowledgement: 'ok', 'okay thanks', 'sheri', '👍'. Nothing to answer."""
+    s = text.strip().lower()
+    if not s:
+        return False
+    if not re.search(r"\w", s):  # emoji or punctuation only
+        return True
+    words = [w.strip(".,!?;:()-'\"") for w in s.split()]  # not \w: it would cut Malayalam vowel signs
+    return 0 < len(words) <= 4 and all(w in ACK_WORDS for w in words)
 
 
 def display_phone(e164: str) -> str:
@@ -61,6 +79,9 @@ class _Turn:
     handed_off: bool = False
 
 
+LANGUAGE_FIELD = {"type": "string", "enum": list(STYLES),
+                  "description": "the language style of the guest's latest message (Manglish = Malayalam in English letters)"}
+
 TOOLS = [
     ToolSpec(
         "check_availability",
@@ -75,8 +96,7 @@ TOOLS = [
             "adults": {"type": "integer", "description": "total persons if the guest did not split adults and children"},
             "children": {"type": "integer", "description": "only when the guest mentioned children"},
             "rooms": {"type": "integer", "description": "rooms the guest asked for, if any"},
-            "language": {"type": "string", "enum": list(STYLES),
-                         "description": "the language style of the guest's latest message"}},
+            "language": LANGUAGE_FIELD},
          "required": ["place", "check_in", "adults"]}),
     ToolSpec(
         "prepare_booking",
@@ -85,7 +105,8 @@ TOOLS = [
         {"type": "object", "properties": {
             "room_type": {"type": "string", "description": "room type name as shown by check_availability"},
             "rooms": {"type": "integer"},
-            "extra_beds": {"type": "integer", "description": "extra beds the guest asked for (default 0)"}},
+            "extra_beds": {"type": "integer", "description": "extra beds the guest asked for (default 0)"},
+            "language": LANGUAGE_FIELD},
          "required": ["room_type", "rooms"]}),
     ToolSpec(
         "create_booking",
@@ -93,12 +114,13 @@ TOOLS = [
         "and replied that they confirm. The payment link is sent automatically right after your reply.",
         {"type": "object", "properties": {
             "guest_name": {"type": "string", "description": "name for the booking, if not already known"},
-            "from_city": {"type": "string", "description": "the city they are coming from, only if they said it"}}}),
+            "from_city": {"type": "string", "description": "the city they are coming from, only if they said it"},
+            "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_payment_link",
         "Send the guest their payment link again (they lost it, it did not open, or they ask for it). Only works "
         "while their booking is still on hold. The link is sent automatically after your reply.",
-        {"type": "object", "properties": {}}),
+        {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "my_bookings",
         "The guest's own recent bookings with status, amounts and the owner's contact. Use when they ask about "
@@ -165,13 +187,29 @@ class ChatMixin:
             "- Reply in the same one: English, Malayalam script, Manglish (Malayalam in English letters), Hindi, "
             "Hinglish, Tamil script, or Tanglish. If they switch, you switch. Short words like 'ok' or 'hi' keep "
             "the language so far.\n"
+            "- Use ONE language per reply, the guest's own. Malayalam typed in English letters ('avde engane und', "
+            "'room undo', 'evide', 'ethra aaya') is Manglish: answer in Manglish, in English letters only, NEVER in "
+            "Malayalam script. Malayalam script gets Malayalam script. English gets English. Never mix scripts or "
+            "languages in one reply; plain English words like room, booking, check-in, payment and price are fine "
+            "inside Manglish. Example: guest 'Alleppey il room undo' -> 'Und bro, Alleppey il rooms und. Ethra "
+            "aalkkaar und, ethra divasam?'\n"
+            "- The booking summary in step 6 is the one exception: always write it in English, whatever the language "
+            "of the chat, so both sides can check the figures.\n"
             "- Pass the language style in the `language` field when you call check_availability.\n\n"
             "HOW TO TALK\n"
             "- Short, natural messages, like a real person on WhatsApp. One or two sentences. Ask at most one or two "
             "things at a time. No lists of options, no 'How may I assist you today', no emoji piles (one is fine).\n"
             "- Say only what was asked or what is needed next. Do not paste the property description. Do not mention "
             "offers, discounts or 'special' deals. Just state the price.\n"
-            "- Never repeat details the guest already gave, except in the final summary.\n\n"
+            "- Never repeat details the guest already gave, except in the final summary.\n"
+            "- Greet back in kind: 'hi' gets a short 'Hi!' and a light question about what they are looking for.\n"
+            "- Do not chase the guest. If their message needs no answer (just 'ok', 'thanks', a thumbs up, or a closing "
+            "remark) and you asked nothing, send no reply at all: answer with exactly [no reply]. If they want more, they "
+            "will write. It is fine for the guest to have the last message in the chat.\n"
+            "- Messages that arrive one after another belong together. A short message (a place, a date, a number, "
+            "'yes') answers your last question or continues what they said before: join them using the chat so far. "
+            "If the guest wrote 'avde engane und' and then 'Alleppey', they are asking how Alleppey is: answer that, "
+            "do not start over or ask the same thing again.\n\n"
             "BOOKING, in this order, skipping what the guest already told you\n"
             "1. Which place. If you have several places, ask which one (name them). If there is only one, don't ask.\n"
             "2. Check-in date, and how many nights or the check-out date. If the date has no year, use the next "
@@ -186,9 +224,11 @@ class ChatMixin:
             "the property, check-in and check-out time. Ask them to confirm. If you do not know their name yet, ask "
             "for it in the same message, and in the same line ask which city they are coming from (optional: "
             "never insist, pass from_city to create_booking only if they tell you).\n"
-            "7. Only after they confirm in a later message, call create_booking. Then tell them briefly that the "
-            "rooms are held and the payment link follows. Do not write the link or the advance amount yourself, it "
-            "is sent automatically.\n"
+            "7. Only after they confirm in a later message, call create_booking. Then tell them briefly to "
+            "complete the payment to confirm the booking; the payment link follows. Do not write the link or the "
+            "advance amount yourself, it is sent automatically.\n"
+            "- Before the payment is received, NEVER say the room or booking is booked, confirmed, reserved or done. "
+            "Say it will be confirmed once the payment is complete. The confirmation message arrives on its own.\n"
             "- If the party does not fit or the dates are sold out, say so and suggest another date, fewer rooms "
             "or the other place.\n\n"
             "MONEY AND FACTS\n"
@@ -233,17 +273,37 @@ class ChatMixin:
             merged.pop(0)
         return merged
 
-    def _greet(self, phone: str, st: dict[str, Any]) -> str:
+    def _greet(self, phone: str, st: dict[str, Any], text: str = "") -> str:
+        """'hi' gets 'Hi!', 'hello' gets 'Hello!', then one light question."""
         lang = st.get("lang", "en")
+        word = "Hello" if HELLO.match(text) and not text.lower().lstrip().startswith("hey") else "Hey" if text.lower().lstrip().startswith("hey") else "Hi"
         props = self._places()
-        if len(props) == 1:  # only one place is open: go straight to the dates
-            self._text(phone, t("greet_one", lang, place=self._place_label(props[0])))
+        if len(props) == 1:
+            self._text(phone, t("greet_one", lang, hi=word, place=self._place_label(props[0])))
             return "greeting"
         places = [f'"{self._place_label(p)}"' for p in props]
-        self._text(phone, t("greet_ask", lang, places=f" {t('or', lang)} ".join(places)))
+        self._text(phone, t("greet_ask", lang, hi=word, places=f" {t('or', lang)} ".join(places)))
         return "greeting"
 
-    def _converse(self, phone: str, st: dict[str, Any], text: str) -> str:
+    def _only_latin_fix(self, llm, system: str, messages: list[ChatMessage], reply: str, guest_text: str) -> str:
+        """A guest writing in English letters (English or Manglish) must not get Malayalam, Tamil or Hindi script:
+        one rewrite, and if it still has script it is sent as it is."""
+        if INDIC.search(guest_text) or not INDIC.search(reply):
+            return reply
+        ask = ChatMessage.user("Rewrite that reply using only English letters (Manglish or English). Do not use "
+                               "Malayalam, Tamil or Hindi script. Keep the meaning and the same short style.")
+        try:
+            fixed = llm.complete(system, [*messages, ChatMessage("assistant", reply), ask], None,
+                                 MAX_REPLY_TOKENS).text.strip()
+        except LLMError:
+            return reply
+        return fixed if fixed and not INDIC.search(fixed) else reply
+
+    def _converse(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0) -> str:
+        if self.debounce_s and in_id:  # a quick second message may follow: wait, and let the newest one answer
+            time.sleep(self.debounce_s)
+            if self.repo.last_chat_id(phone, "in") != in_id:
+                return "superseded"
         st["turn"] = st.get("turn", 0) + 1
         ctx = _Turn(phone, st)
         messages = self._history(phone)
@@ -263,7 +323,7 @@ class ChatMixin:
                     messages.append(ChatMessage.tool_result(call.id, content, is_error=is_error))
                 response = llm.complete(system, messages, TOOLS, MAX_REPLY_TOKENS)
             if not response.tool_calls:
-                reply = response.text.strip()
+                reply = self._only_latin_fix(llm, system, messages, response.text.strip(), text)
         except LLMError as exc:
             log.warning("AI answer failed: %s", exc)
         except Exception as exc:  # a missing key or a bad tool must never leave the guest unanswered
@@ -271,6 +331,8 @@ class ChatMixin:
         self._save(phone, st)
         if ctx.handed_off:
             return "handoff"
+        if NO_REPLY in reply.lower():
+            return "quiet"
         if not reply:
             self._text(phone, t("ai_down", st.get("lang", "en")))
             self.alert_staff(f"Bot could not answer a message from {phone}: {text[:200]}", st.get("bk", {}).get("property_id"))
@@ -327,11 +389,16 @@ class ChatMixin:
                 out.append((rt, options))
         return out
 
-    def _tool_check(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
-        st = ctx.st
+    @staticmethod
+    def _set_style(st: dict[str, Any], a: dict[str, Any]) -> None:
+        """The AI reports the guest's language style; the fixed messages (payment link, confirmations) follow it."""
         style = a.get("language")
         if style in STYLES:
             st["lang"], st["style"] = STYLE_LANG[style], style
+
+    def _tool_check(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        st = ctx.st
+        self._set_style(st, a)
         prop = self._find_property(a.get("place", ""))
         if prop is None:
             return {"error": "unknown place", "places": [self._place_label(p) for p in self._places()]}
@@ -373,6 +440,7 @@ class ChatMixin:
 
     def _tool_prepare(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st = ctx.st
+        self._set_style(st, a)
         bk = st.get("bk")
         if not bk:
             return {"error": "call check_availability first"}
@@ -412,6 +480,7 @@ class ChatMixin:
 
     def _tool_create(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st, phone = ctx.st, ctx.phone
+        self._set_style(st, a)
         bk = st.get("bk") or {}
         chosen = bk.get("chosen")
         if not chosen:
@@ -465,9 +534,11 @@ class ChatMixin:
         ctx.pay_message = t("pay", lang, id=booking.id, minutes=self.config.hold_minutes,
                             advance=f"{booking.advance:,}", url=link.url)
         return {"ok": True, "booking_id": booking.id, "rooms_held_minutes": self.config.hold_minutes,
-                "note": "the payment link and amount are sent automatically after your reply; do not write them"}
+                "note": "the payment link and amount are sent automatically after your reply; do not write them. "
+                         "The booking is NOT confirmed yet: tell the guest to complete the payment to confirm it"}
 
     def _tool_bookings(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        paid_now = self.check_payments()  # a guest who says "I paid" gets their confirmation without waiting
         rows = []
         for b in self.repo.list_bookings(phone=ctx.phone, limit=3):
             prop = self.repo.get_property(b.property_id)
@@ -477,9 +548,13 @@ class ChatMixin:
             if b.status == "hold" and b.payment_link_url:
                 row["payment_link"] = b.payment_link_url
             rows.append(row)
-        return {"bookings": rows} if rows else {"bookings": [], "note": "this guest has no booking yet"}
+        out: dict[str, Any] = {"bookings": rows} if rows else {"bookings": [], "note": "this guest has no booking yet"}
+        if paid_now:
+            out["note"] = "a payment was just found and the confirmation message was sent automatically; do not repeat its details"
+        return out
 
     def _tool_resend(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        self._set_style(ctx.st, a)
         now = self.clock.now()
         live = [b for b in self.repo.list_bookings(phone=ctx.phone, status="hold", limit=5)
                 if b.payment_link_url and b.hold_expires_at and b.hold_expires_at > now]
