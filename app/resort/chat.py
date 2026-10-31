@@ -61,6 +61,9 @@ NO_OFFER = re.compile(
     r"(?:ഓഫർ|ஆஃபர்|ऑफर|offers?)\s*(?:ഇപ്പോൾ\s*)?(?:ഒന്നും\s*)?(?:ഇല്ല|இல்ல|இல்லை|नहीं|illa|illai|nahi|ilya)|"
     r"(?:cannot|can't|cant|not able to|unable to) (?:reduce|decrease|lower)|കുറയ്ക്കാൻ (?:പറ്റില്ല|കഴിയില്ല)|"
     r"குறைக்க முடியாது|कम नहीं (?:कर सकत[ेा]|हो सकता)|kurakkan pattilla|kuraikka mudiyaadhu|discount nahi", re.IGNORECASE)
+# Hindi / Malayalam typed in English letters: a Hinglish guest must not be answered in Manglish
+HINGLISH_WORDS = re.compile(r"\b(?:milega|milegi|kya|kitne|kitna|raat|chahiye|karna|kar do|theek|nahi|hai|hain|aap|mujhe|hum|log)\b", re.IGNORECASE)
+MANGLISH_WORDS = re.compile(r"\b(?:und|undo|aanu|ethra|venam|cheyyanam|cheyyam|ippol|aakum|evide|ningal\w*|parayamo|mathi)\b", re.IGNORECASE)
 ASKS_REDUCE = re.compile(r"reduc|discount|lower|less|last price|final price|negotiat|bargain|best price|kurach|kurakk|kuraikk|"
                          r"kam kar|chhoot|குறை|കുറ|कम कर|छूट|ഡിസ്കൗണ്ട്|തള്ള", re.IGNORECASE)
 
@@ -337,6 +340,10 @@ class ChatMixin:
         elif present - {own}:
             others = " or ".join(LANG_NAMES[k] for k in sorted(present - {own}))
             return f"Rewrite that reply in {LANG_NAMES[own]} only (English words are fine). Do not use {others} script."
+        if HINGLISH_WORDS.search(guest_text) and not MANGLISH_WORDS.search(guest_text):
+            st["hing"] = True
+        if st.get("hing") and not MANGLISH_WORDS.search(guest_text) and MANGLISH_WORDS.search(reply):
+            return "Rewrite that reply in Hinglish (Hindi in English letters), the guest's language. Do not use Malayalam."
         if NO_OFFER.search(reply) and not ASKS_REDUCE.search(guest_text):
             return ("Rewrite that reply without saying there is no offer or discount and without saying you cannot "
                     "reduce anything: the guest only asked. Just give the price for their dates, or ask for the dates.")
