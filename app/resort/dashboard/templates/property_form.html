@@ -31,6 +31,7 @@
 <form method="post" action="{{ BASE }}/properties/{{ 'new' if is_new else p.id }}" class="form">{{ csrf_field(csrf) }}
 <section class="card" id="details"><h3>Basics</h3><div class="cols">
   {{ field("Name", "name", p.name, required=True) }}{{ field("City / area", "city", p.city) }}
+  {{ field("Place name guests use", "place", p.place, "text", "How the bot asks it, e.g. Kanthalloor, Munnar", attrs='maxlength="60"') }}
   {{ field("Address", "address", p.address) }}{{ field("Map link", "map_url", p.map_url, "url") }}
   {{ field("Check-in time", "checkin_time", p.checkin_time, "time") }}{{ field("Check-out time", "checkout_time", p.checkout_time, "time") }}
 </div>
@@ -49,6 +50,7 @@
   {{ field("Advance to pay online (%)", "advance_pct", p.advance_pct, "number", attrs='min="1" max="100"') }}
   {{ field("GST (%)", "gst_pct", p.gst_pct, "number", "Prices already include it. It is split into CGST and SGST on the invoice.", attrs='min="0" max="40"') }}
   {{ field("GSTIN", "gstin", p.gstin, "text", "Shown on invoices", attrs='maxlength="20"') }}
+  {{ field("Extra bed (per bed per night, ₹)", "extra_bed_rate", p.extra_bed_rate, "number", "0 = the bot does not offer extra beds", attrs='min="0"') }}
   {{ field("Invoice prefix", "invoice_prefix", p.invoice_prefix, "text", "e.g. PZR gives PZR-2026-AB12CD", attrs='maxlength="8"') }}
 </div>
 <div class="field"><span>Cancellation refund</span>
@@ -65,6 +67,13 @@
       <div class="chip-list"></div>
       <div class="chip-add"><span class="prefix">+91</span><input type="tel" inputmode="numeric" placeholder="98xxxxxxxx" maxlength="16"><button type="button" class="btn primary">{{ icon('plus') }} Add number</button></div>
     </div><small>These numbers get booking and "talk to a person" alerts on WhatsApp. For another country, type the full number starting with +.</small></div>
+  <div class="field"><span>Owner contact numbers (given to guests)</span>
+    <div class="chipbox" data-chips="contact_numbers" data-kind="phone" data-max="5">
+      <textarea name="contact_numbers" hidden>{{ p.contact_numbers|join('
+') }}</textarea>
+      <div class="chip-list"></div>
+      <div class="chip-add"><span class="prefix">+91</span><input type="tel" inputmode="numeric" placeholder="98xxxxxxxx" maxlength="16"><button type="button" class="btn primary">{{ icon('plus') }} Add number</button></div>
+    </div><small>The bot gives these to guests who want to cancel or still want to negotiate the price.</small></div>
   {{ area("Policies (cancellation, refund, house rules)", "policies", p.policies, 4) }}
   {{ area("Photo links (one per line)", "photo_urls", p.photo_urls|join('\n'), 3) }}
 </section>

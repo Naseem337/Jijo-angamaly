@@ -1,6 +1,7 @@
 """Razorpay payment links over plain httpx (no SDK), a signed-webhook check, and a mock for local tests.
 
-Env: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET (API), RAZORPAY_WEBHOOK_SECRET (webhook signature).
+Env: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET (API), RAZORPAY_WEBHOOK_SECRET (webhook signature),
+RESORT_WHATSAPP_NUMBER (optional, the business number: after paying, the guest is sent back to the chat).
 Without the API keys `build_payments()` returns MockPayments, which hands out a fake link so the whole
 flow can be tried locally; staff can then mark the booking paid from the dashboard.
 """
@@ -38,8 +39,10 @@ class Payments(Protocol):
 
 
 class RazorpayPayments:
-    def __init__(self, key_id: str, key_secret: str, *, http: httpx.Client | None = None) -> None:
+    def __init__(self, key_id: str, key_secret: str, *, http: httpx.Client | None = None,
+                 callback_url: str = "") -> None:
         self._auth = (key_id, key_secret)
+        self._callback_url = callback_url  # where Razorpay's page sends the guest after paying (a wa.me link)
         self._http = http or httpx.Client(timeout=20)
 
     def create_payment_link(self, amount_rupees: int, booking_id: str, name: str, phone: str,
@@ -57,6 +60,8 @@ class RazorpayPayments:
             "expire_by": expire_by,
             "notes": {"booking_id": booking_id},
         }
+        if self._callback_url:
+            body["callback_url"], body["callback_method"] = self._callback_url, "get"
         try:
             resp = self._http.post(f"{API}/payment_links", json=body, auth=self._auth)
         except httpx.HTTPError as exc:
@@ -84,7 +89,8 @@ class MockPayments:
 def build_payments(http: httpx.Client | None = None) -> Payments:
     key_id, key_secret = os.environ.get("RAZORPAY_KEY_ID", ""), os.environ.get("RAZORPAY_KEY_SECRET", "")
     if key_id and key_secret:
-        return RazorpayPayments(key_id, key_secret, http=http)
+        number = "".join(ch for ch in os.environ.get("RESORT_WHATSAPP_NUMBER", "") if ch.isdigit())
+        return RazorpayPayments(key_id, key_secret, http=http, callback_url=f"https://wa.me/{number}" if number else "")
     log.warning("RAZORPAY_KEY_ID/SECRET not set: using mock payment links (testing only)")
     return MockPayments()
 

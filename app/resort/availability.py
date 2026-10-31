@@ -67,11 +67,12 @@ class Quote:
 
 
 def quote(prop: Property, rt: RoomType, rules: list[RateRule], check_in: date, check_out: date,
-          rooms: int) -> Quote:
+          rooms: int, extra_beds: int = 0) -> Quote:
+    """Room rent for every night plus `extra_beds` at the property's per-bed-per-night rate."""
     nights = (check_out - check_in).days
     per_night = [(check_in + timedelta(days=i), night_rate(rt, rules, check_in + timedelta(days=i)))
                  for i in range(nights)]
-    subtotal = sum(rate for _, rate in per_night) * rooms
+    subtotal = sum(rate for _, rate in per_night) * rooms + extra_beds * prop.extra_bed_rate * nights
     gst = round(subtotal * prop.gst_pct / 100)
     total = subtotal + gst
     advance = round(total * prop.advance_pct / 100)
@@ -110,3 +111,19 @@ def check_dates(check_in: date, check_out: date, today: date) -> str | None:
     if (check_out - check_in).days > MAX_NIGHTS:
         return f"stays are limited to {MAX_NIGHTS} nights"
     return None
+
+
+def rate_summary(per_night: list[tuple[date, int]]) -> str:
+    """'2 nights x Rs 2,500, 3 nights x Rs 3,000' (consecutive nights at one rate are grouped)."""
+    groups: list[list[int]] = []
+    for _, rate in per_night:
+        if groups and groups[-1][0] == rate:
+            groups[-1][1] += 1
+        else:
+            groups.append([rate, 1])
+    return ", ".join(f"{n} night{'s' if n != 1 else ''} x Rs {rate:,}" for rate, n in groups)
+
+
+def fmt_range(start: date, end: date) -> str:
+    """'1 Dec to 14 Dec 2026'."""
+    return f"{start.day} {start.strftime('%b')} to {end.day} {end.strftime('%b')} {end.year}"

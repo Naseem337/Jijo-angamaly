@@ -90,11 +90,6 @@ def pay(w, b: Booking) -> None:
     assert w.bot.mark_paid(booking_id=b.id) == "paid"
 
 
-def tap(w, rid, phone=GUEST):
-    return w.bot.handle(InboundMessage(f"wamid.{next(_ids)}", phone, "interactive", datetime(2026, 11, 2, 4, 30),
-                                       text=rid, reply_id=rid))
-
-
 def say(w, text, phone=GUEST):
     return w.bot.handle(InboundMessage(f"wamid.{next(_ids)}", phone, "text", datetime(2026, 11, 2, 4, 30), text=text))
 
@@ -105,53 +100,47 @@ def send_image(w, media_id="m1", data=b"\xff\xd8\xffJPEG", mime="image/jpeg", ph
                                        media_id=media_id))
 
 
-def id_lists(w):
-    return [p for p in w.wa.of("list") if "id:aadhaar" in str(p["rows"])]
+def id_asks(w):
+    """The plain-text ID requests sent so far."""
+    return [x for x in w.wa.of("text") if "ID" in x and "photo" in x and "starts tomorrow" not in x]
 
 
 # --------------------------------------------------------------------------- asking once
 
 
-def test_paid_booking_asks_for_id_once(world):
+def test_paid_booking_asks_for_id_once_in_plain_text(world):
     w = world
     b = make_booking(w)
     pay(w, b)
-    lists = id_lists(w)
-    assert len(lists) == 1
-    assert "Guest 1 of 1" in lists[0]["body"] and "30 days" in lists[0]["body"]
-    assert [r[0] for r in lists[0]["rows"]] == ["id:aadhaar", "id:passport", "id:dl", "id:voter", "id:other",
-                                                "id:later"]
-    assert all(len(r[1]) <= 24 for r in lists[0]["rows"])
+    asks = id_asks(w)
+    assert len(asks) == 1 and "guest 1 of 1" in asks[0] and "30 days" in asks[0]
+    assert "Aadhaar" in asks[0] and "show it at check-in" in asks[0]
+    assert w.wa.of("list") == [] and w.wa.of("buttons") == []  # no tap list anywhere
     assert w.bot.mark_paid(booking_id=b.id) == "already_paid"
     w.bot.announce_paid(w.repo.get_booking(b.id))  # staff path announcing again
-    assert len(id_lists(w)) == 1
+    assert len(id_asks(w)) == 1
 
 
 def test_not_asked_outside_the_24h_window(world):
     w = world
     w.wa.text_error = WhatsAppError("outside window", status=400, code=131047)
     pay(w, make_booking(w))
-    assert id_lists(w) == []
+    assert id_asks(w) == [] and "idp" not in w.repo.get_state(GUEST)
 
 
-# --------------------------------------------------------------------------- photo, last 4 digits
+# --------------------------------------------------------------------------- photo
 
 
-def test_aadhaar_then_photo_is_stored_with_retention(world):
+def test_photo_is_stored_with_retention(world):
     w = world
     b = make_booking(w)
     pay(w, b)
-    assert tap(w, "id:aadhaar") == "id_photo_requested"
-    assert "Aadhaar" in w.wa.of("text")[-1]
-    assert send_image(w) == "id_received"
+    assert send_image(w) == "id_done"
     proofs = w.repo.list_id_proofs(b.id, with_data=True)
     assert len(proofs) == 1
     p = proofs[0]
-    assert (p.guest_no, p.id_type, p.status, p.mime, p.data) == (1, "aadhaar", "received", "image/jpeg",
-                                                                 b"\xff\xd8\xffJPEG")
+    assert (p.guest_no, p.status, p.mime, p.data) == (1, "received", "image/jpeg", b"\xff\xd8\xffJPEG")
     assert p.delete_after == b.check_out + timedelta(days=30)
-    assert w.wa.of("buttons")[-1]["buttons"][0][0] == "id:skip"
-    assert tap(w, "id:skip") == "id_done"
     assert "All set" in w.wa.of("text")[-1]
     assert "idp" not in w.repo.get_state(GUEST)
 
@@ -160,18 +149,16 @@ def test_non_image_is_rejected_and_nothing_stored(world):
     w = world
     b = make_booking(w)
     pay(w, b)
-    tap(w, "id:passport")
     assert send_image(w, "doc1", b"%PDF", "application/pdf", kind="document") == "id_rejected"
     assert "photo" in w.wa.of("text")[-1].lower()
     assert w.repo.list_id_proofs(b.id) == []
-    assert w.repo.get_state(GUEST)["idp"]["stage"] == "photo"  # still waiting for a real photo
+    assert "idp" in w.repo.get_state(GUEST)  # still waiting for a real photo
 
 
 def test_download_errors_ask_again(world):
     w = world
     b = make_booking(w)
     pay(w, b)
-    tap(w, "id:voter")
     w.wa.media["big"] = WhatsAppError("media too large (9000000 bytes)")
     assert w.bot.handle(InboundMessage("wamid.big", GUEST, "image", datetime(2026, 11, 2, 4, 30),
                                        media_id="big")) == "id_failed"
@@ -179,68 +166,45 @@ def test_download_errors_ask_again(world):
     assert w.repo.list_id_proofs(b.id) == []
 
 
-def test_typed_long_number_keeps_only_last_four_and_is_never_echoed(world):
-    w = world
-    b = make_booking(w)
-    pay(w, b)
-    tap(w, "id:aadhaar")
-    send_image(w)
-    assert say(w, "1234 5678 9012") == "id_done"
-    proof = w.repo.list_id_proofs(b.id)[0]
-    assert proof.last4 == "9012"
-    out = w.wa.all_text()
-    assert "123456789012" not in out and "1234 5678" not in out and "9012" not in out
-
-
-def test_too_few_digits_asks_again(world):
-    w = world
-    b = make_booking(w)
-    pay(w, b)
-    tap(w, "id:aadhaar")
-    send_image(w)
-    assert say(w, "12") == "id_last4_retry"
-    assert w.repo.list_id_proofs(b.id)[0].last4 == ""
-
-
 # --------------------------------------------------------------------------- later, several guests
 
 
-def test_later_option_stores_a_pending_proof(world):
+def test_saying_they_will_show_it_at_checkin_stores_a_pending_proof(world):
     w = world
     b = make_booking(w)
     pay(w, b)
-    assert tap(w, "id:later") == "id_done"
+    assert say(w, "I will show it at check-in") == "id_done"
     p = w.repo.list_id_proofs(b.id)[0]
     assert (p.id_type, p.status, p.data) == ("later", "pending", b"")
     assert "show your ID at check-in" in w.wa.of("text")[-1]
+
+
+def test_a_question_while_waiting_is_not_taken_as_skipping(world):
+    w = world
+    b = make_booking(w)
+    pay(w, b)
+    llm = MockLLM([MockLLM.text("Check-in is from 2 PM.")])
+    w.bot._llm = lambda: llm
+    assert say(w, "what time is check in?") == "answered"  # goes to the AI, the ID request stays open
+    assert w.repo.list_id_proofs(b.id) == [] and "idp" in w.repo.get_state(GUEST)
 
 
 def test_two_adults_ask_for_guest_two_then_finish(world):
     w = world
     b = make_booking(w, adults=2)
     pay(w, b)
-    tap(w, "id:aadhaar")
-    send_image(w, "g1")
-    assert tap(w, "id:skip") == "id_next_guest"
-    nxt = id_lists(w)[-1]
-    assert "Guest 2 of 2" in nxt["body"] and "30 days" not in nxt["body"]
-    assert "id:skiprest" not in str(nxt["rows"])  # the last guest has nothing left to skip
-    tap(w, "id:passport")
-    send_image(w, "g2", b"\x89PNG", "image/png")
-    assert tap(w, "id:skip") == "id_done"
-    assert [(p.guest_no, p.id_type, p.mime) for p in w.repo.list_id_proofs(b.id)] == [
-        (1, "aadhaar", "image/jpeg"), (2, "passport", "image/png")]
+    assert send_image(w, "g1") == "id_next_guest"
+    assert "guest 2 of 2" in w.wa.of("text")[-1] and "30 days" not in w.wa.of("text")[-1]
+    assert send_image(w, "g2", b"\x89PNG", "image/png") == "id_done"
+    assert [(p.guest_no, p.mime) for p in w.repo.list_id_proofs(b.id)] == [(1, "image/jpeg"), (2, "image/png")]
 
 
-def test_skip_the_rest_marks_remaining_guests_pending(world):
+def test_later_for_the_rest_marks_remaining_guests_pending(world):
     w = world
     b = make_booking(w, adults=3)
     pay(w, b)
-    assert "id:skiprest" in str(id_lists(w)[0]["rows"])
-    tap(w, "id:aadhaar")
     send_image(w)
-    tap(w, "id:skip")
-    assert tap(w, "id:skiprest") == "id_done"
+    assert say(w, "the others will show it later") == "id_done"
     assert [(p.guest_no, p.status) for p in w.repo.list_id_proofs(b.id)] == [
         (1, "received"), (2, "pending"), (3, "pending")]
 
@@ -251,12 +215,12 @@ def test_second_paid_booking_waits_its_turn(world):
     second = make_booking(w, check_in=date(2026, 12, 10))
     pay(w, first)
     pay(w, second)
-    assert len(id_lists(w)) == 1  # only the first is asked now
+    assert len(id_asks(w)) == 1  # only the first is asked now
     assert w.repo.get_state(GUEST)["idp_queue"] == [second.id]
-    tap(w, "id:later")  # finishes the first booking, which brings up the second
-    assert len(id_lists(w)) == 2
+    say(w, "later")  # finishes the first booking, which brings up the second
+    assert len(id_asks(w)) == 2
     assert w.repo.get_state(GUEST)["idp"]["booking_id"] == second.id
-    tap(w, "id:later")
+    say(w, "later")
     assert "idp" not in w.repo.get_state(GUEST)
 
 
@@ -272,15 +236,16 @@ def test_reminder_goes_once_the_day_before_check_in(world):
     w = world
     b = make_booking(w, check_in=date(2026, 11, 3))  # tomorrow
     w.wa.text_error = WhatsAppError("outside window", status=400, code=131047)
-    pay(w, b)  # outside the window: no ID list at payment time
-    assert id_lists(w) == []
+    pay(w, b)  # outside the window: no ID request at payment time
+    assert id_asks(w) == []
     w.wa.text_error = None
     w.clock.set(datetime(2026, 11, 2, 8, 0, tzinfo=IST))
     assert w.bot.sweep().get("id_reminders") is None  # before 09:00 IST: wait
     w.clock.set(datetime(2026, 11, 2, 11, 0, tzinfo=IST))
     assert w.bot.sweep()["id_reminders"] == 1
     assert "starts tomorrow" in w.wa.of("text")[-1]
-    assert len(id_lists(w)) == 1  # inside the window the option list comes with it
+    assert w.repo.get_state(GUEST)["idp"]["booking_id"] == b.id  # their next photo counts as the ID
+    assert send_image(w) == "id_done"
     assert "id_reminders" not in w.bot.sweep()  # only once
 
 
@@ -288,10 +253,9 @@ def test_reminder_uses_the_template_outside_the_window_and_skips_guests_with_pro
     w = world
     monkeypatch.setenv("RESORT_TPL_ID_REMINDER", "resort_id_reminder")
     pay(w, make_booking(w, check_in=date(2026, 11, 3), phone=GUEST))
-    w.repo.set_state("+919847000002", {"lang": "en", "step": "menu"})
     done = make_booking(w, check_in=date(2026, 11, 3), phone="+919847000002")
     pay(w, done)
-    tap(w, "id:later", "+919847000002")  # promised to show it at check-in: no reminder needed
+    say(w, "later", "+919847000002")  # promised to show it at check-in: no reminder needed
     w.repo.set_state(GUEST, {"lang": "en"})
     w.wa.text_error = WhatsAppError("outside window", status=400, code=131047)
     w.clock.set(datetime(2026, 11, 2, 11, 0, tzinfo=IST))
@@ -304,7 +268,6 @@ def test_expired_id_photos_are_purged_once_a_day(world):
     w = world
     b = make_booking(w)
     pay(w, b)
-    tap(w, "id:aadhaar")
     send_image(w)
     proof = w.repo.list_id_proofs(b.id)[0]
     proof.delete_after = date(2026, 11, 1)  # yesterday
@@ -317,31 +280,37 @@ def test_expired_id_photos_are_purged_once_a_day(world):
 # --------------------------------------------------------------------------- feedback
 
 
-def test_feedback_rating_and_comment_are_stored(world):
+def test_feedback_is_one_plain_reply(world):
     w = world
     b = make_booking(w)
     pay(w, b)
     assert w.bot.announce_checked_out(w.repo.get_booking(b.id)) is True
-    rating_list = w.wa.of("list")[-1]
-    assert [r[0] for r in rating_list["rows"]] == ["fb:5", "fb:4", "fb:3", "fb:2", "fb:1"]
-    assert "Thank you for staying" in w.wa.of("text")[-1]
-    assert tap(w, "fb:4") == "feedback_rating"
-    assert feedback.list_feedback(w.repo)[0]["rating"] == 4
-    assert say(w, "Lovely pool and great food") == "feedback_done"
+    texts = w.wa.of("text")
+    assert "Thank you for staying" in texts[-2] and "rating from 1" in texts[-1]
+    assert w.wa.of("list") == [] and w.wa.of("buttons") == []
+    assert say(w, "4 lovely pool and great food") == "feedback_done"
     row = feedback.list_feedback(w.repo, w.prop.id)[0]
-    assert (row["booking_id"], row["rating"], row["comment"]) == (b.id, 4, "Lovely pool and great food")
+    assert (row["booking_id"], row["rating"], row["comment"]) == (b.id, 4, "lovely pool and great food")
     assert feedback.average_rating(w.repo) == 4.0
     assert "fb" not in w.repo.get_state(GUEST)
 
 
-def test_feedback_comment_can_be_skipped(world):
+def test_feedback_parsing_never_takes_a_number_from_the_middle_of_a_sentence():
+    parse = BookingBot._parse_feedback
+    assert parse("5") == (5, "") and parse("4/5 great food") == (4, "great food")
+    assert parse("★★★★ nice") == (4, "nice") and parse("great stay 5") == (5, "great stay")
+    assert parse("we booked 2 rooms and loved it") is None
+    assert parse("what time is checkout") is None
+
+
+def test_feedback_can_be_skipped(world):
     w = world
     b = make_booking(w)
     pay(w, b)
+    send_image(w)  # the ID request is finished first
     w.bot.announce_checked_out(w.repo.get_booking(b.id))
-    tap(w, "fb:5")
-    assert tap(w, "fb:skip") == "feedback_done"
-    assert feedback.list_feedback(w.repo)[0]["comment"] == ""
+    assert say(w, "skip") == "feedback_skipped"
+    assert feedback.list_feedback(w.repo) == [] and "fb" not in w.repo.get_state(GUEST)
 
 
 def test_feedback_not_asked_when_the_guest_cannot_be_reached(world):

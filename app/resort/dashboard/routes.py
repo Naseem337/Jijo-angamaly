@@ -848,6 +848,9 @@ async def property_save(property_id: str, request: Request, auth: Auth = Depends
         raise redirect(toast_url(f"{BASE}/properties/{property_id}", "!Name is required"))
     staff = [n for raw in _lines(f.get("staff_numbers", "")) if (n := try_normalize_phone(raw))]
     p.name, p.city, p.address = name, f.get("city", "").strip(), f.get("address", "").strip()
+    p.place = f.get("place", "").strip()[:60]
+    p.contact_numbers = [n for raw in _lines(f.get("contact_numbers", "")) if (n := try_normalize_phone(raw))]
+    p.extra_bed_rate = _int(f, "extra_bed_rate", 0, 0, 100000)
     p.map_url, p.description, p.policies = f.get("map_url", "").strip(), f.get("description", "").strip(), \
         f.get("policies", "").strip()
     p.checkin_time, p.checkout_time = f.get("checkin_time", "14:00") or "14:00", f.get("checkout_time", "11:00") or "11:00"

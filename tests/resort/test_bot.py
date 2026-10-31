@@ -16,10 +16,10 @@ from app.providers.llm import LLMError, MockLLM
 from app.resort import web
 from app.resort.config import load_resort_config
 from app.resort.db import ResortRepo
-from app.resort.flow import BookingBot, parse_date
+from app.resort.flow import BookingBot
 from app.resort.i18n import S, detect_script, t
-from app.resort.models import Booking, Property, RoomType
-from app.resort.payments import MockPayments, parse_event, verify_webhook_signature
+from app.resort.models import Booking, Property, RateRule, RoomType
+from app.resort.payments import MockPayments, PaymentError, parse_event, verify_webhook_signature
 from app.resort.services import ResortServices
 from app.whatsapp.client import WhatsAppClient, WhatsAppError
 from app.whatsapp.parse import InboundMessage, parse_webhook
@@ -67,22 +67,26 @@ class FakeWA:
         return [p for _, k, p in self.to(phone) if k == "text"]
 
 
+
 @pytest.fixture()
 def world(tmp_path, monkeypatch):
     monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", "whsec")
     repo = ResortRepo(tmp_path / "r.sqlite3")
-    p1 = repo.save_property(Property("Pozhiyoram Resort", city="Kerala", advance_pct=50, staff_numbers=[STAFF],
-                                     policies="Free cancellation 7 days before."))
-    repo.save_property(Property("Vibes Kanthalloor", city="Munnar", advance_pct=50))
+    p1 = repo.save_property(Property("Pozhiyoram Resort", city="Alleppey", place="Pozhiyoram, Alleppey", advance_pct=50,
+                                     staff_numbers=[STAFF], policies="Free cancellation 7 days before.",
+                                     contact_numbers=["+919497861924", "+919995855789"], extra_bed_rate=500,
+                                     map_url="https://maps.app.goo.gl/abc", highlights=["Beach view from every room"]))
+    p2 = repo.save_property(Property("Vibes Kanthalloor", city="Munnar", place="Kanthalloor, Munnar", advance_pct=50))
     deluxe = repo.save_room_type(RoomType(p1.id, "Deluxe", units=2, max_adults=2, max_children=1, max_occupancy=3,
                                           base_rate=4000))
     family = repo.save_room_type(RoomType(p1.id, "Family Suite", units=3, max_adults=4, max_children=2,
                                           max_occupancy=6, base_rate=8000))
+    repo.save_room_type(RoomType(p2.id, "Cottage", units=2, base_rate=5000))
     clock = FixedClock(datetime(2026, 11, 2, 10, 0, tzinfo=IST))  # a Monday
     wa, pay = FakeWA(), MockPayments()
     llm = MockLLM()
     bot = BookingBot(load_resort_config(), repo, wa, pay, clock, llm=lambda: llm)
-    return type("W", (), dict(repo=repo, wa=wa, pay=pay, clock=clock, bot=bot, llm=llm, p1=p1, deluxe=deluxe,
+    return type("W", (), dict(repo=repo, wa=wa, pay=pay, clock=clock, bot=bot, llm=llm, p1=p1, p2=p2, deluxe=deluxe,
                               family=family))()
 
 
@@ -91,152 +95,236 @@ def msg(phone, text="", rid=None, kind=None):
                           datetime(2026, 11, 2, 4, 30), text=text or (rid or ""), reply_id=rid)
 
 
-def tap(w, rid, phone=GUEST):
-    return w.bot.handle(msg(phone, rid=rid))
-
-
-def say(w, text, phone=GUEST):
+def say(w, text, phone=GUEST, *script):
+    """The guest writes `text`; `script` is what the (mock) AI does: tool calls and the final reply."""
+    w.llm.script.extend(script)
     return w.bot.handle(msg(phone, text))
 
 
-def go_to_confirm(w, adults=2, children=1, nights=2, rt="deluxe", rooms=None, phone=GUEST):
-    say(w, "Hi", phone)
-    tap(w, "lang:en", phone)
-    tap(w, "menu:book", phone)
-    tap(w, f"prop:{w.p1.id}", phone)
-    tap(w, "d:2026-11-10", phone)
-    tap(w, f"n:{nights}", phone)
-    tap(w, f"a:{adults}", phone)
-    tap(w, f"c:{children}", phone)
-    tap(w, f"rt:{getattr(w, rt).id}", phone)
-    if rooms:
-        tap(w, f"r:{rooms}", phone)
+tool, reply = MockLLM.tool, MockLLM.text
 
 
-# --------------------------------------------------------------------------- the booking flow
+def last_tool(w) -> dict:
+    """The newest tool result the AI was shown."""
+    return json.loads([m for m in w.llm.calls[-1].messages if m.role == "tool"][-1].content)
 
 
-def test_full_tap_flow_to_payment_link(world):
+def to_summary(w, *, place="Alleppey", adults=2, nights=2, rt="Deluxe", rooms=1, beds=0, check_in="2026-11-10",
+               phone=GUEST):
+    say(w, f"room for {adults} on 10 Nov, {nights} nights", phone,
+        tool("check_availability", place=place, check_in=check_in, nights=nights, adults=adults, language="en"),
+        reply("We have Deluxe and Family Suite. Which one?"))
+    say(w, f"{rt} please", phone,
+        tool("prepare_booking", room_type=rt, rooms=rooms, extra_beds=beds),
+        reply("Summary ... shall I confirm?"))
+
+
+def confirm(w, phone=GUEST):
+    return say(w, "yes confirm, Asha Menon", phone, tool("create_booking", guest_name="Asha Menon"),
+               reply("Done, your rooms are held."))
+
+
+def hold(w, rooms=1, nights=2, rt="Deluxe", phone=GUEST):
+    """A guest chats all the way to a held booking with a payment link."""
+    to_summary(w, rt=rt, rooms=rooms, nights=nights, adults=2 * rooms, phone=phone)
+    return confirm(w, phone)
+
+
+# --------------------------------------------------------------------------- the conversation
+
+
+def test_hi_asks_where_with_no_menu_and_no_ai_call(world):
     w = world
-    assert say(w, "Hi") == "language_picker"
-    kind, payload = w.wa.last()[1:]
-    assert kind == "list" and [r[0] for r in payload["rows"]] == ["lang:en", "lang:ml", "lang:ta", "lang:hi"]
-    assert tap(w, "lang:en") == "menu"
-    assert [r[0] for r in w.wa.last()[2]["rows"]] == ["menu:book", "menu:ask", "menu:status", "menu:staff"]
-    tap(w, "menu:book")
-    assert [r[1] for r in w.wa.last()[2]["rows"]] == ["Pozhiyoram Resort", "Vibes Kanthalloor"]
-    tap(w, f"prop:{w.p1.id}")
-    rows = w.wa.last()[2]["rows"]
-    assert rows[0][1] == "Today" and rows[1][1] == "Tomorrow" and rows[-1][0] == "d:other" and len(rows) == 10
-    tap(w, "d:2026-11-10")
-    assert w.wa.last()[2]["rows"][-1][0] == "n:more"
-    tap(w, "n:2")
-    assert w.wa.last()[2]["rows"][0][0] == "a:1"
-    tap(w, "a:2")
-    assert w.wa.last()[2]["rows"][0][0] == "c:0"
-    tap(w, "c:1")
-    types = w.wa.last()[2]["rows"]
-    assert [r[0] for r in types] == [f"rt:{w.deluxe.id}", f"rt:{w.family.id}"]
-    assert "8,000" in types[0][2] and "16,000" in types[1][2]  # 2 nights x rate, whole stay
-    tap(w, f"rt:{w.deluxe.id}")
-    assert [r[0] for r in w.wa.last()[2]["rows"]] == ["r:1", "r:2"]
-    tap(w, "r:1")
-    kind, payload = w.wa.last()[1:]
-    assert kind == "buttons" and [b[0] for b in payload["buttons"]] == ["ok", "chg"]
-    assert "Total: ₹8,000" in payload["body"] and "₹4,000" in payload["body"]
-    tap(w, "ok")
-    assert "guest name" in w.wa.last()[2]
-    assert say(w, "Asha Menon") == "payment_link"
-    assert "https://rzp.io/mock/" in w.wa.texts()[-1] and "4,000" in w.wa.texts()[-1]
+    assert say(w, "hii") == "greeting"
+    assert w.wa.last() == (GUEST, "text",
+                           'Hi! Where are you looking to stay: "Pozhiyoram, Alleppey" or "Kanthalloor, Munnar"?')
+    assert [k for _, k, _ in w.wa.to(GUEST)] == ["text"] and w.llm.calls == []
+
+
+def test_greeting_in_other_scripts_answers_in_that_language(world):
+    w = world
+    say(w, "ഹായ്")
+    assert "എവിടെ" in w.wa.texts()[-1] and w.repo.get_state(GUEST)["lang"] == "ml"
+    say(w, "नमस्ते", "+919847000099")
+    assert "कहाँ" in w.wa.texts("+919847000099")[-1]
+
+
+def test_booking_chat_end_to_end_with_payment_link(world):
+    w = world
+    say(w, "Alleppey, 10 Nov 2 nights, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="en"),
+        reply("Deluxe is Rs 4,000 a night, Family Suite Rs 8,000. Which one?"))
+    res = last_tool(w)
+    assert res["place"] == "Pozhiyoram, Alleppey" and res["check_out"] == "2026-11-12"
+    deluxe = next(o for o in res["options"] if o["room_type"] == "Deluxe")
+    assert deluxe["total_for_stay"] == 8000 and deluxe["advance_now"] == 4000 and deluxe["rooms_possible"] == [1, 2]
+    assert w.wa.texts()[-1].startswith("Deluxe is Rs 4,000")
+    say(w, "deluxe, 1 room", GUEST, tool("prepare_booking", room_type="deluxe", rooms=1), reply("Summary. Confirm?"))
+    summary = last_tool(w)
+    assert (summary["total"], summary["advance_now"], summary["balance_at_property"]) == (8000, 4000, 4000)
+    assert summary["guest_name_known"] is False and w.repo.list_bookings(phone=GUEST) == []  # nothing booked yet
+    assert confirm(w) == "payment_link"
     booking = w.repo.list_bookings(phone=GUEST)[0]
     assert (booking.status, booking.advance, booking.total, booking.rooms) == ("hold", 4000, 8000, 1)
-    assert booking.guest_name == "Asha Menon" and booking.payment_link_url
-    assert w.pay.created[0]["amount"] == 4000
+    assert booking.guest_name == "Asha Menon" and w.pay.created[0]["amount"] == 4000
+    texts = w.wa.texts()
+    assert texts[-2] == "Done, your rooms are held." and "https://rzp.io/mock/" in texts[-1] and "4,000" in texts[-1]
+    assert {k for _, k, _ in w.wa.to(GUEST)} == {"text"}  # never a list or button
+    assert "bk" not in w.repo.get_state(GUEST)
 
 
-def test_returning_guest_with_name_skips_name_question(world):
+def test_system_prompt_has_the_rules_and_facts(world):
     w = world
-    w.repo.touch_guest(GUEST, w.clock.now(), name="Asha")
-    go_to_confirm(w, rooms=1)
-    assert tap(w, "ok") == "payment_link"
+    say(w, "do you allow pets?", GUEST, reply("Sorry, I am not sure about pets."))
+    system = w.llm.calls[0].system
+    assert "9497861924" in system and "9995855789" in system and "https://maps.app.goo.gl/abc" in system
+    assert "Never ask which language" in system and "Manglish" in system and "Hinglish" in system
+    assert "call the owner" in system and "NEGOTIATION" in system and "Never offer a" in system
+    assert "₹4,000" in system and "Extra bed: ₹500" in system
+    assert "Kanthalloor, Munnar" in system and "2026-11-02 (Monday)" in system
+
+
+def test_booking_cannot_be_created_in_the_same_turn_as_the_summary(world):
+    w = world
+    say(w, "book deluxe 10 Nov 2 nights for 2", GUEST,
+        tool("check_availability", place="alleppey", check_in="2026-11-10", nights=2, adults=2),
+        tool("prepare_booking", room_type="Deluxe", rooms=1),
+        tool("create_booking", guest_name="Asha"),
+        reply("Please confirm the summary."))
+    assert "has not seen the summary" in last_tool(w)["error"]
+    assert w.repo.list_bookings(phone=GUEST) == [] and w.pay.created == []
+
+
+def test_create_needs_a_prepared_booking_and_a_name(world):
+    w = world
+    say(w, "yes book it", GUEST, tool("create_booking", guest_name="Asha"), reply("Which dates?"))
+    assert "no prepared booking" in last_tool(w)["error"]
+    to_summary(w)
+    say(w, "yes", GUEST, tool("create_booking"), reply("May I have your name?"))
+    assert "name" in last_tool(w)["error"] and w.repo.list_bookings(phone=GUEST) == []
 
 
 def test_ten_guests_never_one_room(world):
     w = world
-    say(w, "Hi")
-    tap(w, "lang:en")
-    tap(w, "menu:book")
-    tap(w, f"prop:{w.p1.id}")
-    tap(w, "d:2026-11-10")
-    tap(w, "n:1")
-    tap(w, "a:more")
-    assert "type the number of adults" in w.wa.last()[2]
-    say(w, "10")
-    tap(w, "c:0")
+    say(w, "10 of us, Alleppey 10 Nov 1 night", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=1, adults=10), reply("ok"))
+    options = last_tool(w)["options"]
     # Family Suite fits 4 adults: 10 people need 3 rooms (3 free), never 1 or 2. Deluxe can't take them.
-    types = w.wa.last()[2]["rows"]
-    assert [r[0] for r in types] == [f"rt:{w.family.id}"] and "3 room" in types[0][2]
-    tap(w, f"rt:{w.family.id}")
-    assert w.wa.last()[1] == "buttons"  # only one valid count (3): no room question, straight to the summary
-    assert w.repo.get_state(GUEST)["rooms"] == 3
+    assert [(o["room_type"], o["rooms_possible"]) for o in options] == [("Family Suite", [3])]
+    say(w, "1 room", GUEST, tool("prepare_booking", room_type="Family Suite", rooms=1), reply("not possible"))
+    assert "not possible" in last_tool(w)["error"]
 
 
-def test_rooms_list_only_offers_valid_counts_and_rejects_others(world):
+def test_no_room_fits_says_so(world):
     w = world
-    go_to_confirm(w, adults=8, children=0, nights=1, rt="family")
-    assert [r[0] for r in w.wa.last()[2]["rows"]] == ["r:2", "r:3"]
-    assert tap(w, "r:1") == "rooms"  # not offered: refused and the list is shown again
-    assert w.repo.get_state(GUEST)["step"] == "rooms" and "rooms" not in w.repo.get_state(GUEST)
-    tap(w, "r:2")
-    assert w.repo.get_state(GUEST)["rooms"] == 2
+    say(w, "20 people", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=1, adults=20), reply("Sorry"))
+    res = last_tool(w)
+    assert res["available"] is False and res["options"] == []
 
 
-def test_no_room_fits_offers_change_or_team(world):
+def test_dates_in_the_past_are_refused(world):
     w = world
-    go_to_confirm(w, adults=20, children=0, nights=1, rt="family")
-    kind, payload = w.wa.last()[1:]
-    assert kind == "buttons" and [b[0] for b in payload["buttons"]] == ["nf_guests", "nf_dates", "nf_staff"]
-    assert w.repo.get_state(GUEST)["step"] == "nofit"
-    tap(w, "nf_staff")
-    assert w.repo.is_paused(GUEST)[0]
-    assert "no room fits" in w.wa.texts(STAFF)[-1]
+    say(w, "yesterday", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-01", nights=1, adults=2), reply("Which date?"))
+    assert "past" in last_tool(w)["error"]
 
 
-def test_soldout_race_offers_choosing_again(world):
+def test_season_rates_and_extra_bed(world):
     w = world
-    w.repo.touch_guest(GUEST, w.clock.now(), name="Asha")
-    go_to_confirm(w, rooms=2)
+    w.repo.save_rate_rule(RateRule(w.deluxe.id, date(2026, 11, 11), date(2026, 11, 20), 5000, "season"))
+    say(w, "3 nights from 10 Nov", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=3, adults=2), reply("ok"))
+    deluxe = next(o for o in last_tool(w)["options"] if o["room_type"] == "Deluxe")
+    assert deluxe["rate_per_room_per_night"] == "1 night x Rs 4,000, 2 nights x Rs 5,000"
+    assert deluxe["total_for_stay"] == 14000
+    say(w, "deluxe with one extra bed", GUEST, tool("prepare_booking", room_type="Deluxe", rooms=1, extra_beds=1),
+        reply("summary"))
+    summary = last_tool(w)
+    assert summary["extra_bed_cost"] == 1500 and summary["total"] == 15500 and summary["advance_now"] == 7750
+    assert w.repo.get_state(GUEST)["bk"]["chosen"]["total"] == 15500
+
+
+def test_extra_beds_refused_where_not_offered(world):
+    w = world
+    to_summary(w, place="Munnar", rt="Cottage", adults=2)
+    assert last_tool(w)["room_type"] == "Cottage"
+    say(w, "add 1 extra bed", GUEST, tool("prepare_booking", room_type="Cottage", rooms=1, extra_beds=1), reply("no"))
+    assert "extra beds are not available" in last_tool(w)["error"]
+
+
+def test_place_is_matched_from_words_the_guest_uses(world):
+    w = world
+    say(w, "munnar", GUEST,
+        tool("check_availability", place="Munnar", check_in="2026-11-10", nights=1, adults=2), reply("ok"))
+    assert last_tool(w)["place"] == "Kanthalloor, Munnar"
+    say(w, "goa", GUEST,
+        tool("check_availability", place="Goa", check_in="2026-11-10", nights=1, adults=2), reply("ok"))
+    assert last_tool(w)["error"] == "unknown place" and "Pozhiyoram, Alleppey" in last_tool(w)["places"]
+
+
+def test_language_style_is_remembered_for_fixed_messages(world):
+    w = world
+    say(w, "Alleppey il 10 nu room venam", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=1, adults=2, language="manglish"),
+        reply("Deluxe 4000 aanu."))
+    assert w.repo.get_state(GUEST)["lang"] == "en" and w.repo.get_state(GUEST)["style"] == "manglish"
+    say(w, "இரண்டு பேர்", GUEST, reply("சரி"))
+    assert w.repo.get_state(GUEST)["lang"] == "ta"
+
+
+def test_history_reaches_the_ai_in_order(world):
+    w = world
+    say(w, "do you have AC?", GUEST, reply("Yes, all rooms are AC."))
+    say(w, "and wifi?", GUEST, reply("Not sure."))
+    roles = [(m.role, m.content) for m in w.llm.calls[-1].messages]
+    assert roles == [("user", "do you have AC?"), ("assistant", "Yes, all rooms are AC."), ("user", "and wifi?")]
+
+
+def test_my_bookings_tool(world):
+    w = world
+    hold(w, rooms=1)
+    say(w, "what is my booking status?", GUEST, tool("my_bookings"), reply("It is on hold."))
+    row = last_tool(w)["bookings"][0]
+    assert row["status"] == "on hold" and row["total"] == 8000 and row["place"] == "Pozhiyoram, Alleppey"
+    assert row["payment_link"].startswith("https://rzp.io/mock/")
+
+
+def test_soldout_race_is_reported_to_the_ai(world):
+    w = world
+    to_summary(w, rooms=2)
     other = Booking(w.p1.id, w.deluxe.id, "+919811111111", date(2026, 11, 10), date(2026, 11, 12), 2, 0, 2, 8000,
                     4000, w.clock.now(), hold_expires_at=w.clock.now() + timedelta(minutes=15))
     w.repo.create_hold(other, w.clock.now())  # someone else grabbed both Deluxe rooms first
-    assert tap(w, "ok") == "type"
-    assert "just taken" in w.wa.texts()[-1]
-    assert [b.id for b in w.repo.list_bookings(phone=GUEST)] == []
-    assert [r[0] for r in w.wa.last()[2]["rows"]] == [f"rt:{w.family.id}"]  # fresh list: Deluxe is gone
+    say(w, "yes, Asha", GUEST, tool("create_booking", guest_name="Asha"), reply("Sorry, those rooms just went."))
+    assert "just taken" in last_tool(w)["error"] and w.repo.list_bookings(phone=GUEST) == []
+    assert w.pay.created == []
 
 
-def test_typed_date_and_numbers_are_accepted(world):
+def test_stale_button_tap_is_ignored(world):
     w = world
-    say(w, "Hi")
-    tap(w, "lang:en")
-    tap(w, "menu:book")
-    tap(w, f"prop:{w.p1.id}")
-    tap(w, "d:other")
-    assert say(w, "banana") == "date_bad"
-    say(w, "25 Dec")
-    assert w.repo.get_state(GUEST)["check_in"] == "2026-12-25"
-    say(w, "3")  # typing a number at a list step works too
-    assert w.repo.get_state(GUEST)["nights"] == 3
+    assert w.bot.handle(msg(GUEST, rid="menu:book")) == "ignored"
+    assert w.llm.calls == [] and w.wa.sent == []
 
 
-def test_parse_date():
-    today = date(2026, 11, 2)
-    assert parse_date("25 Dec", today) == date(2026, 12, 25)
-    assert parse_date("Dec 25", today) == date(2026, 12, 25)
-    assert parse_date("25/12", today) == date(2026, 12, 25)
-    assert parse_date("1 Jan", today) == date(2027, 1, 1)
-    assert parse_date("2026-12-25", today) == date(2026, 12, 25)
-    assert parse_date("30 Feb", today) is None and parse_date("hello", today) is None
+def test_ai_failure_apologises_and_alerts_staff(world):
+    w = world
+    say(w, "do you have a pool?", GUEST, LLMError("mock", "down"))
+    assert "could not answer" in w.wa.texts()[-1] and "could not answer a message" in w.wa.texts(STAFF)[-1]
+
+
+def test_payment_link_failure_hands_off(world, monkeypatch):
+    w = world
+    to_summary(w)
+
+    def boom(*a, **k):
+        raise PaymentError("razorpay down")
+
+    monkeypatch.setattr(w.pay, "create_payment_link", boom)
+    say(w, "yes, Asha", GUEST, tool("create_booking", guest_name="Asha"), reply("never shown"))
+    assert w.repo.is_paused(GUEST)[0] and "payment link" in w.wa.texts(STAFF)[-1]
+    assert "payment link" in w.wa.texts()[-1] and "never shown" not in " ".join(w.wa.texts())
+    assert w.repo.list_bookings(phone=GUEST)[0].status == "failed"
 
 
 # --------------------------------------------------------------------------- languages and voice
@@ -254,24 +342,7 @@ def test_every_string_exists_in_all_four_languages():
     for key, table in S.items():
         assert set(table) == {"en", "ml", "ta", "hi"}, key
         assert all(v.strip() for v in table.values()), key
-    assert t("room_n", "xx", n=2) == "2 rooms"  # unknown language falls back to English
-
-
-def test_first_message_in_malayalam_skips_the_picker(world):
-    w = world
-    assert say(w, "ഹായ്") == "menu"
-    assert w.repo.get_state(GUEST)["lang"] == "ml"
-    assert "മുറി" in w.wa.last()[2]["rows"][0][1]
-
-
-def test_tamil_flow_labels(world):
-    w = world
-    say(w, "Hi")
-    tap(w, "lang:ta")
-    tap(w, "menu:book")
-    tap(w, f"prop:{w.p1.id}")
-    tap(w, "d:2026-11-10")
-    assert w.wa.last()[2]["rows"][0][1] == "1 இரவு"
+    assert t("greet_ask", "xx", places="x") == "Hi! Where are you looking to stay: x?"  # unknown language: English
 
 
 def test_voice_note_is_transcribed_and_used(world):
@@ -283,7 +354,7 @@ def test_voice_note_is_transcribed_and_used(world):
 
     w.bot._voice_in = lambda: Voice()
     m = InboundMessage("wamid.voice", GUEST, "audio", datetime(2026, 11, 2, 4, 30), media_id="m1")
-    assert w.bot.handle(m) == "language_picker"  # treated exactly like the typed text "hello"
+    assert w.bot.handle(m) == "greeting"  # treated exactly like the typed text "hello"
     assert w.repo.list_chat(GUEST)[0].source == "voice"
 
 
@@ -295,87 +366,54 @@ def test_voice_problem_gets_text_reply(world):
     assert all(k in ("text",) for _, k, _ in w.wa.to(GUEST))  # never a voice reply
 
 
-# --------------------------------------------------------------------------- AI, staff, opt-out
-
-
-def test_free_question_goes_to_ai_with_property_facts(world):
-    w = world
-    say(w, "Hi")
-    tap(w, "lang:en")
-    tap(w, "menu:ask")
-    w.llm.script.append(MockLLM.text("Check-in is from 14:00."))
-    assert say(w, "What time is check-in?") == "answered"
-    assert w.wa.texts()[-1] == "Check-in is from 14:00."
-    system = w.llm.calls[0].system
-    assert "14:00" in system and "Free cancellation 7 days" in system and "Deluxe" in system
-
-
-def test_question_in_the_middle_of_booking_reprompts_the_step(world):
-    w = world
-    say(w, "Hi")
-    tap(w, "lang:en")
-    tap(w, "menu:book")
-    tap(w, f"prop:{w.p1.id}")
-    w.llm.script.append(MockLLM.text("Yes, pets are welcome."))
-    say(w, "are pets allowed?")
-    assert w.wa.texts()[-1] == "Yes, pets are welcome."
-    assert w.wa.last()[1] == "list" and w.wa.last()[2]["rows"][-1][0] == "d:other"  # date list again
-
-
-def test_ai_failure_falls_back_and_alerts_staff(world):
-    w = world
-    say(w, "Hi")
-    tap(w, "lang:en")
-    tap(w, "menu:ask")
-    w.llm.script.append(LLMError("mock", "down"))
-    say(w, "do you have a pool?")
-    assert "could not answer" in w.wa.texts()[-1]
+# --------------------------------------------------------------------------- staff, opt-out
 
 
 def test_staff_handoff_pauses_chat(world):
     w = world
-    say(w, "Hi")
-    tap(w, "lang:en")
-    assert tap(w, "menu:staff") == "handoff"
+    w.bot.handoff(GUEST, {"lang": "en"}, "guest asked for the team")
     assert w.repo.is_paused(GUEST)[0] and "needs the team" in w.wa.texts(STAFF)[-1]
     before = len(w.wa.to(GUEST))
     assert say(w, "hello?") == "paused"
     assert len(w.wa.to(GUEST)) == before  # the bot stays quiet while staff own the chat
     w.clock.advance(hours=25)
-    assert say(w, "hello again") != "paused"
+    assert say(w, "hello again", GUEST, reply("Hi, how can I help?")) != "paused"
 
 
 def test_stop_and_start(world):
     w = world
-    say(w, "Hi")
-    tap(w, "lang:en")
     assert say(w, "STOP") == "opt_out"
     assert w.repo.get_guest(GUEST).offers_consent is False
     assert say(w, "START") == "opt_in"
 
 
-# --------------------------------------------------------------------------- payments
+def test_paid_message_carries_the_map_link(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    w.bot.mark_paid(booking_id=b.id)
+    paid = next(x for x in w.wa.texts() if "confirmed" in x)
+    assert "Location: https://maps.app.goo.gl/abc" in paid
 
+
+# --------------------------------------------------------------------------- payments
 
 def test_paid_event_confirms_booking_and_alerts_staff(world):
     w = world
-    w.repo.touch_guest(GUEST, w.clock.now(), name="Asha")
-    go_to_confirm(w, rooms=1)
-    tap(w, "ok")
+    hold(w, rooms=1)
     b = w.repo.list_bookings(phone=GUEST)[0]
     assert w.bot.mark_paid(link_id=b.payment_link_id, payment_id="pay_1") == "paid"
     b = w.repo.get_booking(b.id)
     assert b.status == "paid" and b.razorpay_payment_id == "pay_1" and b.paid_at
-    assert "confirmed" in w.wa.texts()[-1] and b.id in w.wa.texts()[-1]
+    confirmed = next(x for x in w.wa.texts() if "confirmed" in x)
+    assert b.id in confirmed and "ID proof" in w.wa.texts()[-1]  # the ID request follows in plain chat
     assert "PAID" in w.wa.texts(STAFF)[-1]
     assert w.bot.mark_paid(link_id=b.payment_link_id) == "already_paid"  # webhook retries are harmless
 
 
 def test_failed_payment_message_has_retry_link_and_template_fallback(world):
     w = world
-    w.repo.touch_guest(GUEST, w.clock.now(), name="Asha")
-    go_to_confirm(w, rooms=1)
-    tap(w, "ok")
+    hold(w, rooms=1)
     b = w.repo.list_bookings(phone=GUEST)[0]
     assert w.bot.payment_failed(booking_id=b.id) == "notified"
     assert "did not go through" in w.wa.texts()[-1] and b.payment_link_url in w.wa.texts()[-1]
@@ -387,9 +425,7 @@ def test_failed_payment_message_has_retry_link_and_template_fallback(world):
 
 def test_hold_expiry_sweep_releases_rooms_and_messages_guest(world):
     w = world
-    w.repo.touch_guest(GUEST, w.clock.now(), name="Asha")
-    go_to_confirm(w, rooms=2)
-    tap(w, "ok")
+    hold(w, rooms=2)
     b = w.repo.list_bookings(phone=GUEST)[0]
     w.clock.advance(minutes=11)
     assert w.bot.sweep() == {"expired": 0, "reminded": 1}  # nudge 4 minutes before the end
@@ -402,9 +438,7 @@ def test_hold_expiry_sweep_releases_rooms_and_messages_guest(world):
 
 def test_paid_after_expiry_with_rooms_gone_needs_refund(world):
     w = world
-    w.repo.touch_guest(GUEST, w.clock.now(), name="Asha")
-    go_to_confirm(w, rooms=2)
-    tap(w, "ok")
+    hold(w, rooms=2)
     b = w.repo.list_bookings(phone=GUEST)[0]
     w.clock.advance(minutes=16)
     w.bot.sweep()
@@ -421,9 +455,7 @@ def _signed(body: bytes, secret: str) -> str:
 
 def test_razorpay_webhook_signature_and_paid(world):
     w = world
-    w.repo.touch_guest(GUEST, w.clock.now(), name="Asha")
-    go_to_confirm(w, rooms=1)
-    tap(w, "ok")
+    hold(w, rooms=1)
     b = w.repo.list_bookings(phone=GUEST)[0]
     services = ResortServices(w.bot.config, w.repo, w.wa, w.pay, w.clock, None, _llm=w.llm)
     app = FastAPI()
@@ -464,7 +496,7 @@ def test_meta_webhook_verify_and_signature(world, monkeypatch):
     assert client.post("/resort/webhook", content=body, headers={"x-hub-signature-256": "sha256=bad"}).status_code == 403
     sig = "sha256=" + _signed(body, "appsecret")
     assert client.post("/resort/webhook", content=body, headers={"x-hub-signature-256": sig}).json() == {"received": 1}
-    assert w.wa.last()[1] == "list"  # language picker sent
+    assert w.wa.last()[1] == "text" and "Where are you looking to stay" in w.wa.last()[2]
 
 
 # --------------------------------------------------------------------------- WhatsApp client / parse
@@ -503,3 +535,50 @@ def test_client_sends_valid_interactive_payloads():
         wa.send_interactive_list(GUEST, "b", "go", [("a", "t", "")] * 11)
     with pytest.raises(ValueError):
         wa.send_reply_buttons(GUEST, "b", [("a", "t")] * 4)
+
+
+# --------------------------------------------------------------------------- payment help in chat
+
+
+def test_resend_payment_link_while_on_hold(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    w.clock.advance(minutes=5)
+    assert say(w, "link not opening, send again", GUEST, tool("send_payment_link"),
+               reply("Sure, sending it again.")) == "payment_link"
+    last = w.wa.texts()[-1]
+    assert b.payment_link_url in last and "10 minutes" in last and "UPI" in last
+
+
+def test_resend_refused_after_the_hold_ran_out(world):
+    w = world
+    hold(w, rooms=1)
+    w.clock.advance(minutes=16)
+    say(w, "send the link", GUEST, tool("send_payment_link"), reply("That booking expired, shall we book again?"))
+    assert "no booking is waiting for payment" in last_tool(w)["error"]
+    assert "https://rzp.io" not in w.wa.texts()[-1]
+
+
+def test_system_prompt_explains_payment_methods_and_stuck_payments(world):
+    w = world
+    say(w, "can I pay by gpay?", GUEST, reply("Yes, UPI works."))
+    system = w.llm.calls[0].system
+    assert "UPI (GPay, PhonePe, Paytm" in system and "money was deducted" in system and "Never promise a refund" in system
+
+
+def test_razorpay_link_takes_all_methods_and_returns_the_guest_to_whatsapp():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "plink_1", "short_url": "https://rzp.io/i/abc"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    from app.resort.payments import RazorpayPayments
+    link = RazorpayPayments("k", "s", http=http, callback_url="https://wa.me/919800000000").create_payment_link(
+        4000, "RB-1", "Asha", GUEST, "Stay", 1790000000)
+    assert link.url == "https://rzp.io/i/abc"
+    body = seen[0]
+    assert body["amount"] == 400000 and body["callback_url"] == "https://wa.me/919800000000"
+    assert body["callback_method"] == "get" and "upi_link" not in body  # not UPI-only: cards and net banking too

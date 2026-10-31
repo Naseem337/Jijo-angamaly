@@ -23,6 +23,7 @@ def new_id(prefix: str) -> str:
 class Property:
     name: str
     city: str = ""
+    place: str = ""  # how guests say it: "Kanthalloor, Munnar". Shown in the bot's first question
     description: str = ""
     checkin_time: str = "14:00"
     checkout_time: str = "11:00"
@@ -32,6 +33,8 @@ class Property:
     map_url: str = ""
     photo_urls: list[str] = field(default_factory=list)
     staff_numbers: list[str] = field(default_factory=list)  # E.164, get the handoff / booking alerts
+    contact_numbers: list[str] = field(default_factory=list)  # E.164, the owner's numbers the bot gives to guests
+    extra_bed_rate: int = 0  # per bed per night, rupees; 0 = no extra beds offered
     highlights: list[str] = field(default_factory=list)  # short selling points: "Infinity pool", "Mountain view"
     policies: str = ""  # cancellation / refund / house rules, in the resort's own words
     gstin: str = ""  # shown on invoices
