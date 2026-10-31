@@ -60,7 +60,7 @@ NO_OFFER = re.compile(
     r"\bno offers?\b|\bno discounts?\b|offers?\s+(?:\w+\s+)?(?:ഒന്നും|எதுவும்|kuch|nahi|nahin|illa|illai|ilya|ilai)\b|"
     r"(?:ഓഫർ|ஆஃபர்|ऑफर|offers?)\s*(?:ഇപ്പോൾ\s*)?(?:ഒന്നും\s*)?(?:ഇല്ല|இல்ல|இல்லை|नहीं|illa|illai|nahi|ilya)|"
     r"(?:cannot|can't|cant|not able to|unable to) (?:reduce|decrease|lower)|കുറയ്ക്കാൻ (?:പറ്റില്ല|കഴിയില്ല)|"
-    r"குறைக்க முடியாது|कम नहीं (?:कर सकते|हो सकता)|kurakkan pattilla|kuraikka mudiyaadhu|discount nahi", re.IGNORECASE)
+    r"குறைக்க முடியாது|कम नहीं (?:कर सकत[ेा]|हो सकता)|kurakkan pattilla|kuraikka mudiyaadhu|discount nahi", re.IGNORECASE)
 ASKS_REDUCE = re.compile(r"reduc|discount|lower|less|last price|final price|negotiat|bargain|best price|kurach|kurakk|kuraikk|"
                          r"kam kar|chhoot|குறை|കുറ|कम कर|छूट|ഡിസ്കൗണ്ട്|തള്ള", re.IGNORECASE)
 
@@ -215,6 +215,9 @@ class ChatMixin:
             "languages in one reply; plain English words like room, booking, check-in, payment and price are fine "
             "inside Manglish. Example: guest 'Alleppey il room undo' -> 'Und sir, Alleppey il rooms und. Ethra "
             "aalkkaar und, ethra divasam?'\n"
+            "- Hindi typed in English letters ('kitne log', 'room milega', 'theek hai') is Hinglish: answer in Hinglish "
+            "(Hindi in English letters), NEVER in Malayalam or Manglish. Tamil in English letters ('irukka', 'venum') "
+            "is Tanglish: answer in Tanglish.\n"
             "- The booking summary is sent automatically, always in English; your own lines stay in the guest's "
             "language.\n"
             "- Pass the language style in the `language` field when you call check_availability.\n\n"
@@ -399,8 +402,10 @@ class ChatMixin:
             self._text(phone, t("ai_down", st.get("lang", "en")))
             self.alert_staff(f"Bot could not answer a message from {phone}: {text[:200]}", st.get("bk", {}).get("property_id"))
             return "ai_down"
-        if ctx.summary_message:  # the English summary first, then the AI's one short line asking to confirm
-            self._text(phone, ctx.summary_message)
+        if ctx.summary_message and ctx.summary_message != st.get("last_summary"):  # never the same summary twice
+            st["last_summary"] = ctx.summary_message
+            self._save(phone, st)
+            self._text(phone, ctx.summary_message)  # the English summary first, then the AI's short line to confirm
         guest = self.repo.get_guest(phone)
         clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
         self._text(phone, self._ease_sir(phone, clean))
