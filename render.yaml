@@ -20,6 +20,8 @@ services:
         sync: false
       - key: RESORT_WHATSAPP_VERIFY_TOKEN
         sync: false
+      - key: RESORT_OWNER_EMAIL
+        sync: false
       - key: RESORT_OWNER_PASSWORD
         sync: false
       - key: SESSION_SECRET

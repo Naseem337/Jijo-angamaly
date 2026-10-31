@@ -12,7 +12,7 @@ import re
 import secrets
 from datetime import date
 
-from app.resort.db import ResortRepo, hash_password
+from app.resort.db import ResortRepo, check_password, hash_password
 from app.resort.models import DashboardUser, Property, RateRule, RoomType
 
 ALLEPPEY = dict(
@@ -37,7 +37,7 @@ ROOMS = [
     ("Deluxe Room", 3, 2, 2, 4, 4500, 5500),
     ("Family Suite", 2, 4, 2, 6, 7500, 9000),
 ]
-OWNER_EMAIL = "owner@resort.local"
+DEFAULT_OWNER_EMAIL = "owner@resort.local"
 # Stand-in wording that an older version wrote into descriptions and room names
 OLD_MARK = re.compile(r"\s*\(placeholder\)|placeholder( description: replace with the real one\.)?", re.IGNORECASE)
 
@@ -102,12 +102,18 @@ def seed(repo: ResortRepo) -> list[str]:
                 out.append(f"{p.name}: old stand-in text removed, switched off until its data is entered.")
         if not out:
             out.append("Properties already exist: nothing seeded.")
-    if repo.get_user(OWNER_EMAIL) is None:
-        given = os.environ.get("RESORT_OWNER_PASSWORD")
+    email = (os.environ.get("RESORT_OWNER_EMAIL") or DEFAULT_OWNER_EMAIL).strip().lower()
+    given = os.environ.get("RESORT_OWNER_PASSWORD")
+    owner = repo.get_user(email)
+    if owner is None:
         password = given or secrets.token_urlsafe(9)
-        repo.save_user(DashboardUser(OWNER_EMAIL, hash_password(password), name="Owner", role="owner"))
-        out.append(f"Owner login: {OWNER_EMAIL}  password: {'(from RESORT_OWNER_PASSWORD)' if given else password}"
+        repo.save_user(DashboardUser(email, hash_password(password), name="Owner", role="owner"))
+        out.append(f"Owner login: {email}  password: {'(from RESORT_OWNER_PASSWORD)' if given else password}"
                    "  (shown once; change it in the dashboard)")
+    elif given and not check_password(given, owner.password_hash):  # the setting is the source of truth
+        owner.password_hash = hash_password(given)
+        repo.save_user(owner)
+        out.append(f"Owner password for {email} updated from RESORT_OWNER_PASSWORD.")
     else:
         out.append("Owner user already exists.")
     return out

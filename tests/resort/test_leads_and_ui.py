@@ -138,3 +138,18 @@ def test_fresh_seed_has_no_stand_in_wording_and_only_alleppey_is_open(tmp_path):
     kanthalloor = next(p for p in repo.list_properties(active_only=False) if not p.active)
     texts = [kanthalloor.description] + [r.name + r.description for r in repo.list_room_types(kanthalloor.id, active_only=False)]
     assert not any("placeholder" in t.lower() for t in texts)
+
+
+def test_owner_login_comes_from_the_settings(tmp_path, monkeypatch):
+    from app.resort.db import check_password
+    repo = ResortRepo(tmp_path / "r.sqlite3")
+    monkeypatch.setenv("RESORT_OWNER_EMAIL", "Manager@Gmail.com")
+    monkeypatch.setenv("RESORT_OWNER_PASSWORD", "1234")
+    assert any("manager@gmail.com" in line for line in seed.seed(repo))
+    user = repo.get_user("manager@gmail.com")
+    assert user.role == "owner" and check_password("1234", user.password_hash)
+    assert repo.get_user("owner@resort.local") is None
+    monkeypatch.setenv("RESORT_OWNER_PASSWORD", "5678")  # changing the setting changes the login at the next start
+    assert any("updated" in line for line in seed.seed(repo))
+    assert check_password("5678", repo.get_user("manager@gmail.com").password_hash)
+    assert "Owner user already exists." in seed.seed(repo)
