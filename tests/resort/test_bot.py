@@ -1038,3 +1038,26 @@ def test_the_prompt_never_lets_the_ai_assume_the_guest_count(world):
     say(w, "room und?", GUEST, reply("Und sir. Ethra per?"))
     assert "Never assume the number of persons, rooms or nights" in w.llm.calls[0].system
     assert "never assume 1" in str(w.llm.calls[0].tools[0].parameters)
+
+
+def test_discount_before_payment_makes_a_new_total_a_new_link_and_closes_the_old_one(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    old_link, old_total, old_advance = b.payment_link_id, b.total, b.advance
+    assert w.bot.reissue_link(b, discount=1000, by="owner@x.com") is None
+    b = w.repo.get_booking(b.id)
+    assert b.total == old_total - 1000 and b.advance == round(b.total * 50 / 100) and b.advance != old_advance
+    assert b.payment_link_id != old_link and old_link in w.pay.cancelled
+    assert w.pay.created[-1]["amount"] == b.advance and "Discount Rs 1000" in b.notes
+    text = w.wa.texts()[-1]
+    assert f"₹{b.total:,}" in text and b.payment_link_url in text and "special price" in text
+    assert w.bot.reissue_link(b, discount=b.total) and w.bot.reissue_link(b, discount=0) is None  # too big refused; plain resend works
+
+
+def test_no_discount_after_payment(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    w.bot.mark_paid(booking_id=b.id)
+    assert "waiting for payment" in w.bot.reissue_link(w.repo.get_booking(b.id), discount=500)

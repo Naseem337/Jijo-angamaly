@@ -42,3 +42,6 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 ## Dashboard
 - Login manager@gmail.com / 1234 (env vars `RESORT_OWNER_EMAIL`, `RESORT_OWNER_PASSWORD`).
 - Simple "Today" home, guests saved as WhatsApp leads (with export), one date-range picker for collections, only needed settings, no "placeholder" wording, works on phone, tablet and laptop.
+- Installable app (PWA) for the owner's phone: open the dashboard in Chrome (Android) or Safari (iPhone), then Add to Home screen.
+- No greeting banner on the home page. The "Waiting for payment" card shows only when a booking is waiting.
+- Discount before payment: when a guest negotiates and talks to the owner, the owner opens the booking (Waiting for payment) and taps "Give discount". The total and advance are recalculated, the old payment link is closed, and the guest gets the new link on WhatsApp.

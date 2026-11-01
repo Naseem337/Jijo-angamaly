@@ -13,7 +13,9 @@ from app.resort import seed
 from app.resort.dashboard.deps import BASE, get_repo, now_utc
 from app.resort.db import ResortRepo
 from app.resort.models import Guest, Property, RoomType
-from tests.resort.test_ops import env, login, make, no_whatsapp  # noqa: F401  (fixtures)
+from app.resort.dashboard import integrations
+from fastapi.testclient import TestClient
+from tests.resort.test_ops import env, login, make, no_whatsapp, post  # noqa: F401  (fixtures)
 
 PHONE = "+919847012345"
 
@@ -78,12 +80,15 @@ def test_guest_page_shows_the_latest_enquiry(env):
 
 def test_home_is_the_simple_front_desk_view(env):
     repo, app, (p1, _p2, rt1, _rt2) = env
-    make(repo, p1, rt1, status="hold", paid=0)
+    held = make(repo, p1, rt1, status="hold", paid=0)
+    held.hold_expires_at = now_utc() + timedelta(minutes=10)
+    repo.save_booking(held)
     client, _ = login(app)
     home = client.get(f"{BASE}/").text
     for want in ("Arrivals today", "Departures today", "In the house", "Occupancy tonight", "Collected today",
-                 "Waiting for payment", "Next 14 days"):
+                 "Waiting for payment", "Give discount", "Next 14 days"):
         assert want in home, want
+    assert "Good morning" not in home and "Good afternoon" not in home and "Good evening" not in home and "at a glance" not in home
     assert home.count("New booking") == 1  # one button, not two
     for gone in ("Open chats", "Chats needing a human", "Money collected, by how it was paid", "all time"):
         assert gone not in home, gone
@@ -159,5 +164,42 @@ def test_pages_link_a_versioned_stylesheet_so_browsers_never_show_an_old_design(
     _repo, app, _ = env
     client, _ = login(app)
     home = client.get(f"{BASE}/").text
-    assert "static/app.css?v=" in home and "static/app.js?v=" in home and "Good " in home and "🌴" in home
+    assert "static/app.css?v=" in home and "static/app.js?v=" in home and "🌴" in home
     assert client.get(f"{BASE}/static/app.css").headers["cache-control"] == "no-cache"
+
+
+def test_home_hides_the_waiting_for_payment_card_when_nothing_is_waiting(env):
+    _repo, app, _ = env
+    client, _ = login(app)
+    assert "Waiting for payment" not in client.get(f"{BASE}/").text and "Nothing waiting" not in client.get(f"{BASE}/").text
+
+
+def test_the_dashboard_is_an_installable_app(env):
+    _repo, app, _ = env
+    client, _ = login(app)
+    manifest = client.get(f"{BASE}/manifest.webmanifest")
+    data = manifest.json()
+    assert data["display"] == "standalone" and data["start_url"] == f"{BASE}/" and data["scope"] == f"{BASE}/"
+    sizes = {i["sizes"] for i in data["icons"]}
+    assert {"192x192", "512x512"} <= sizes
+    for icon in data["icons"]:
+        assert client.get(icon["src"]).content[1:4] == b"PNG"
+    sw = client.get(f"{BASE}/sw.js")
+    assert sw.status_code == 200 and "fetch" in sw.text and sw.headers["content-type"].startswith("text/javascript")
+    login_page = TestClient(app).get(f"{BASE}/login").text  # even the sign-in page can be installed
+    assert 'rel="manifest"' in login_page and "serviceWorker" in login_page and "apple-touch-icon" in login_page
+
+
+def test_owner_gives_a_discount_before_payment_and_the_guest_gets_a_new_link(env, monkeypatch):
+    repo, app, (p1, _p2, rt1, _rt2) = env
+    b = make(repo, p1, rt1, status="hold", paid=0)
+    seen = {}
+
+    def fake(booking, discount=0, by=""):
+        seen.update(discount=discount, by=by)
+        return None
+    monkeypatch.setattr(integrations, "resend_payment_link", fake)
+    client, token = login(app)
+    assert "Give discount" in client.get(f"{BASE}/bookings/{b.id}").text
+    post(client, token, f"/bookings/{b.id}/action", action="discount", discount="1500")
+    assert seen == {"discount": 1500, "by": "owner@x.com"}

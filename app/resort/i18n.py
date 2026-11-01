@@ -46,6 +46,10 @@ S: dict[str, dict[str, str]] = {
                 'ബുക്കിംഗ് ഉറപ്പിക്കാൻ {minutes} മിനിറ്റിനുള്ളിൽ ₹{advance} പേയ്മെന്റ് പൂർത്തിയാക്കൂ. UPI (GPay, PhonePe, Paytm), കാർഡ്, നെറ്റ് ബാങ്കിംഗ് എല്ലാം ഉപയോഗിക്കാം:\n{url}\n\nബുക്കിംഗ് ID: {id}',
                 'முன்பதிவை உறுதிசெய்ய {minutes} நிமிடங்களுக்குள் ₹{advance} கட்டணத்தை முடிக்கவும். UPI (GPay, PhonePe, Paytm), கார்டு, நெட் பேங்கிங் அனைத்தும் பயன்படுத்தலாம்:\n{url}\n\nமுன்பதிவு ID: {id}',
                 'बुकिंग कन्फर्म करने के लिए {minutes} मिनट में ₹{advance} का पेमेंट पूरा करें। UPI (GPay, PhonePe, Paytm), कार्ड और नेट बैंकिंग सब चलेगा:\n{url}\n\nबुकिंग ID: {id}'),
+    "discount": _t("Good news: the owner has given you a special price. Your new total is ₹{total}, and the advance to pay now is ₹{advance}.",
+                   "ശുഭവാർത്ത: ഉടമ നിങ്ങൾക്ക് പ്രത്യേക വില അനുവദിച്ചിട്ടുണ്ട്. പുതിയ ആകെ തുക ₹{total}, ഇപ്പോൾ അടയ്ക്കേണ്ട അഡ്വാൻസ് ₹{advance}.",
+                   "நல்ல செய்தி: உரிமையாளர் உங்களுக்கு சிறப்பு விலை வழங்கியுள்ளார். புதிய மொத்தம் ₹{total}, இப்போது செலுத்த வேண்டிய முன்பணம் ₹{advance}.",
+                   "खुशखबरी: मालिक ने आपको खास कीमत दी है। नया कुल ₹{total} है और अभी देने वाला एडवांस ₹{advance} है।"),
     "pay_failed_link": _t("We could not create the payment link just now. Our team will contact you shortly.",
                           "പേയ്മെന്റ് ലിങ്ക് ഇപ്പോൾ ഉണ്ടാക്കാനായില്ല. ടീം ഉടൻ ബന്ധപ്പെടും.",
                           "கட்டண இணைப்பை இப்போது உருவாக்க முடியவில்லை. எங்கள் குழு விரைவில் தொடர்புகொள்ளும்.",
@@ -150,6 +154,7 @@ S.update({
 
 # Manglish (Malayalam in English letters) for the fixed messages. Keys not listed here fall back to English.
 MN = {
+    "discount": "Nalla vaartha: owner ningalkku special price tharunnu. Puthiya total ₹{total}, ippol pay cheyyenda advance ₹{advance}.",
     "greet_ask": "{hi}! Evide thaamasikkaan aanu nokkunnath: {places}?",
     "greet_one": "{hi}! {place}-il stay aanu nokkunnath alle?",
     "or": "allenkil",

@@ -57,6 +57,7 @@
   {% if b.status not in ('cancelled', 'expired', 'failed') and f.balance > 0 %}
     <button type="button" class="btn primary" data-open="pay-dialog">{{ icon('cash') }} {{ 'Record balance payment' if b.paid_amount else 'Record payment' }}</button>
   {% endif %}
+  {% if b.status == 'hold' and not b.paid_amount %}<button type="button" class="btn" data-open="discount-dialog">🏷️ Give discount</button>{% endif %}
   {% if b.status in ('hold', 'expired', 'failed') %}{{ act('resend_link', 'Resend payment link') }}{% endif %}
   {% if left_to_refund > 0 and b.status in ('cancelled', 'checked_in', 'checked_out') %}
     <button type="button" class="btn" data-open="refund-dialog">Record refund</button>
@@ -136,6 +137,18 @@
     <div class="modal-actions"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save payment</button></div>
   </form>
 </dialog>
+
+{% if b.status == 'hold' and not b.paid_amount %}
+<dialog id="discount-dialog" class="modal">
+  <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action" class="modal-body">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="discount">
+    <div class="modal-head"><h3>Give a discount</h3><button type="button" class="btn ghost sm" data-close aria-label="Close">{{ icon('x') }}</button></div>
+    <label class="field"><span>Discount (₹ off the total of {{ b.total|rupees }})</span>
+      <input type="number" name="discount" min="1" max="{{ b.total - 1 }}" required></label>
+    <p class="muted small-note">The advance is worked out again on the new total. The old payment link stops working and the guest gets the new one on WhatsApp.</p>
+    <div class="modal-actions"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Give discount and send link</button></div>
+  </form>
+</dialog>
+{% endif %}
 
 <dialog id="cancel-dialog" class="modal">
   <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/cancel" class="modal-body">{{ csrf_field(csrf) }}

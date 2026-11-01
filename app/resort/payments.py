@@ -37,6 +37,8 @@ class Payments(Protocol):
     def create_payment_link(self, amount_rupees: int, booking_id: str, name: str, phone: str,
                             description: str, expire_by: int) -> PaymentLink: ...
 
+    def cancel_link(self, link_id: str) -> None: ...
+
 
 class RazorpayPayments:
     def __init__(self, key_id: str, key_secret: str, *, http: httpx.Client | None = None,
@@ -71,6 +73,13 @@ class RazorpayPayments:
         data = resp.json()
         return PaymentLink(data["id"], data["short_url"])
 
+    def cancel_link(self, link_id: str) -> None:
+        """Close a link so it can no longer be paid (used when the price changes). Already closed or paid is fine."""
+        try:
+            self._http.post(f"{API}/payment_links/{link_id}/cancel", auth=self._auth)
+        except httpx.HTTPError as exc:
+            raise PaymentError(f"Razorpay request failed: {exc!r}") from exc
+
     def link_status(self, link_id: str) -> dict[str, Any]:
         """Ask Razorpay whether this link has been paid, so a missed webhook never leaves a guest unconfirmed."""
         try:
@@ -101,6 +110,9 @@ class MockPayments:
         self.created: list[dict[str, Any]] = []
         self.paid_links: dict[str, str] = {}  # link id -> payment id, for tests
         self.failed_links: dict[str, str] = {}  # link id -> failed payment id, for tests
+
+    def cancel_link(self, link_id: str) -> None:
+        self.cancelled = [*getattr(self, "cancelled", []), link_id]
 
     def link_status(self, link_id: str) -> dict[str, Any]:
         return {"paid": link_id in self.paid_links, "payment_id": self.paid_links.get(link_id, ""),

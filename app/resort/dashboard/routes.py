@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 
@@ -86,6 +87,26 @@ def static_file(path: str):
     if root not in target.parents or not target.is_file():
         raise HTTPException(404)
     return FileResponse(target, headers={"Cache-Control": "no-cache"})  # always ask whether it changed
+
+
+@router.get("/manifest.webmanifest")
+def manifest():
+    """Makes the dashboard installable on a phone's home screen (PWA)."""
+    data = {
+        "name": "Resort Desk", "short_name": "Resort Desk", "description": "Bookings, guests and payments for your resort",
+        "id": f"{BASE}/", "start_url": f"{BASE}/", "scope": f"{BASE}/", "display": "standalone", "orientation": "portrait",
+        "background_color": "#ffffff", "theme_color": "#7c5cff",
+        "icons": [{"src": f"{BASE}/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+                  {"src": f"{BASE}/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
+        "shortcuts": [{"name": "New booking", "url": f"{BASE}/bookings/new"}, {"name": "Calendar", "url": f"{BASE}/calendar"}],
+    }
+    return Response(json.dumps(data), media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/sw.js")
+def service_worker():
+    """Served from the dashboard root so it controls every dashboard page."""
+    return FileResponse(HERE / "static" / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/login")
@@ -405,8 +426,11 @@ async def booking_action(booking_id: str, request: Request, auth: Auth = Depends
             raise redirect(toast_url(url, f"!{exc}")) from None
         raise redirect(toast_url(url, "Booking cancelled"))
     if action == "resend_link":
-        error = integrations.resend_payment_link(b)
+        error = integrations.resend_payment_link(b, by=auth.user.email)
         raise redirect(toast_url(url, f"!{error}" if error else "Payment link sent"))
+    if action == "discount":  # before the guest pays: new total, new advance, new link sent on WhatsApp
+        error = integrations.resend_payment_link(b, discount=_int(f, "discount", 0), by=auth.user.email)
+        raise redirect(toast_url(url, f"!{error}" if error else "Discount given. The guest has the new payment link"))
     if action == "note":
         if text := f.get("note", "").strip():
             stamp = datetime.now(IST).strftime("%d %b %H:%M")

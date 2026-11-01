@@ -28,7 +28,7 @@ from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
 from app.resort.idproof import IdProofMixin
 from app.resort.models import Booking, ChatMessage as Chat
 from app.resort.paying import apply_payment, method_label
-from app.resort.payments import Payments
+from app.resort.payments import PaymentError, Payments
 from app.whatsapp.client import WhatsAppClient, WhatsAppError
 from app.whatsapp.parse import InboundMessage
 
@@ -249,6 +249,49 @@ class BookingBot(IdProofMixin, ChatMixin):
         self.repo.save_booking(b)
         self.announce_paid(b)
         return "paid"
+
+    def reissue_link(self, b: Booking, *, discount: int = 0, by: str = "") -> str | None:
+        """Give an unpaid booking a fresh payment link (optionally after the owner took `discount` rupees off the total)
+        and send it to the guest. The old link is closed so it can never be paid at the old amount. Returns an error
+        text for staff, or None."""
+        if b.status != "hold" or b.paid_amount:
+            return "Only a booking that is waiting for payment can get a new link or a discount"
+        prop, rt = self.repo.get_property(b.property_id), self.repo.get_room_type(b.room_type_id)
+        now = self.clock.now()
+        total, advance = b.total, b.advance
+        if discount:
+            if not 0 < discount < b.total:
+                return "The discount must be more than 0 and less than the total"
+            total = b.total - discount
+            advance = round(total * (prop.advance_pct if prop else 50) / 100)
+        hold = timedelta(minutes=self.config.hold_minutes)
+        try:
+            link = self.payments.create_payment_link(
+                advance, b.id, b.guest_name, b.guest_phone,
+                f"{prop.name if prop else ''}: {rt.name if rt else ''} x {b.rooms}, {fmt_date(b.check_in)} to {fmt_date(b.check_out)}",
+                int((now + max(hold, timedelta(minutes=16))).timestamp()))
+        except PaymentError as exc:
+            return f"Could not create the payment link: {exc}"
+        if b.payment_link_id:
+            try:
+                self.payments.cancel_link(b.payment_link_id)
+            except PaymentError as exc:
+                log.warning("Could not close the old link of %s: %s", b.id, exc)
+        if discount:
+            stamp = to_ist(now).strftime("%d %b %H:%M")
+            b.notes = (b.notes + f"\n[{stamp} {by}] Discount Rs {discount}: total Rs {b.total} -> Rs {total}").strip()
+            b.total, b.advance = total, advance
+        b.payment_link_id, b.payment_link_url = link.id, link.url
+        b.hold_expires_at = now + hold
+        self.repo.save_booking(b)
+        lang = b.language if b.language in FIXED_LANGS else "en"
+        minutes = max(1, int(hold.total_seconds() // 60))
+        text = t("pay", lang, id=b.id, minutes=minutes, advance=f"{b.advance:,}", url=link.url)
+        if discount:
+            text = t("discount", lang, total=f"{b.total:,}", advance=f"{b.advance:,}") + "\n\n" + text
+        if not self._notify_guest(b, text, "pay", self._params(b)):
+            return "The link is ready, but the guest could not be messaged on WhatsApp (outside the 24 hour window)"
+        return None
 
     def announce_paid(self, b: Booking) -> None:
         """Tell the guest their booking is confirmed and alert the staff (online or desk payment)."""

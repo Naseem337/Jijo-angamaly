@@ -2,7 +2,7 @@
 {% from "macros.html" import page_head, empty, icon %}
 {% block title %}Today · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head(greeting ~ ", " ~ ((user.name or user.email.split("@")[0])|capitalize) ~ " 👋", "Here is " ~ today.strftime('%A, %d %B') ~ " at a glance") %}
+{% call page_head("Today", today.strftime('%A, %d %B')) %}
 <a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a>
 {% endcall %}
 <div class="stats">
@@ -21,10 +21,9 @@
     {% else %}{{ empty("No departures today", "cal") }}{% endfor %}</section>
 </div>
 <div class="grid2">
-  <section class="card"><h3>Waiting for payment</h3>
-    {% for b in holds[:6] %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ b.check_in.strftime('%d %b') }} · {{ b.advance|rupees }} advance</span></a>
-    {% else %}{{ empty("Nothing waiting for payment", "cash") }}{% endfor %}
-    {% if holds|length > 6 %}<a class="mini" href="{{ BASE }}/bookings?status=hold">See all {{ holds|length }}</a>{% endif %}</section>
+  {% if holds %}<section class="card"><h3>Waiting for payment</h3>
+    {% for b in holds[:6] %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ b.check_in.strftime('%d %b') }} · {{ b.advance|rupees }} advance · Give discount</span></a>{% endfor %}
+    {% if holds|length > 6 %}<a class="mini" href="{{ BASE }}/bookings?status=hold">See all {{ holds|length }}</a>{% endif %}</section>{% endif %}
   <section class="card"><h3>Next 14 days</h3>
   {% for p, days in occ %}
   <div class="occ">{% if occ|length > 1 %}<div class="occ-name">{{ p.name }}</div>{% endif %}
