@@ -1011,8 +1011,10 @@ def test_a_plain_offers_question_never_gets_a_no_offer_answer(world):
     say(w, "offer undo?", GUEST, reply("Sorry sir, no offers right now."), reply("Dates parayamo sir? Appol price parayam."))
     assert w.wa.texts() == ["Dates parayamo sir? Appol price parayam."]
     assert "without saying there is no offer" in w.llm.calls[1].messages[-1].content
-    say(w, "can you reduce the price a little?", GUEST, reply("Sir, the price is fair for a beachfront stay; I cannot reduce it."))
-    assert w.wa.texts()[-1].endswith("I cannot reduce it.") and len(w.llm.calls) == 3  # a real haggle: no rewrite
+    say(w, "can you reduce the price a little?", GUEST, reply("Sorry sir, I cannot reduce it."),
+        reply("Sir, you get a beachfront room with breakfast at this price; guests love it."))
+    assert w.wa.texts()[-1].startswith("You get a beachfront")  # a haggle is convinced, never refused
+    assert "convince the guest" in w.llm.calls[3].messages[-1].content
 
 
 def test_sir_is_used_now_and_then_not_in_every_message(world):

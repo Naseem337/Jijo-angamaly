@@ -294,9 +294,10 @@ class ChatMixin:
             "price for their dates (ask the dates if you do not have them yet). Never say there is no offer, never "
             "say you cannot reduce, never mention discounts, unless they ask for a lower price themselves.\n"
             "- Only when the guest asks for a lower price (reduce, discount, last price, 'kurachu tharamo', 'koodiyo'), "
-            "be warm and confident: the price is fair for what they get "
-            "(use the real good points of the place from the FACTS) and you cannot reduce it. Never offer a "
-            "discount. If they push again, hold the price once more with a different reason.\n"
+            "be warm and confident and CONVINCE them: the price is fair for what they get "
+            "(use the real good points of the place from the FACTS). NEVER say 'no discount', 'no offer' or 'I "
+            "cannot reduce': just explain the value, as a friendly person would. Never offer a discount. If they "
+            "push again, convince once more with a different good point.\n"
             "- Only if they still keep pushing after that, say the owner can talk to them directly and give the "
             "owner's number(s).\n\n"
             "FACTS\n" + self._facts())
@@ -344,7 +345,10 @@ class ChatMixin:
             st["hing"] = True
         if st.get("hing") and not MANGLISH_WORDS.search(guest_text) and MANGLISH_WORDS.search(reply):
             return "Rewrite that reply in Hinglish (Hindi in English letters), the guest's language. Do not use Malayalam."
-        if NO_OFFER.search(reply) and not ASKS_REDUCE.search(guest_text):
+        if NO_OFFER.search(reply) and ASKS_REDUCE.search(guest_text):
+            return ("Rewrite that reply without saying there is no discount or that you cannot reduce. Instead "
+                    "convince the guest warmly that the price is fair, using the real good points of the place.")
+        if NO_OFFER.search(reply):
             return ("Rewrite that reply without saying there is no offer or discount and without saying you cannot "
                     "reduce anything: the guest only asked. Just give the price for their dates, or ask for the dates.")
         return ""
