@@ -1,6 +1,6 @@
 /* Resort Desk service worker: lets the app install and open fast. Pages always come from the server
    (bookings change all the time); only the look (css, js, icons) is kept for offline and speed. */
-const CACHE = "resort-desk-v1";
+const CACHE = "resort-desk-v2";
 const SHELL = ["static/app.css", "static/app.js", "static/icon-192.png", "static/icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -22,11 +22,10 @@ self.addEventListener("fetch", (e) => {
       "<h2>You are offline</h2><p>Check your internet and open the app again.</p>", { headers: { "Content-Type": "text/html" } })));
     return;
   }
-  if (url.pathname.includes("/static/")) {  // look and feel: fast from the cache, refreshed in the background
-    e.respondWith(caches.open(CACHE).then(async (c) => {
-      const hit = await c.match(req, { ignoreSearch: true });
-      const fresh = fetch(req).then((r) => { if (r.ok) c.put(req, r.clone()); return r; }).catch(() => hit);
-      return hit || fresh;
-    }));
+  if (url.pathname.includes("/static/")) {  // look and feel: always the newest from the server, the saved copy only when offline
+    e.respondWith(fetch(req).then((r) => {
+      if (r.ok) { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+      return r;
+    }).catch(() => caches.match(req, { ignoreSearch: true })));
   }
 });
