@@ -82,10 +82,24 @@ var closeDrawer = function () {};
   function menu(open) { if (sb) sb.classList.toggle('open', open); if (scrim) scrim.classList.toggle('show', open); }
   if (mb) mb.addEventListener('click', function () { menu(!sb.classList.contains('open')); });
   if (scrim) scrim.addEventListener('click', function () { menu(false); });
-  // "/" jumps to the search box, like in Frappe.
+  // light / dark, the collapsed menu and the user dropdown (the choices are remembered on this device)
+  var root = document.documentElement, tt = document.getElementById('theme-toggle'), cb = document.getElementById('collapse-btn');
+  if (tt) tt.addEventListener('click', function () {
+    var dark = root.dataset.theme !== 'dark'; root.dataset.theme = dark ? 'dark' : 'light';
+    try { localStorage.setItem('rd-theme', dark ? 'dark' : 'light'); } catch (e) {}
+  });
+  if (cb) cb.addEventListener('click', function () {
+    var on = root.classList.toggle('collapsed'); try { localStorage.setItem('rd-collapsed', on ? '1' : '0'); } catch (e) {}
+  });
+  var ub = document.getElementById('user-btn'), um = document.getElementById('user-menu');
+  if (ub && um) {
+    ub.addEventListener('click', function (e) { e.stopPropagation(); um.hidden = !um.hidden; ub.setAttribute('aria-expanded', String(!um.hidden)); });
+    document.addEventListener('click', function () { um.hidden = true; ub.setAttribute('aria-expanded', 'false'); });
+  }
+  // "/" or Ctrl/Cmd+K jumps to the search box.
   document.addEventListener('keydown', function (e) {
     var t = e.target, typing = t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
-    if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey) {
+    if ((e.key === '/' && !typing && !e.metaKey && !e.ctrlKey) || ((e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey))) {
       var s = document.getElementById('global-search'); if (s) { e.preventDefault(); s.focus(); s.select(); }
     }
     if (e.key === 'Escape') { menu(false); closeDrawer(); }

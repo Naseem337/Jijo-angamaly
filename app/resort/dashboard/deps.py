@@ -148,5 +148,13 @@ def page(request: Request, name: str, auth: Auth | None, **ctx):
     if auth:
         ctx.setdefault("side_props", auth.properties(get_repo(), active_only=True))
         ctx.setdefault("cur_prop", current_property(request, auth))
+        try:  # the little "Arriving today" pill in the header
+            from datetime import timedelta
+            day = datetime.now(IST).date()
+            ctx.setdefault("arriving_today", sum(
+                1 for b in get_repo().list_bookings(status="paid", start=day, end=day + timedelta(days=1), limit=500)
+                if b.check_in == day and auth.can_see(b.property_id)))
+        except Exception:  # noqa: BLE001 - a header badge must never break a page
+            ctx.setdefault("arriving_today", 0)
     return templates.TemplateResponse(request, name, {"auth": auth, "user": auth.user if auth else None,
                                                       "csrf": auth.csrf if auth else "", **ctx})
