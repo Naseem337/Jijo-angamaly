@@ -50,9 +50,8 @@
       <button class="menu-btn" id="menu-btn" aria-label="Menu">{{ icon('menu') }}</button>
       <button class="icon-btn collapse-btn" id="collapse-btn" type="button" aria-label="Collapse the menu" title="Collapse the menu">{{ icon('left') }}</button>
       <form class="search" action="{{ BASE }}/search" method="get">
-        {{ icon('search') }}<input id="global-search" name="q" placeholder="Search anything..." value="{{ q if nav == '' else '' }}" autocomplete="off"><kbd>Ctrl K</kbd>
+        {{ icon('search') }}<input id="global-search" name="q" placeholder="Search anything..." value="{{ q if nav == '' else '' }}" autocomplete="off">
       </form>
-      <a class="kpi-pill" href="{{ BASE }}/stay" title="Guests arriving today">Arriving today <b>{{ arriving_today }}</b></a>
       <div class="user-menu">
         <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch between day and night mode" title="Day / Night"><span>☀️</span><span>🌙</span></button>
         <div class="user-drop">

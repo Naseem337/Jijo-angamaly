@@ -205,11 +205,9 @@ def test_owner_gives_a_discount_before_payment_and_the_guest_gets_a_new_link(env
     assert seen == {"discount": 1500, "by": "owner@x.com"}
 
 
-def test_header_shows_how_many_guests_arrive_today_and_has_the_light_dark_switch(env):
-    repo, app, (p1, _p2, rt1, _rt2) = env
-    make(repo, p1, rt1, status="paid", day=0)
-    make(repo, p1, rt1, status="paid", day=4)
+def test_header_is_plain_with_the_day_night_switch(env):
+    _repo, app, _ = env
     client, _ = login(app)
     page = client.get(f"{BASE}/").text
-    assert 'Arriving today <b>1</b>' in page and 'id="theme-toggle"' in page and "Search anything..." in page
-    assert 'class="crumbs"' in page and "Management" in page
+    assert 'id="theme-toggle"' in page and "Search anything..." in page and 'class="crumbs"' in page
+    assert "Arriving today <b>" not in page and "Ctrl K" not in page

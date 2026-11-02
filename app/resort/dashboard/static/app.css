@@ -475,3 +475,21 @@ html[data-theme=dark] .modal::backdrop{background:rgba(0,0,0,.65)}
 @media(max-width:1180px){.kpi-pill{display:none}}
 @media(max-width:860px){.collapse-btn,.theme-toggle span:not(:first-child),.chev{display:none}.theme-toggle span:first-child{opacity:1}.topbar{height:62px;padding:0 14px}
 html.collapsed .sidebar{width:260px}html.collapsed .sidebar nav a span,html.collapsed .sidebar .scope,html.collapsed .nav-label{display:revert}}
+
+/* ---- v6.1: fewer boxes, coloured buttons ---- */
+.btn{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 4px 12px var(--ring)}
+.btn:hover{background:var(--brand-d);border-color:var(--brand-d);color:#fff}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--brand-d);box-shadow:none}.btn.ghost:hover{background:var(--hover);color:var(--brand-d)}
+.btn.danger{background:var(--red);border-color:var(--red);color:#fff}.btn.danger:hover{background:var(--red);filter:brightness(.92);color:#fff}
+.btn.primary{background:var(--brand);border-color:var(--brand)}
+.btn[disabled]{opacity:.55;box-shadow:none}
+.chip-btn{background:var(--brand-soft);border-color:transparent;color:var(--brand-d)}
+/* header: no boxes, one soft user chip */
+.collapse-btn{border:0;background:transparent;width:36px;height:36px}
+.search{border:0}
+.theme-toggle{border:0;background:var(--gray-soft)}
+.user-btn{background:var(--gray-soft);border-radius:999px;padding:4px 14px 4px 4px;gap:10px}.user-btn:hover{background:var(--brand-soft)}
+.user-btn .avatar{width:34px;height:34px}.chev{margin-left:2px}
+/* tiles: round icon, plain arrow, no extra squares */
+.stat-ic,.stat-ic.c1,.stat-ic.c2,.stat-ic.c3,.stat-ic.c4,.stat-ic.c5{border-radius:50%}
+.stat::after{background:none;width:auto;height:auto;border-radius:0;font-size:18px;color:var(--brand)}
