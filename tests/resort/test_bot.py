@@ -1091,3 +1091,58 @@ def test_no_discount_after_payment(world):
     b = w.repo.list_bookings(phone=GUEST)[0]
     w.bot.mark_paid(booking_id=b.id)
     assert "waiting for payment" in w.bot.reissue_link(w.repo.get_booking(b.id), discount=500)
+
+
+def _old_guest(w, *, status="paid", check_in="2026-10-10", check_out="2026-10-12"):
+    """A guest who booked long ago: the old payment link is still in the chat log."""
+    from datetime import date
+
+    from app.resort.models import Booking, ChatMessage as Chat
+    old = datetime(2026, 10, 1, 9, 0, tzinfo=IST)
+    b = Booking(w.p1.id, w.deluxe.id, GUEST, date.fromisoformat(check_in), date.fromisoformat(check_out), 2, 0, 1,
+                8000, 4000, old, guest_name="Asha Menon", language="en")
+    b.hold_expires_at = old
+    w.repo.create_hold(b, old)
+    b.status = status
+    w.repo.save_booking(b)
+    guest = w.repo.touch_guest(GUEST, old)
+    guest.name = "Asha Menon"
+    w.repo.upsert_guest(guest)
+    w.repo.add_chat(Chat(GUEST, "in", "room venam 10 Oct", old, "text"))
+    w.repo.add_chat(Chat(GUEST, "out", "Pay here to confirm: https://rzp.io/old-link-123", old, "text"))
+    return b
+
+
+def test_an_old_payment_link_never_reaches_the_ai_in_a_new_conversation(world):
+    w = world
+    _old_guest(w)
+    say(w, "I want another room for 20 Nov", GUEST, reply("Sure, which place and how many nights?"))
+    call = w.llm.calls[-1]
+    seen = " ".join(m.content for m in call.messages if isinstance(m.content, str))
+    assert "old-link-123" not in seen and "room venam" not in seen  # the 6 h+ gap hides the old chat
+    assert "GUEST RECORDS" in call.system and "2026-10-10 to 2026-10-12" in call.system
+    assert "confirmed" in call.system and "Asha Menon" in call.system
+    assert "NEW conversation" in call.system
+
+
+def test_links_inside_the_current_conversation_are_masked_for_the_ai(world):
+    w = world
+    from app.resort.models import ChatMessage as Chat
+    now = w.clock.now()
+    w.repo.add_chat(Chat(GUEST, "in", "room venam", now, "text"))
+    w.repo.add_chat(Chat(GUEST, "out", "Pay here: https://rzp.io/same-day-link", now, "text"))
+    say(w, "what is the status", GUEST, reply("Let me check."))
+    seen = " ".join(m.content for m in w.llm.calls[-1].messages if isinstance(m.content, str))
+    assert "same-day-link" not in seen and "[link]" in seen
+
+
+def test_the_reply_language_is_decided_from_the_latest_message_only(world):
+    w = world
+    say(w, "Alleppey il room undo", GUEST, reply("Und sir."))
+    assert "REPLY LANGUAGE" in w.llm.calls[-1].system and "Manglish" in w.llm.calls[-1].system.split("REPLY LANGUAGE (")[1]
+    say(w, "Do you have a room for 3 people on 20 Nov for 2 nights?", GUEST, reply("Yes, we do."))
+    tail = w.llm.calls[-1].system.split("REPLY LANGUAGE (")[1]
+    assert "English" in tail and "Manglish" not in tail
+    say(w, "ഒരു റൂം വേണം", GUEST, reply("ശരി."))
+    assert "Malayalam script" in w.llm.calls[-1].system.split("REPLY LANGUAGE (")[1]
+    say(w, "ok", GUEST, reply("[no reply]"))  # a neutral message keeps the guest's own language so far

@@ -48,3 +48,8 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 
 ## Auto-pause when staff reply from the phone (user, 2026-11-07)
 - When staff type a reply to a guest in the WhatsApp Business app (coexistence number), Meta sends an `smb_message_echoes` webhook. `BookingBot.human_replied` logs it as a `staff` chat line and pauses the bot for that guest; every new staff message restarts the 24 h auto-resume. Needs the `smb_message_echoes` webhook field subscribed in the Meta app.
+
+## Language and guest memory (user, 2026-11-11)
+- **One language per reply, the guest's latest message only.** The code decides the reply language each turn (`_language_note`: script, Manglish, Hinglish or English) and puts "REPLY LANGUAGE" at the end of the system prompt. Earlier messages and earlier chats in other languages never decide it. A message that mixes two languages gets the language most of its words are in.
+- **Memory comes from the database, not the old chat.** The AI only sees the current conversation (a 6 h gap starts a new one; `SESSION_GAP`), and every link in the shown chat is masked as `[link]`, so an old payment link can never be copied into a new booking. Earlier bookings are given as a short "GUEST RECORDS" block (dates, place, status, upcoming or past).
+- **Using the records:** paid booking upcoming or in progress and the guest asks for another room: the bot says it can see that booking and asks whether the new room is for the same stay or a different one. Only past stays: a new booking, with at most one warm welcome-back line. An unpaid hold that is still valid is the only payment the bot may mention. Expired, cancelled or failed bookings are never brought up. Warm, short, no forms.

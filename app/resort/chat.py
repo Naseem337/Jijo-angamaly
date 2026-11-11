@@ -23,6 +23,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from app.core.clock import to_ist
+from app.core.language import detect_language, is_language_neutral
 from app.providers.llm import ChatMessage, LLMError, ToolCall, ToolSpec
 from app.resort import availability as av
 from app.resort import leads
@@ -36,6 +37,11 @@ log = logging.getLogger(__name__)
 MAX_TOOL_ROUNDS = 6
 MAX_REPLY_TOKENS = 700
 HISTORY = 16
+SESSION_GAP = timedelta(hours=6)  # a pause this long starts a new conversation: older chat is not shown to the AI
+LINK = re.compile(r"https?://\S+")
+STYLE_LABELS = {"en": "English", "ml": "Malayalam script", "hi": "Hindi script", "ta": "Tamil script",
+                "manglish": "Manglish (Malayalam in English letters)", "hinglish": "Hinglish (Hindi in English letters)",
+                "tanglish": "Tanglish (Tamil in English letters)"}
 GREETING = re.compile(r"^\W*((hi+|hello+|hey+|hai+|hlo|hola|namaste|namaskar\w*|vanakkam|good\s*(morning|afternoon|evening))"
                       r"|നമസ്കാരം|ഹായ്|ഹലോ|வணக்கம்|ஹாய்|நமஸ்தே|नमस्ते|हाय|हेलो|हैलो)\W*$", re.IGNORECASE)
 # Styles the AI may report. Fixed messages (payment, ID) use the script language; Latin-script styles get English.
@@ -201,7 +207,58 @@ class ChatMixin:
             out += self._rooms_facts(p)
         return "\n".join(out)
 
-    def _system_prompt(self, st: dict[str, Any]) -> str:
+    def _guest_memory(self, phone: str, fresh: bool) -> str:
+        """What our records say about this guest (not the chat): name and earlier bookings, newest first."""
+        if not phone:
+            return "GUEST RECORDS\n- none"
+        now, today = self.clock.now(), self._today()
+        guest = self.repo.get_guest(phone)
+        lines = ["GUEST RECORDS (from our database)"]
+        lines.append(f"- Name: {guest.name} (never address them by name)" if guest and guest.name
+                     else "- Name: not known yet")
+        rows = self.repo.list_bookings(phone=phone, limit=4)
+        for b in rows:
+            prop = self.repo.get_property(b.property_id)
+            place = self._place_label(prop) if prop else "?"
+            when = "upcoming" if b.check_in >= today else ("in progress" if b.check_out > today else "past")
+            status = status_name(b.status, "en")
+            note = ""
+            if b.status == "hold":
+                live = bool(b.hold_expires_at and b.hold_expires_at > now)
+                status = "ON HOLD, waiting for payment" if live else "expired (unpaid)"
+                note = "" if live else " - finished, ignore it"
+            lines.append(f"- {b.check_in.isoformat()} to {b.check_out.isoformat()}, {place}, {b.rooms} room(s), "
+                         f"{status}, {when}{note}")
+        if not rows:
+            lines.append("- No earlier booking: a first-time guest.")
+        lines.append("- This is a NEW conversation after a long gap." if fresh
+                     else "- This is the same conversation continuing.")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _language_note(st: dict[str, Any], text: str) -> str:
+        """The language of THIS reply, decided in code from the guest's latest message, so earlier chats cannot
+        pull the AI into mixing languages."""
+        own = st.get("gs", "")
+        if own in LANG_NAMES:
+            style = own
+        elif is_language_neutral(text):
+            style = st.get("style") or "en"  # 'ok' / 'hi' / a name: the guest's own language so far
+        elif MANGLISH_WORDS.search(text) and not HINGLISH_WORDS.search(text):
+            style = "manglish"
+        elif HINGLISH_WORDS.search(text) and not MANGLISH_WORDS.search(text):
+            style = "hinglish"
+        else:
+            style = {"en": "en", "manglish": "manglish"}.get(detect_language(text, "en"), "en")
+        if style not in STYLE_LABELS:
+            style = "en"
+        if not is_language_neutral(text):
+            st["style"] = style
+        extra = " Plain English words like room, booking and payment are fine inside it." if style != "en" else ""
+        return (f"REPLY LANGUAGE (decided from the guest's latest message): {STYLE_LABELS[style]}. Write the whole "
+                f"reply in it and no other language.{extra}")
+
+    def _system_prompt(self, st: dict[str, Any], phone: str = "", text: str = "", fresh: bool = False) -> str:
         today = self._today()
         return (
             f"You are the WhatsApp booking assistant of {self._brand()}. You talk like a friendly, sensible person at "
@@ -223,6 +280,10 @@ class ChatMixin:
             "is Tanglish: answer in Tanglish.\n"
             "- The booking summary is sent automatically, always in English; your own lines stay in the guest's "
             "language.\n"
+            "- ONLY the guest's LATEST message decides the language. Earlier messages in this chat, and earlier "
+            "chats, may be in other languages: ignore them completely and never carry their words or script into "
+            "your reply. If one message mixes two languages, answer in the language most of its words are in. The "
+            "line \"REPLY LANGUAGE\" at the end of these instructions is the language to use now.\n"
             "- Pass the language style in the `language` field when you call check_availability.\n\n"
             "HOW TO TALK\n"
             "- Call the guest \"sir\", now and then and never in every message (\"madam\" only if they are clearly a woman). "
@@ -300,15 +361,40 @@ class ChatMixin:
             "push again, convince once more with a different good point.\n"
             "- Only if they still keep pushing after that, say the owner can talk to them directly and give the "
             "owner's number(s).\n\n"
-            "FACTS\n" + self._facts())
+            "GUEST MEMORY\n"
+            "- Below, after the FACTS, is what our records say about this guest's earlier bookings. Use it quietly to "
+            "be warm and sensible; it is NOT part of the current request.\n"
+            "- Read the records and use some sense, like a good front-desk person who remembers guests:\n"
+            "  * Paid booking UPCOMING or IN PROGRESS, and the guest now asks for another room or stay: say you can "
+            "see their booking (place and dates) and ask in one friendly line whether the new room is for the same "
+            "stay (extra room) or a different stay. Then follow their answer. Use the new dates they give.\n"
+            "  * Only PAST stays: treat it as a new booking. If it fits, add one warm line such as 'Welcome back, "
+            "sir! Happy to host you again' and, if useful, 'Same place as last time (Alleppey, March)?'. Do not "
+            "recite the history.\n"
+            "  * ON HOLD (unpaid and still valid): payment is the only thing you may bring up for it, and only if the "
+            "guest asks, or wants those same dates. For different dates or another room just help with the new "
+            "request, and mention once, kindly, that the earlier one is still waiting for payment.\n"
+            "  * Expired, cancelled or failed bookings are finished: never talk about their payment.\n"
+            "- Never reuse the dates, rooms, prices or payment link of an earlier booking for a new request, and "
+            "never paste or mention an old payment link. Always take the details of a new booking from what the "
+            "guest says now.\n"
+            "- Be warm and easy: short friendly lines, no forms, no jargon, no lecturing.\n"
+            "- For questions about an old booking, use the my_bookings tool.\n\n"
+            "FACTS\n" + self._facts() + "\n\n" + self._guest_memory(phone, fresh) + "\n\n"
+            + self._language_note(st, text))
 
     # ------------------------------------------------------------------ the conversation
 
     def _history(self, phone: str) -> list[ChatMessage]:
         merged: list[ChatMessage] = []
-        for m in self.repo.list_chat(phone, limit=HISTORY):
+        rows = self.repo.list_chat(phone, limit=HISTORY)
+        for i in range(len(rows) - 1, 0, -1):  # only the current conversation: a long gap starts a new one
+            if rows[i].at - rows[i - 1].at >= SESSION_GAP:
+                rows = rows[i:]
+                break
+        for m in rows:
             role = "user" if m.direction == "in" else "assistant"
-            text = m.text[:700]
+            text = LINK.sub("[link]", m.text[:700])  # an old payment link must never be copied into a new chat
             if merged and merged[-1].role == role:
                 merged[-1] = ChatMessage(role, merged[-1].content + "\n" + text)
             else:
@@ -383,7 +469,7 @@ class ChatMixin:
         st["turn"] = st.get("turn", 0) + 1
         ctx = _Turn(phone, st)
         messages = self._history(phone)
-        system = self._system_prompt(st)
+        system = self._system_prompt(st, phone, text, fresh=len(messages) <= 1)
         reply = ""
         try:
             if self._llm is None:
