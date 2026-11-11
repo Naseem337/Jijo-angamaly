@@ -68,6 +68,10 @@ def _to_wire(system: str, messages: list[ChatMessage], *, keep_tools: bool = Tru
                 "content": m.content or None,
                 "tool_calls": [_call_to_wire(c) for c in m.tool_calls],
             })
+        elif m.role == "user" and m.images:  # a picture the guest sent (vision models only)
+            parts: list[dict[str, Any]] = [{"type": "text", "text": m.content}]
+            parts += [{"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}} for mime, b64 in m.images]
+            wire.append({"role": "user", "content": parts})
         else:
             wire.append({"role": m.role, "content": m.content})
     return wire

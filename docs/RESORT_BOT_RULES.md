@@ -65,3 +65,12 @@ English -> English, Malayalam (any script, or a voice note) -> Manglish, Tamil -
 Native script is never sent. Code: `LATIN_STYLE` in chat.py (language note, rewrite check, style) and `_LATIN_LANG`
 in i18n.py `t()` (fixed messages: Malayalam -> Manglish, Tamil/Hindi -> English). A reply that still contains
 native script gets one rewrite.
+
+## Fewer confirmations, payment screenshots, latest language (user, 2026-11-11)
+- A guest who chose the room and gave dates and persons is not asked "confirm?" again: `create_booking` runs in the same
+  turn as `prepare_booking` (summary + payment link together). Only a missing name or unclear detail is asked.
+- An image from a guest (no ID request open) is read by the AI (vision; Gemini is first in the chain). Before that the
+  bot asks Razorpay about unpaid holds, so a paid one is confirmed at once. A screenshot never confirms a booking:
+  only Razorpay does, and the normal confirmation message follows.
+- Language: only the latest message decides. When the guest switches language, the reminder is also put on their
+  message itself, and an English-style reply that contains Manglish/Hinglish words gets one rewrite.

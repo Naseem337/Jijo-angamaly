@@ -185,15 +185,16 @@ def test_system_prompt_has_the_rules_and_facts(world):
     assert "Kanthalloor, Munnar" in system and "2026-11-02 (Monday)" in system
 
 
-def test_booking_cannot_be_created_in_the_same_turn_as_the_summary(world):
+def test_a_decided_guest_gets_the_payment_link_in_the_same_turn_without_a_second_confirmation(world):
     w = world
     say(w, "book deluxe 10 Nov 2 nights for 2", GUEST,
         tool("check_availability", place="alleppey", check_in="2026-11-10", nights=2, adults=2),
         tool("prepare_booking", room_type="Deluxe", rooms=1),
         tool("create_booking", guest_name="Asha"),
-        reply("Please confirm the summary."))
-    assert "has not seen the summary" in last_tool(w)["error"]
-    assert w.repo.list_bookings(phone=GUEST) == [] and w.pay.created == []
+        reply("Please complete the payment to confirm."))
+    assert last_tool(w)["ok"] is True
+    assert len(w.repo.list_bookings(phone=GUEST)) == 1 and len(w.pay.created) == 1
+    assert "https://rzp.io/mock/" in w.wa.texts()[-1]
 
 
 def test_create_needs_a_prepared_booking_and_a_name(world):

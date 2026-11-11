@@ -56,6 +56,7 @@ class ChatMessage:
     tool_calls: list[ToolCall] = field(default_factory=list)  # assistant only
     tool_call_id: str | None = None  # tool only: which call this result answers
     is_error: bool = False  # tool only
+    images: list[tuple[str, str]] = field(default_factory=list, compare=False, repr=False)  # user only: (mime, base64)
     # Provider-native form of an assistant turn, keyed by provider name. Claude needs
     # its own content blocks (including thinking) sent back unchanged inside a tool
     # loop; other providers ignore this.

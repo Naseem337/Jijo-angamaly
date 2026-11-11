@@ -325,13 +325,15 @@ class ChatMixin:
             "5. Call check_availability. Then offer what is free in plain words: each room type with the total for "
             "THEIR dates (and price_per_night when the tool gives it). With more than one room type, put each on its "
             "own line and let the guest pick.\n"
-            "6. When they choose, call prepare_booking. The full English booking summary is then sent automatically; "
-            "do not write it. You only add one or two short lines asking them to confirm. If you do not know their name "
-            "yet, ask for it in the same message, and in the same line ask which city they are coming from (optional: "
-            "never insist, pass from_city to create_booking only if they tell you).\n"
-            "7. Only after they confirm in a later message, call create_booking. Then, WITHOUT starting with 'Done' or "
-            "'All set', tell them in one short line to complete the payment to confirm the booking; the payment link follows. Do not write the link or the "
-            "advance amount yourself, it is sent automatically.\n"
+            "6. When they choose a room (or say yes to your suggestion), call prepare_booking. The full English "
+            "booking summary is sent automatically; do not write it.\n"
+            "7. Do NOT ask 'shall I confirm?' again. A guest who has chosen the room and given dates and persons has "
+            "already decided: in the SAME turn, right after prepare_booking, call create_booking. Then, WITHOUT starting with "
+            "'Done' or 'All set', tell them in one short line to complete the payment to confirm the booking; the "
+            "payment link follows. Do not write the link or the advance amount yourself, it is sent automatically. "
+            "If you do not know their name, ask it first (one short line, plus the city they come from, optional, "
+            "never insist) and create the booking as soon as they reply. Ask for confirmation only when something "
+            "is still unclear (room type, rooms, dates). Never ask the same thing twice.\n"
             "- Before the payment is received, NEVER say the room or booking is booked, confirmed, reserved or done. "
             "Say it will be confirmed once the payment is complete. The confirmation message arrives on its own.\n"
             "- If the party does not fit or the dates are sold out, say so and suggest another date, fewer rooms "
@@ -354,6 +356,14 @@ class ChatMixin:
             "- If they say the link is lost, did not open or they want it again, call send_payment_link. If the hold "
             "ran out, offer to book again (check the dates again). Explain any payment doubt simply and patiently. "
             "A confirmation message arrives here automatically as soon as the payment goes through.\n"
+            "- PAYMENT SCREENSHOT: when the guest sends an image, look at it. If it is a payment screenshot (UPI / "
+            "bank / Razorpay), note the amount and the status you can see, call my_bookings (it asks Razorpay), and "
+            "then: if my_bookings says the booking is paid, say nothing more (the confirmation was already sent); if "
+            "still waiting, thank them and say the booking will be confirmed automatically as soon as Razorpay shows "
+            "the payment, usually within a minute or two, and that they need not pay again. NEVER confirm a booking "
+            "from a screenshot alone: only Razorpay confirms. If the screenshot shows a failed payment, tell them it "
+            "did not go through and use send_payment_link. If it is not a payment (a photo, a document), answer "
+            "naturally about what it shows or say the team will look at it.\n"
             "- If money was deducted but they got no confirmation, tell them not to pay again, that it normally "
             "shows within a few minutes, and give the owner's number. Never promise a refund.\n\n"
             "CANCELLATION, CHANGES AND REFUNDS\n"
@@ -426,6 +436,8 @@ class ChatMixin:
         if present:
             want = {"ml": "Manglish", "ta": "Tanglish", "hi": "Hinglish"}.get(own, "Manglish, Tanglish, Hinglish or English, the guest's own language")
             return f"Rewrite that reply using only English letters ({want}). Do not use Malayalam, Tamil or Hindi script."
+        if st.get("style") == "en" and (MANGLISH_WORDS.search(reply) or re.search(r"(?:milega|chahiye|nahi|kitne|theek|aap|mujhe)", reply, re.I)):
+            return "Rewrite that reply in plain English only. The guest's latest message is in English."
         if HINGLISH_WORDS.search(guest_text) and not MANGLISH_WORDS.search(guest_text):
             st["hing"] = True
         if st.get("hing") and not MANGLISH_WORDS.search(guest_text) and MANGLISH_WORDS.search(reply):
@@ -460,7 +472,8 @@ class ChatMixin:
         eased = re.sub(r",?\s*\b(sir|madam)\b(?=[.!?]?\s*$)", "", eased, flags=re.IGNORECASE)
         return eased[:1].upper() + eased[1:] if eased != reply and eased else reply
 
-    def _converse(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0) -> str:
+    def _converse(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0,
+                  images: list[tuple[str, str]] | None = None) -> str:
         if self.debounce_s and in_id:  # a second message may follow: wait, and let the newest one answer
             time.sleep(self.patience_s if looks_unfinished(text) else self.debounce_s)
             if self.repo.last_chat_id(phone, "in") != in_id:
@@ -468,7 +481,14 @@ class ChatMixin:
         st["turn"] = st.get("turn", 0) + 1
         ctx = _Turn(phone, st)
         messages = self._history(phone)
+        if images and messages and messages[-1].role == "user":
+            messages[-1].images = list(images)  # the AI sees the picture this turn only; the chat keeps just "[image]"
+        before = st.get("style")
         system = self._system_prompt(st, phone, text, fresh=len(messages) <= 1)
+        if before and st.get("style") != before and messages and messages[-1].role == "user":
+            # the guest switched language: say it again right on their message, the latest one decides
+            note = STYLE_LABELS.get(st["style"], "English")
+            messages[-1].content += f"\n\n[Reply ONLY in {note}. Ignore the language of earlier messages.]"
         reply = ""
         try:
             if self._llm is None:
@@ -710,8 +730,6 @@ class ChatMixin:
         chosen = bk.get("chosen")
         if not chosen:
             return {"error": "no prepared booking: call check_availability and prepare_booking first"}
-        if chosen["turn"] >= st["turn"]:
-            return {"error": "the guest has not seen the summary yet. Show it and wait for their confirmation message"}
         now = self.clock.now()
         guest = self.repo.touch_guest(phone, now, language=st.get("lang"))
         name = (a.get("guest_name") or "").strip()[:60] or guest.name

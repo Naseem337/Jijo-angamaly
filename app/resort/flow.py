@@ -96,6 +96,8 @@ class BookingBot(IdProofMixin, ChatMixin):
                 self._text(phone, t("voice_problem", lang))
                 return "voice_problem"
             text, source = result.text, "voice"
+        elif msg.type == "image" and msg.media_id:  # a payment screenshot or a photo: the AI looks at it
+            return self._image_turn(phone, st, msg, now)
         elif not msg.is_text:
             self.repo.add_chat(Chat(phone, "in", f"[{msg.type}]", now, "text"))
             if msg.type not in ("reaction", "sticker"):
@@ -114,6 +116,37 @@ class BookingBot(IdProofMixin, ChatMixin):
         except Exception:
             pass
         return self._dispatch(phone, st, text, None if source != "button" else msg.reply_id, source, guest.name, in_id)
+
+    def _image_turn(self, phone: str, st: dict[str, Any], msg, now) -> str:
+        """An image from a guest with no ID request open: ask Razorpay about their unpaid holds first (a paid one is
+        confirmed right away, exactly like the webhook), then let the AI read the picture. Only Razorpay confirms."""
+        import base64
+        caption = (msg.text or "").strip()
+        self.repo.add_chat(Chat(phone, "in", f"[image] {caption}".strip(), now, "text"))
+        paused, _ = self.repo.is_paused(phone)
+        if paused:
+            return "paused"
+        try:
+            self.wa.mark_read(msg.id)
+        except Exception:
+            pass
+        try:
+            data, mime = self.wa.download_media(msg.media_id, max_bytes=5_000_000)
+        except Exception as exc:
+            log.warning("Image download failed for %s: %s", mask_phone(phone), exc)
+            self._text(phone, t("unsupported", st.get("lang", "en")))
+            return "unsupported"
+        mime = (mime or "image/jpeg").split(";")[0].strip().lower()
+        if mime not in ("image/jpeg", "image/png", "image/webp"):
+            self._text(phone, t("unsupported", st.get("lang", "en")))
+            return "unsupported"
+        try:
+            self.check_payments()
+        except Exception as exc:
+            log.warning("Payment check failed: %s", exc)
+        st.setdefault("lang", "en")
+        text = f"[The guest sent an image{': ' + caption if caption else ''}]"
+        return self._converse(phone, st, text, 0, images=[(mime, base64.b64encode(data).decode())])
 
     # ------------------------------------------------------------------ routing
 
