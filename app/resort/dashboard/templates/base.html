@@ -41,7 +41,6 @@
       {% if auth.is_owner %}
         <div class="nav-label">Admin</div>
         <a href="{{ BASE }}/users" class="{{ 'active' if nav == 'users' }}">{{ icon('key') }}<span>Users</span></a>
-        <a href="{{ BASE }}/settings" class="{{ 'active' if nav == 'settings' }}">{{ icon('gear') }}<span>Settings</span></a>
       {% endif %}
     </nav>
   </aside>
@@ -61,14 +60,13 @@
             <div class="who"><b>{{ user.name or user.email }}</b><small>{{ user.role|capitalize }}</small></div><span class="chev">▾</span>
           </button>
           <div class="drop-menu" id="user-menu" hidden>
-            {% if auth.is_owner %}<a href="{{ BASE }}/settings">{{ icon('gear') }} Settings</a>{% endif %}
             <form method="post" action="{{ BASE }}/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Log out</button></form>
           </div>
         </div>
       </div>
     </header>
     <main class="content">
-      {% set crumbs = {"home":"Dashboard","bookings":"Bookings","calendar":"Calendar","stay":"Arrivals & departures","properties":"Properties","guests":"Guests & leads","reports":"Reports","users":"Users","settings":"Settings"} %}
+      {% set crumbs = {"home":"Dashboard","bookings":"Bookings","calendar":"Calendar","stay":"Arrivals & departures","properties":"Properties","guests":"Guests & leads","reports":"Reports","users":"Users"} %}
       {% if nav in crumbs %}<nav class="crumbs" aria-label="Breadcrumb">{{ icon('home') }}<a href="{{ BASE }}/">Home</a><span>›</span><b>{{ crumbs[nav] }}</b></nav>{% endif %}
       {% block content %}{% endblock %}</main>
   </div>

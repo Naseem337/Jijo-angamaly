@@ -1147,36 +1147,6 @@ async def user_delete(request: Request, auth: Auth = Depends(require_owner)):
     raise redirect(toast_url(f"{BASE}/users", "User deleted"))
 
 
-def _connection_status() -> list[tuple[str, bool, str]]:
-    """Plain-language state of each connection for the owner: (name, working, one line). No variable names, no values."""
-    import os
-    have = lambda *names: all(os.environ.get(n) for n in names)  # noqa: E731
-    number = os.environ.get("RESORT_WHATSAPP_NUMBER", "").strip()
-    whatsapp = have("RESORT_WHATSAPP_PHONE_NUMBER_ID", "RESORT_WHATSAPP_ACCESS_TOKEN", "RESORT_WHATSAPP_APP_SECRET",
-                    "RESORT_WHATSAPP_VERIFY_TOKEN")
-    pay = have("RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET")
-    ai = any(os.environ.get(n) for n in ("GEMINI_API_KEY", "GROQ_API_KEY", "SARVAM_API_KEY"))
-    return [
-        ("WhatsApp bot", whatsapp, (f"Guests message {number}" if number else "Replies to guests on WhatsApp")
-         if whatsapp else "Not connected: the bot cannot send or receive messages"),
-        ("Online payments", pay, ("Guests pay the advance by UPI, card or net banking"
-                                  + ("" if have("RAZORPAY_WEBHOOK_SECRET") else ". Payments are confirmed within a minute"))
-         if pay else "Not connected: payment links cannot be created"),
-        ("AI assistant", ai, "Answers guests in English, Malayalam, Manglish, Hindi and Tamil" if ai
-         else "Not connected: the bot cannot answer guests"),
-    ]
-
-
-@router.get("/settings")
-def settings_view(request: Request, auth: Auth = Depends(require_owner)):
-    from app.resort.config import load_resort_config
-    cfg = load_resort_config()
-    facts = [("Rooms are held for payment", f"{cfg.hold_minutes} minutes"),
-             ("Languages", ", ".join(cfg.languages)),
-             ("Voice notes from guests", f"Up to {cfg.max_audio_seconds} seconds")]
-    return page(request, "settings.html", auth, nav="settings", status=_connection_status(), facts=facts)
-
-
 @router.get("/search")
 def search(request: Request, auth: Auth = Depends(require_user)):
     repo, q = get_repo(), (request.query_params.get("q") or "").strip()

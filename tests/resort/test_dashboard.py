@@ -75,7 +75,7 @@ def test_pages_render(env):
     client, _ = login(app)
     for path in ["/", "/bookings", "/bookings/new", "/calendar", "/properties", f"/properties/{p1.id}",
                  f"/properties/{p1.id}/rooms/{rt1.id}", "/properties/new", "/guests", "/conversations", "/users",
-                 "/settings", "/search?q=asha", "/bookings/export.csv"]:
+                 "/search?q=asha", "/bookings/export.csv"]:
         assert client.get(BASE + path).status_code == 200, path
 
 

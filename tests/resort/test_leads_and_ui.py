@@ -95,15 +95,12 @@ def test_home_is_the_simple_front_desk_view(env):
     assert "WhatsApp chats" not in home  # not in the menu either
 
 
-def test_settings_shows_plain_status_not_variable_names(env):
+def test_settings_page_is_gone_and_home_has_no_occupancy_card(env):
     _repo, app, _ = env
     client, _ = login(app)
-    page = client.get(f"{BASE}/settings").text
-    for need in ("WhatsApp bot", "Online payments", "AI assistant", "Rooms are held for payment"):
-        assert need in page
-    for hidden in ("RESORT_WHATSAPP_ACCESS_TOKEN", "RAZORPAY_KEY_ID", "GEMINI_API_KEY", "SESSION_SECRET", "RESORT_DB_PATH"):
-        assert hidden not in page  # no variable names on the owner's page
-    assert "Occupancy tonight" not in client.get(f"{BASE}/").text
+    assert client.get(f"{BASE}/settings").status_code == 404
+    home = client.get(f"{BASE}/").text
+    assert "Occupancy tonight" not in home and f"{BASE}/settings" not in home
 
 
 def test_collections_has_one_date_range_field_and_no_help_clutter(env):
