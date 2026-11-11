@@ -1146,3 +1146,21 @@ def test_the_reply_language_is_decided_from_the_latest_message_only(world):
     say(w, "ഒരു റൂം വേണം", GUEST, reply("ശരി."))
     assert "Malayalam script" in w.llm.calls[-1].system.split("REPLY LANGUAGE (")[1]
     say(w, "ok", GUEST, reply("[no reply]"))  # a neutral message keeps the guest's own language so far
+
+
+def test_the_ai_can_read_the_old_chat_on_demand_with_links_hidden(world):
+    w = world
+    _old_guest(w)
+    say(w, "as I told you earlier, same room as before", GUEST, tool("recall_old_chat"), reply("Yes, I remember."))
+    result = last_tool(w)
+    text = " ".join(result["messages"])
+    assert "room venam 10 Oct" in text and "[link]" in text and "old-link-123" not in text
+    assert any(t_["name"] == "recall_old_chat" for t_ in [{"name": x.name} for x in w.llm.calls[-1].tools])
+
+
+def test_my_bookings_answers_about_an_old_paid_booking(world):
+    w = world
+    _old_guest(w)
+    say(w, "my last booking details?", GUEST, tool("my_bookings"), reply("Your stay was 10 to 12 Oct."))
+    rows = last_tool(w)["bookings"]
+    assert rows and rows[0]["check_in"] == "2026-10-10" and "payment_link" not in rows[0]

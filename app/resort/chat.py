@@ -160,6 +160,12 @@ TOOLS = [
         "while their booking is still on hold. The link is sent automatically after your reply.",
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
+        "recall_old_chat",
+        "Read what was said in this guest's EARLIER conversations (before today's chat). Use it only when the guest "
+        "refers to something said or sent before ('as I told you', 'you said earlier', 'the link you sent', 'my last "
+        "enquiry', 'that room we talked about'). Never for greetings, small talk or a fresh request.",
+        {"type": "object", "properties": {}}),
+    ToolSpec(
         "my_bookings",
         "The guest's own recent bookings with status, amounts and the owner's contact. Use when they ask about "
         "an existing booking or payment.",
@@ -362,36 +368,30 @@ class ChatMixin:
             "- Only if they still keep pushing after that, say the owner can talk to them directly and give the "
             "owner's number(s).\n\n"
             "GUEST MEMORY\n"
-            "- Below, after the FACTS, is what our records say about this guest's earlier bookings. Use it quietly to "
-            "be warm and sensible; it is NOT part of the current request.\n"
-            "- Read the records and use some sense, like a good front-desk person who remembers guests:\n"
-            "  * Paid booking UPCOMING or IN PROGRESS, and the guest now asks for another room or stay: say you can "
-            "see their booking (place and dates) and ask in one friendly line whether the new room is for the same "
-            "stay (extra room) or a different stay. Then follow their answer. Use the new dates they give.\n"
-            "  * Only PAST stays: treat it as a new booking. If it fits, add one warm line such as 'Welcome back, "
-            "sir! Happy to host you again' and, if useful, 'Same place as last time (Alleppey, March)?'. Do not "
-            "recite the history.\n"
-            "  * ON HOLD (unpaid and still valid): payment is the only thing you may bring up for it, and only if the "
-            "guest asks, or wants those same dates. For different dates or another room just help with the new "
-            "request, and mention once, kindly, that the earlier one is still waiting for payment.\n"
-            "  * Expired, cancelled or failed bookings are finished: never talk about their payment.\n"
-            "- Never reuse the dates, rooms, prices or payment link of an earlier booking for a new request, and "
-            "never paste or mention an old payment link. Always take the details of a new booking from what the "
-            "guest says now.\n"
-            "- Be warm and easy: short friendly lines, no forms, no jargon, no lecturing.\n"
-            "- For questions about an old booking, use the my_bookings tool.\n\n"
+            "- You remember every guest. After the FACTS you get their records (name, earlier bookings with dates, place and status). The chat shown is today's conversation; older chat is kept and you can read it with the recall_old_chat tool.\n"
+            "- Look things up only when needed, to save effort: a guest who asks about an earlier booking, a payment, a link, a stay date or something said before gets the real answer (use the records, my_bookings and/or recall_old_chat). A guest who only says hi, makes small talk or jokes gets a short, polite, friendly reply with no lookup.\n"
+            "- Earlier bookings: if they ask about one, answer from the records or my_bookings in plain words: dates, place, rooms, whether it is confirmed, how much was paid and what is left to pay at the property. Paid and upcoming: say you can see it and be warm about their coming stay. Past: a warm thanks or welcome back. ON HOLD and still valid: tell them it is waiting for payment and offer the link (send_payment_link). Expired, cancelled or failed: say so kindly and offer to book again. Payment queries are answered politely and respectfully, never defensively.\n"
+            "- When the guest asks for another room or a new stay while a paid booking is upcoming or in progress, say you can see that booking (place, dates) and ask in one friendly line whether the new room is for the same stay or a different one, then follow their answer. With only past stays, treat it as a new booking and add at most one warm welcome-back line.\n"
+            "- A new booking always takes its dates, rooms and price from what the guest says now and from the tools, never from an earlier booking. Never paste an old payment link: only the send_payment_link tool sends one, and only for a booking still on hold.\n"
+            "- Warm and easy: short friendly lines, no forms, no jargon.\n"
+            "- Never address them by name.\n\n"
             "FACTS\n" + self._facts() + "\n\n" + self._guest_memory(phone, fresh) + "\n\n"
             + self._language_note(st, text))
 
     # ------------------------------------------------------------------ the conversation
 
+    @staticmethod
+    def _session_start(rows: list[ChatMessage]) -> int:
+        """Index of the first message of the current conversation: a pause of SESSION_GAP starts a new one."""
+        for i in range(len(rows) - 1, 0, -1):
+            if rows[i].at - rows[i - 1].at >= SESSION_GAP:
+                return i
+        return 0
+
     def _history(self, phone: str) -> list[ChatMessage]:
         merged: list[ChatMessage] = []
         rows = self.repo.list_chat(phone, limit=HISTORY)
-        for i in range(len(rows) - 1, 0, -1):  # only the current conversation: a long gap starts a new one
-            if rows[i].at - rows[i - 1].at >= SESSION_GAP:
-                rows = rows[i:]
-                break
+        rows = rows[self._session_start(rows):]  # the current conversation only; older chat is fetched on demand
         for m in rows:
             role = "user" if m.direction == "in" else "assistant"
             text = LINK.sub("[link]", m.text[:700])  # an old payment link must never be copied into a new chat
@@ -516,7 +516,7 @@ class ChatMixin:
     def _run_tool(self, ctx: _Turn, call: ToolCall) -> tuple[str, bool]:
         handlers = {"check_availability": self._tool_check, "prepare_booking": self._tool_prepare,
                     "create_booking": self._tool_create, "my_bookings": self._tool_bookings,
-                    "send_payment_link": self._tool_resend}
+                    "send_payment_link": self._tool_resend, "recall_old_chat": self._tool_recall}
         handler = handlers.get(call.name)
         if handler is None or call.arguments_error:
             return json.dumps({"error": call.arguments_error or f"unknown tool {call.name}"}), True
@@ -763,10 +763,21 @@ class ChatMixin:
                 "note": "the payment link and amount are sent automatically after your reply; do not write them. "
                          "The booking is NOT confirmed yet: tell the guest to complete the payment to confirm it"}
 
+    def _tool_recall(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        rows = self.repo.list_chat(ctx.phone, limit=80)
+        older = rows[:self._session_start(rows)][-30:]
+        if not older:
+            return {"messages": [], "note": "there is no earlier chat with this guest"}
+        lines = [f"{m.at.strftime('%d %b')} {'Guest' if m.direction == 'in' else 'Bot'}: "
+                 f"{LINK.sub('[link]', m.text)[:300]}" for m in older]
+        return {"messages": lines,
+                "note": "Earlier chat, oldest first. Links are hidden: if the guest needs a payment link, use "
+                        "send_payment_link (only works while the booking is on hold). Answer only what they asked."}
+
     def _tool_bookings(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         paid_now = self.check_payments()  # a guest who says "I paid" gets their confirmation without waiting
         rows = []
-        for b in self.repo.list_bookings(phone=ctx.phone, limit=3):
+        for b in self.repo.list_bookings(phone=ctx.phone, limit=5):
             prop = self.repo.get_property(b.property_id)
             row = {"id": b.id, "place": self._place_label(prop) if prop else "", "check_in": b.check_in.isoformat(),
                    "check_out": b.check_out.isoformat(), "rooms": b.rooms, "status": status_name(b.status, "en"),
