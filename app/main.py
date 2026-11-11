@@ -15,9 +15,9 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.runtime import Runtime
+from app.runtime import Runtime, build_repository
 from app.scheduler import start_background_jobs
-from app.settings import get_settings
+from app.settings import EnvSecretResolver, get_settings
 from app.resort import web as resort_web
 from app.whatsapp import webhook
 
@@ -26,7 +26,10 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines print full URLs (sheet id)
-    runtime = runtime or Runtime.from_settings(settings)  # fails fast on bad client config
+    resort_only = os.environ.get("RESORT_ONLY") == "1"  # the resort service: no car-dealer client is loaded at all
+    if runtime is None:
+        runtime = (Runtime({}, build_repository(settings), EnvSecretResolver()) if resort_only
+                   else Runtime.from_settings(settings))  # fails fast on bad client config
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -45,7 +48,8 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
 
     app = FastAPI(title="Dealer WhatsApp Agent", lifespan=lifespan)
     app.state.runtime = runtime
-    app.include_router(webhook.router)
+    if not resort_only:
+        app.include_router(webhook.router)
     app.include_router(resort_web.router)  # /resort/webhook and /resort/razorpay/webhook
     try:  # the resort dashboard is built separately; the app still starts without it
         from app.resort.dashboard import router as dashboard_router

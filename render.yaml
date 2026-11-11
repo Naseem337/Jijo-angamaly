@@ -12,8 +12,8 @@ services:
         value: /tmp/resort.sqlite3
       - key: RESORT_AUTO_SEED
         value: "1"
-      - key: ALERTS_EVERY_MINUTES  # this service is the resort bot: no True Choice car-alert timer
-        value: "0"
+      - key: RESORT_ONLY  # resort service only: no True Choice client, webhook or alert timer
+        value: "1"
       - key: RESORT_WHATSAPP_PHONE_NUMBER_ID
         sync: false
       - key: RESORT_WHATSAPP_ACCESS_TOKEN
