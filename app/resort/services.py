@@ -63,8 +63,9 @@ def build_resort_services(settings: Settings | None = None) -> ResortServices:
     config = load_resort_config()
     db_path = Path(os.environ.get("RESORT_DB_PATH") or PROJECT_ROOT / "data" / "resort.sqlite3")
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    phone_id = os.environ.get("RESORT_WHATSAPP_PHONE_NUMBER_ID", "")
-    token = os.environ.get("RESORT_WHATSAPP_ACCESS_TOKEN", "")
+    phone_id = os.environ.get("RESORT_WHATSAPP_PHONE_NUMBER_ID", "").strip().strip("\"'")
+    token = os.environ.get("RESORT_WHATSAPP_ACCESS_TOKEN", "").strip().strip("\"'")  # a pasted space or quote breaks it
+    log.info("WhatsApp sender: phone number id %s, token length %d, ends ...%s", phone_id or "-", len(token), token[-4:])
     if not (phone_id and token):
         log.warning("RESORT_WHATSAPP_PHONE_NUMBER_ID / RESORT_WHATSAPP_ACCESS_TOKEN not set: the resort bot can't send")
     return ResortServices(config, ResortRepo(db_path), WhatsAppClient(phone_id or "not-set", token or "not-set",
