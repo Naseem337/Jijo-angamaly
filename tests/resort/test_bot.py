@@ -22,7 +22,7 @@ from app.resort.models import Booking, Property, RateRule, RoomType
 from app.resort.payments import MockPayments, PaymentError, parse_event, verify_webhook_signature
 from app.resort.services import ResortServices
 from app.whatsapp.client import WhatsAppClient, WhatsAppError
-from app.whatsapp.parse import InboundMessage, parse_webhook
+from app.whatsapp.parse import InboundMessage, parse_echoes, parse_webhook
 
 STAFF = "+919800000001"
 GUEST = "+919847012345"
@@ -379,6 +379,36 @@ def test_staff_handoff_pauses_chat(world):
     assert len(w.wa.to(GUEST)) == before  # the bot stays quiet while staff own the chat
     w.clock.advance(hours=25)
     assert say(w, "hello again", GUEST, reply("Hi, how can I help?")) != "paused"
+
+
+def _echo(text, phone="919847012345", mid="e1"):
+    return parse_echoes({"entry": [{"changes": [{"field": "smb_message_echoes", "value": {
+        "metadata": {"phone_number_id": "123"},
+        "message_echoes": [{"from": "914800000000", "to": phone, "id": mid, "timestamp": "1790000000",
+                            "type": "text", "text": {"body": text}}]}}]}]}, "123")
+
+
+def test_human_reply_in_phone_app_pauses_bot(world):
+    w = world
+    (echo,) = _echo("Sir, room confirm cheyyam", GUEST.lstrip("+"))
+    assert echo.phone == GUEST
+    assert w.bot.human_replied(echo) == "paused_by_human"
+    assert w.repo.is_paused(GUEST)[0]
+    assert w.repo.list_chat(GUEST)[-1].source == "staff"
+    before = len(w.wa.to(GUEST))
+    assert say(w, "ok thanks, what time?") == "paused"
+    assert len(w.wa.to(GUEST)) == before
+    assert w.bot.human_replied(echo) == "duplicate"  # Meta may resend
+    w.clock.advance(hours=25)  # staff went quiet: the bot is back
+    assert say(w, "hello again", GUEST, reply("Hi, how can I help?")) != "paused"
+
+
+def test_echo_of_a_bot_message_does_not_pause(world):
+    w = world
+    w.bot._text(GUEST, "Hello from the bot")
+    (echo,) = _echo("Hello from the bot", GUEST.lstrip("+"), "e2")
+    assert w.bot.human_replied(echo) == "bot_echo"
+    assert not w.repo.is_paused(GUEST)[0]
 
 
 def test_stop_and_start(world):

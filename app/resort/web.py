@@ -17,7 +17,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.resort.payments import PaymentEvent, parse_event, verify_webhook_signature
 from app.resort.services import ResortServices, build_resort_services, get_services
-from app.whatsapp.parse import parse_webhook, verify_signature
+from app.whatsapp.parse import parse_echoes, parse_webhook, verify_signature
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -53,7 +53,17 @@ async def receive(request: Request, background: BackgroundTasks) -> dict[str, in
     messages = parse_webhook(payload, os.environ.get("RESORT_WHATSAPP_PHONE_NUMBER_ID", ""))
     for msg in messages:
         background.add_task(_handle_message, services, msg)
+    echoes = parse_echoes(payload, os.environ.get("RESORT_WHATSAPP_PHONE_NUMBER_ID", ""))
+    for echo in echoes:  # staff typed in the phone app: pause the bot for that guest
+        background.add_task(_handle_echo, services, echo)
     return {"received": len(messages)}
+
+
+def _handle_echo(services: ResortServices, echo) -> None:
+    try:
+        log.info("Resort staff echo %s: %s", echo.id, services.bot.human_replied(echo))
+    except Exception:
+        log.exception("Failed to handle resort echo %s", echo.id)
 
 
 def _handle_message(services: ResortServices, msg) -> None:

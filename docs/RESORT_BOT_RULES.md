@@ -45,3 +45,6 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Installable app (PWA) for the owner's phone: open the dashboard in Chrome (Android) or Safari (iPhone), then Add to Home screen.
 - No greeting banner on the home page. The "Waiting for payment" card shows only when a booking is waiting.
 - Discount before payment: when a guest negotiates and talks to the owner, the owner opens the booking (Waiting for payment) and taps "Give discount". The total and advance are recalculated, the old payment link is closed, and the guest gets the new link on WhatsApp.
+
+## Auto-pause when staff reply from the phone (user, 2026-11-07)
+- When staff type a reply to a guest in the WhatsApp Business app (coexistence number), Meta sends an `smb_message_echoes` webhook. `BookingBot.human_replied` logs it as a `staff` chat line and pauses the bot for that guest; every new staff message restarts the 24 h auto-resume. Needs the `smb_message_echoes` webhook field subscribed in the Meta app.

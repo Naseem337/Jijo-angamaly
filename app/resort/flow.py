@@ -30,7 +30,7 @@ from app.resort.models import Booking, ChatMessage as Chat
 from app.resort.paying import apply_payment, method_label
 from app.resort.payments import PaymentError, Payments
 from app.whatsapp.client import WhatsAppClient, WhatsAppError
-from app.whatsapp.parse import InboundMessage
+from app.whatsapp.parse import EchoMessage, InboundMessage
 
 log = logging.getLogger(__name__)
 
@@ -196,6 +196,20 @@ class BookingBot(IdProofMixin, ChatMixin):
             self._text(phone, t("handoff", st.get("lang", "en")))
         self.alert_staff(summary, st.get("property_id"))
         return "handoff"
+
+    def human_replied(self, echo: EchoMessage) -> str:
+        """Staff typed a reply to this guest in the WhatsApp Business app: the bot steps back.
+        Every new staff message restarts the 24 h auto-resume timer."""
+        now = self.clock.now()
+        if not self.repo.mark_event_processed(echo.id, now):
+            return "duplicate"
+        text = echo.text.strip() or f"[{echo.type}]"
+        for m in self.repo.list_chat(echo.phone, limit=5):  # a copy of something the bot sent is not a human
+            if m.direction == "out" and m.source != "staff" and m.text.strip() == text and now - m.at < timedelta(minutes=2):
+                return "bot_echo"
+        self.repo.add_chat(Chat(echo.phone, "out", text, now, "staff"))
+        self.repo.set_paused(echo.phone, True, now)
+        return "paused_by_human"
 
     # ------------------------------------------------------------------ payment events and sweeps
 

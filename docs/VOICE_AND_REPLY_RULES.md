@@ -221,3 +221,6 @@ resort. The weak Groq 20b backup is not in the chain. Test any change with real 
 ## 21. Always sir/madam, no filler sounds (user, 2026-10-27)
 - Every reply (text and voice) addresses the customer as sir or madam: madam when the profile name or their words show a woman, otherwise sir. Never the name, never chetta/chechi. This replaces the "only when clear" rule in §3.
 - The voice must not sound like it is hesitating ("ആ, അത്..."). The spoken script starts straight with the point or "സാർ,", and never uses filler sounds (ആ, ഓ, അത്, ഉം). Set in app/agent/spoken.py and business_rules.yaml `speaking_style`.
+
+## 22. Always use the earlier chat (user, 2026-10-27)
+- Customers carry on from earlier chats, even days later. The bot reads the earlier messages before every reply and never re-asks what it already knows. History sent to the AI: 20 messages (`bot.history_messages`), older ones cut to 400 chars, last two nearly whole. Prompt rule in HOW TO THINK.

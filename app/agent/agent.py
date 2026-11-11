@@ -111,7 +111,7 @@ def plain_dashes(text: str) -> str:
     return text.translate(_ODD_DASHES)
 
 MAX_TOOL_ROUNDS = 5
-HISTORY_CHARS = 300
+HISTORY_CHARS = 400
 RECENT_CHARS = 1200  # the last two messages stay (nearly) whole: the customer is almost always answering them
 DATA_TOOLS = frozenset({"search_cars", "get_car_details", "emi_estimate"})
 MAX_REPLY_TOKENS = 700

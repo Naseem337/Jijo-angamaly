@@ -30,6 +30,39 @@ class InboundMessage:
         return self.type in TEXT_LIKE and bool(self.text.strip())
 
 
+@dataclass(frozen=True)
+class EchoMessage:
+    """A message a person sent to a customer from the WhatsApp Business app (coexistence number)."""
+    id: str
+    phone: str  # the customer the message went to, E.164
+    type: str
+    timestamp: datetime
+    text: str = ""
+
+
+def parse_echoes(payload: dict[str, Any], phone_number_id: str) -> list[EchoMessage]:
+    """Messages staff typed in the phone app. Meta sends them as field `smb_message_echoes`;
+    messages sent through the API are not echoed."""
+    found: list[EchoMessage] = []
+    for entry in payload.get("entry") or []:
+        for change in entry.get("changes") or []:
+            value = change.get("value") or {}
+            if change.get("field") != "smb_message_echoes":
+                continue
+            if (value.get("metadata") or {}).get("phone_number_id") != phone_number_id:
+                continue
+            for msg in value.get("message_echoes") or []:
+                phone = try_normalize_phone("+" + str(msg.get("to", "")))
+                if not phone or not msg.get("id"):
+                    continue
+                found.append(EchoMessage(
+                    id=msg["id"], phone=phone, type=msg.get("type", "unknown"),
+                    timestamp=datetime.fromtimestamp(int(msg.get("timestamp", 0)), tz=timezone.utc),
+                    text=_text_of(msg),
+                ))
+    return found
+
+
 def verify_signature(app_secret: str, body: bytes, header: str | None) -> bool:
     """Meta signs every POST: X-Hub-Signature-256: sha256=<hex HMAC of the raw body>."""
     if not header or not header.startswith("sha256="):
