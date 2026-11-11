@@ -5,7 +5,7 @@
 <script>try{var th=localStorage.getItem("rd-theme");if(th==="dark"||(!th&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.dataset.theme="dark";if(localStorage.getItem("rd-collapsed")==="1")document.documentElement.classList.add("collapsed")}catch(e){}</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#7c5cff">
+<meta name="theme-color" content="#171717">
 <link rel="manifest" href="{{ BASE }}/manifest.webmanifest">
 <link rel="icon" type="image/png" href="{{ BASE }}/static/icon-192.png">
 <link rel="apple-touch-icon" href="{{ BASE }}/static/apple-touch-icon.png">
@@ -13,15 +13,16 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Resort Desk">
 <title>{% block title %}Resort Desk{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="{{ BASE }}/static/app.css?v={{ ASSET_V }}">
+<link rel="stylesheet" href="{{ BASE }}/static/frappe.css?v={{ ASSET_V }}">
 </head>
 <body>
 {% from "macros.html" import icon %}
 {% if user %}
 <div class="shell">
   <aside class="sidebar" id="sidebar">
-    <a class="brand" href="{{ BASE }}/"><span class="logo">🌴</span><span>Resort Desk</span></a>
+    <a class="brand" href="{{ BASE }}/"><span class="logo">{{ icon('leaf') }}</span><span>Resort Desk</span></a>
     <div class="scope">
       <label for="scope">Property</label>
       <select id="scope" data-scope="{{ cur_prop }}">
@@ -53,7 +54,7 @@
         {{ icon('search') }}<input id="global-search" name="q" placeholder="Search anything..." value="{{ q if nav == '' else '' }}" autocomplete="off">
       </form>
       <div class="user-menu">
-        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch between day and night mode" title="Day / Night"><span>☀️</span><span>🌙</span></button>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch between day and night mode" title="Day / Night"><span>{{ icon('sun') }}</span><span>{{ icon('moon') }}</span></button>
         <div class="user-drop">
           <button class="user-btn" id="user-btn" type="button" aria-haspopup="true" aria-expanded="false">
             <span class="avatar">{{ (user.name or user.email)[:1]|upper }}<i class="online"></i></span>

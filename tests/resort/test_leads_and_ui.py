@@ -164,8 +164,9 @@ def test_pages_link_a_versioned_stylesheet_so_browsers_never_show_an_old_design(
     _repo, app, _ = env
     client, _ = login(app)
     home = client.get(f"{BASE}/").text
-    assert "static/app.css?v=" in home and "static/app.js?v=" in home and "🌴" in home
+    assert "static/app.css?v=" in home and "static/frappe.css?v=" in home and "static/app.js?v=" in home and "🌴" not in home
     assert client.get(f"{BASE}/static/app.css").headers["cache-control"] == "no-cache"
+    assert client.get(f"{BASE}/static/frappe.css").status_code == 200
 
 
 def test_home_hides_the_waiting_for_payment_card_when_nothing_is_waiting(env):

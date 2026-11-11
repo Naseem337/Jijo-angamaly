@@ -1,6 +1,6 @@
 <div class="drawer-head">
   <div><h3>{{ day.strftime('%A') }}</h3><p class="muted">{{ day.strftime('%d %B %Y') }} · {{ prop.name }}</p></div>
-  <button type="button" class="btn ghost sm" data-drawer-close aria-label="Close">✕</button>
+  <button type="button" class="btn ghost sm" data-drawer-close aria-label="Close">&times;</button>
 </div>
 <div class="drawer-stats"><div><b>{{ used }}</b><small>rooms taken</small></div><div><b>{{ free }}</b><small>rooms free</small></div><div><b>{{ total }}</b><small>total</small></div></div>
 <a class="btn primary block" href="{{ BASE }}/bookings/new?property_id={{ prop.id }}&room_type_id={{ rt_id }}&check_in={{ day }}">+ New booking for {{ day.strftime('%d %b') }}</a>

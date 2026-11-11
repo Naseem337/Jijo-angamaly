@@ -124,7 +124,7 @@ def ist(value: datetime | None, fmt: str = "%d %b %Y, %I:%M %p") -> str:
 def _asset_version() -> str:
     """Changes whenever the stylesheet or script file changes (a new deploy), so browsers never show an old design."""
     try:
-        return str(int(max((HERE / "static" / name).stat().st_mtime for name in ("app.css", "app.js"))))
+        return str(int(max((HERE / "static" / name).stat().st_mtime for name in ("app.css", "frappe.css", "app.js"))))
     except OSError:
         return "1"
 

@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% from "macros.html" import icon %}
 {% block title %}Log in · Resort Desk{% endblock %}
 {% block bare %}
 <div class="login-wrap">
   <form class="login-card" method="post" action="{{ BASE }}/login">
-    <div class="login-logo"><span class="logo">🌴</span></div>
-    <h1>Welcome back 👋</h1>
+    <div class="login-logo"><span class="logo">{{ icon('leaf') }}</span></div>
+    <h1>Welcome back</h1>
     <p class="muted">Sign in to manage your stays and guests.</p>
     {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
     <label class="field"><span>Email</span><input type="email" name="email" required autofocus></label>

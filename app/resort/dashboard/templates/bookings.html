@@ -25,5 +25,6 @@
 <td>{% if b.paid_amount %}{{ method_chip(b.payment_method or 'online') }}<small class="block">{{ b.paid_amount|rupees }} paid{% if b.balance %} · {{ b.balance|rupees }} due{% endif %}</small>{% else %}<span class="muted">Unpaid</span>{% endif %}</td>
 <td>{{ pill(b.status) }}</td></tr>
 {% else %}<tr><td colspan="8">{{ empty("No bookings match these filters", "book", BASE ~ "/bookings/new", "Create a booking") }}</td></tr>{% endfor %}
-</tbody></table></div>
+</tbody></table>
+<div class="list-foot"><span>{{ items|length }} of {{ items|length }}</span><span>{{ collected|rupees }} collected</span></div></div>
 {% endblock %}

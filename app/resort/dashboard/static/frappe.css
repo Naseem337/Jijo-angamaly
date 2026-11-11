@@ -1,0 +1,191 @@
+/* Frappe Desk look (v15 / ERPNext): neutral, flat, dense. Loaded AFTER app.css: it only restyles, nothing else.
+   No gradients, no glass, no glow, no big shadows. Colours come from the tokens below. */
+:root{
+  --bg:#f8f8f8;--card:#fff;--ink:#383838;--muted:#7c7c7c;--line:#ededed;--line-2:#e2e2e2;--soft:#fafafa;--hover:#f7f7f7;
+  --gray-soft:#f3f3f3;--control-bg:#f3f3f3;
+  --brand:#171717;--brand-d:#171717;--brand-soft:#f3f3f3;--on-brand:#fff;--grad:none;
+  --green:#2b8a57;--green-soft:#e4f5e9;--amber:#b8581a;--amber-soft:#fff1e7;--red:#d83a3a;--red-soft:#fff0f0;
+  --blue:#2d6cb5;--blue-soft:#e8f1fb;--ring:#e2e2e2;--glass:#fff;--bar:#fff;
+  --radius:8px;--radius-sm:6px;--btn-h:28px;--shadow:none;--shadow-lg:0 4px 14px rgba(0,0,0,.10);
+}
+html[data-theme=dark]{
+  --bg:#141414;--card:#1c1c1c;--ink:#e4e4e4;--muted:#9a9a9a;--line:#2b2b2b;--line-2:#363636;--soft:#181818;--hover:#222;
+  --gray-soft:#262626;--control-bg:#262626;--brand:#ededed;--brand-d:#ededed;--brand-soft:#262626;--on-brand:#171717;
+  --green:#5cc690;--green-soft:#17301f;--amber:#f0a36b;--amber-soft:#35261a;--red:#f08080;--red-soft:#361d1d;
+  --blue:#7fb0ea;--blue-soft:#1b2a3d;--ring:#3a3a3a;--glass:#1c1c1c;--bar:#1c1c1c;--shadow-lg:0 4px 14px rgba(0,0,0,.5);
+}
+body{font:13px/1.5 Inter,-apple-system,"Segoe UI","Noto Sans","Noto Sans Malayalam","Noto Sans Tamil","Noto Sans Devanagari",sans-serif!important;
+  background:var(--bg)!important;color:var(--ink);-webkit-font-smoothing:antialiased}
+a{color:var(--ink)}a:hover{text-decoration:underline}
+h1{font-size:18px;font-weight:600;letter-spacing:0}h3{font-size:13px;font-weight:600;margin:0 0 8px}
+small{font-size:12px}code{border-radius:4px;padding:1px 5px}
+.ic{width:15px;height:15px}
+
+/* ---------- shell: sidebar and top bar ---------- */
+.sidebar{background:var(--bg);backdrop-filter:none;border-right:1px solid var(--line);padding:10px 8px;box-shadow:none}
+.brand{gap:8px;font-size:13px;font-weight:600;padding:4px 8px 12px}
+.logo,html .logo{width:24px;height:24px;border-radius:6px;background:var(--brand);color:var(--on-brand);box-shadow:none;font-size:12px}
+.logo .ic{width:14px;height:14px}
+.nav-label{font-size:11px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:12px 8px 4px}
+.sidebar nav a{height:28px;padding:0 8px;border-radius:var(--radius-sm);gap:8px;font-size:13px;font-weight:400;color:var(--ink);margin-bottom:1px}
+.sidebar nav a .ic{color:var(--muted)}
+.sidebar nav a:hover{background:#efefef;text-decoration:none}html[data-theme=dark] .sidebar nav a:hover{background:#242424}
+.sidebar nav a.active{background:#e9e9e9;color:var(--ink);font-weight:500}html[data-theme=dark] .sidebar nav a.active{background:#2a2a2a}
+.sidebar nav a.active .ic{color:var(--ink)}
+.scope{padding:0 0 4px}.scope label{font-size:12px;color:var(--muted)}
+.topbar{height:44px;padding:0 16px;gap:10px;background:var(--card);backdrop-filter:none;border-bottom:1px solid var(--line)}
+.search{height:var(--btn-h);max-width:340px;background:var(--control-bg);border:1px solid transparent;border-radius:var(--radius-sm);padding:0 8px}
+.search:focus-within{background:var(--card);border-color:transparent;box-shadow:0 0 0 2px var(--ring)}
+.search input{padding:0;height:26px;font-size:13px}
+.icon-btn{width:var(--btn-h);height:var(--btn-h);border:0;background:transparent;border-radius:var(--radius-sm);color:var(--muted)}
+.icon-btn:hover{background:var(--gray-soft);color:var(--ink)}
+.theme-toggle{border:0;background:transparent;padding:0;gap:0;border-radius:var(--radius-sm)}
+.theme-toggle span{width:var(--btn-h);height:var(--btn-h);border-radius:var(--radius-sm);font-size:0;opacity:.45;color:var(--muted)}
+.theme-toggle .ic{width:15px;height:15px}
+html:not([data-theme=dark]) .theme-toggle span:first-child,html[data-theme=dark] .theme-toggle span:last-child{background:var(--gray-soft);opacity:1;box-shadow:none;color:var(--ink)}
+.avatar,html .avatar{width:24px;height:24px;font-size:11px;background:var(--gray-soft);color:var(--ink)}
+.avatar .online{display:none}
+.user-btn{padding:2px 6px;border-radius:var(--radius-sm)}.who b{font-size:12px}.who small{font-size:11px}
+.drop-menu{border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:4px}
+.drop-menu a,.drop-menu button{padding:6px 8px;border-radius:var(--radius-sm);font-weight:400;font-size:13px}
+.content{padding:16px 20px;max-width:1280px}
+.crumbs{font-size:12px;margin:0 0 8px;gap:6px}.crumbs .ic{width:13px;height:13px}.crumbs b{font-weight:500}
+@media(min-width:1025px){
+  .sidebar{width:220px}
+  html.collapsed .sidebar{width:48px}
+  html.collapsed .sidebar nav a{justify-content:center;padding:0}
+}
+
+/* ---------- page header ---------- */
+.page-head{align-items:center;margin-bottom:12px;gap:8px}
+.page-head>div:first-child{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.page-head p{margin:0;font-size:12px}
+.actions{gap:6px}
+
+/* ---------- buttons ---------- */
+.btn,html .btn{height:var(--btn-h);padding:0 10px;border-radius:var(--radius-sm);font-size:13px;font-weight:500;box-shadow:none;
+  border:1px solid var(--line-2);background:var(--card);color:var(--ink);gap:5px;transition:none}
+.btn:hover{background:var(--hover);text-decoration:none}
+.btn.primary,html .btn.primary{background:var(--brand);border-color:var(--brand);color:var(--on-brand);box-shadow:none;filter:none}
+.btn.primary:hover{background:var(--brand);opacity:.88;color:var(--on-brand)}
+.btn.danger{color:var(--red);border-color:var(--line-2);background:var(--card)}.btn.danger:hover{background:var(--red-soft)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}.btn.ghost:hover{background:var(--gray-soft);color:var(--ink)}
+.btn.sm{height:24px;padding:0 8px;font-size:12px}.btn.block{height:32px;width:100%}
+.btn .ic{width:14px;height:14px}
+
+/* ---------- forms ---------- */
+input,select,textarea,html input,html select,html textarea{background:var(--control-bg);color:var(--ink);border:1px solid transparent;border-radius:var(--radius-sm);
+  height:var(--btn-h);padding:0 8px;font-size:13px;box-shadow:none}
+textarea,html textarea{height:auto;padding:6px 8px}
+input:focus,select:focus,textarea:focus,html input:focus,html select:focus,html textarea:focus{background:var(--card);border-color:transparent;box-shadow:0 0 0 2px var(--ring)}
+input::placeholder,textarea::placeholder{color:#9b9b9b}
+input[type=checkbox],input[type=radio]{height:auto;accent-color:var(--brand)}
+.field>span{font-size:12px;font-weight:400;color:var(--muted);margin-bottom:4px}
+.field small{margin-top:2px}.req{color:var(--red)}
+.check{margin:6px 0;font-weight:400}
+.filters{gap:6px;margin-bottom:10px}.filters select,.filters input{min-width:120px}
+.inline-form{gap:6px}
+.alert{border-radius:var(--radius-sm);padding:8px 10px}
+.savebar{background:var(--card);backdrop-filter:none;border-top:1px solid var(--line);padding:8px 0;gap:6px;box-shadow:none}
+
+/* ---------- cards, number cards, lists ---------- */
+.card,.stat,.quick a,.room-card,.cal-grid,.drawer,.modal,.range-pop,.login-card,html .card{background:var(--card);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:none;color:var(--ink)}
+.card{padding:12px 14px;margin-bottom:12px}
+.card>h3:first-child{padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid var(--line)}
+.stats{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px}
+.stat,html .stat{padding:10px 12px;gap:0}
+.stat::after{display:none}
+.stat-ic{display:none}
+.stat small{font-size:12px;color:var(--muted)}
+.stat b{font-size:22px;font-weight:600;line-height:1.3;margin-top:2px}
+.stat em{font-size:12px}
+a.stat:hover,.room-card:hover,.quick a:hover,.cal-day:hover,a.card:hover{transform:none;box-shadow:none;border-color:var(--line-2);text-decoration:none}
+.grid2,.cards{gap:12px}.grid2>.card{margin-bottom:12px}
+.row{padding:7px 0}.row:hover{text-decoration:none;background:var(--hover)}
+.empty{padding:20px}.empty-ic{background:var(--gray-soft);color:var(--muted);border-radius:var(--radius)}
+table.list th{background:var(--card);color:var(--muted);font-size:12px;font-weight:500;text-transform:none;letter-spacing:0;padding:6px 12px;
+  border-bottom:1px solid var(--line);white-space:nowrap}
+table.list td{padding:7px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr.click:hover td,table.list tbody tr:hover td{background:#fafafa}
+html[data-theme=dark] tr.click:hover td,html[data-theme=dark] table.list tbody tr:hover td{background:#222}
+.table-wrap{border-radius:var(--radius)}
+.list-foot{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+
+/* ---------- status pills: soft tint ---------- */
+.pill,html .pill{padding:1px 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--gray-soft);color:var(--muted);gap:5px}
+.pill:before{width:6px;height:6px;opacity:.9}
+.pill.paid,.pill.confirmed,.pill.completed,.pill.checked_out.ok,html .pill.paid{background:var(--green-soft);color:var(--green)}
+.pill.hold,.pill.pending,html .pill.hold{background:var(--amber-soft);color:var(--amber)}
+.pill.failed,.pill.expired,.pill.cancelled{background:var(--red-soft);color:var(--red)}
+.pill.checked_in{background:var(--blue-soft);color:var(--blue)}
+.pill.checked_out{background:var(--gray-soft);color:var(--muted)}
+.mchip,.idchip,.chip,.tag,.chips-static span{border-radius:999px;font-size:11px;font-weight:500}
+.kpi-pill{border-radius:999px;border-color:var(--line-2);font-weight:500;padding:2px 4px 2px 10px}.kpi-pill b{background:var(--brand);color:var(--on-brand)}
+
+/* ---------- form view / details ---------- */
+.kv{grid-template-columns:130px 1fr;gap:6px 12px}
+.timeline{border-left:1px solid var(--line)}.timeline li:before{width:7px;height:7px;left:-15px;background:var(--muted)}
+.notes{border-radius:var(--radius-sm);background:var(--control-bg)}
+.preview{border-radius:var(--radius-sm);font-weight:500}.preview.ok{background:var(--green-soft);color:var(--green)}
+.callout{border-radius:var(--radius-sm)}
+.modal{border:1px solid var(--line);box-shadow:var(--shadow-lg);border-radius:var(--radius)}.modal::backdrop{backdrop-filter:none;background:rgba(0,0,0,.35)}
+.modal-head{border-bottom:1px solid var(--line)}
+.drop-menu,.range-pop{box-shadow:var(--shadow-lg);border-radius:var(--radius)}
+.toast{border-radius:var(--radius-sm);background:#262626}
+.room-card,.cal-day,.cal-grid{border-radius:var(--radius)}
+.bubble{box-shadow:none;border-radius:var(--radius)}.bubble.out{background:var(--gray-soft)}
+.occ-bars i{background:#c9c9c9}.occ-bars i.mid{background:#8f8f8f}.occ-bars i.full{background:var(--brand)}
+.meter,.bar{border-radius:3px}
+
+/* ---------- sign-in ---------- */
+.login-card,html .login-card{max-width:360px;padding:24px;border-radius:var(--radius);box-shadow:none;background:var(--card);border:1px solid var(--line)}
+.login-wrap{background:var(--bg)}
+.login-logo{background:var(--brand);color:var(--on-brand);box-shadow:none;border-radius:8px}
+
+/* ---------- type scale: beats the older "larger text" blocks in app.css (13px base, 12px small, 11px pills) ---------- */
+html{font-size:13px}
+html body{font-size:13px;line-height:1.5}
+html body h1{font-size:18px;font-weight:600;line-height:1.3;letter-spacing:0}
+html body h3,html body .card h3{font-size:13px;font-weight:600;margin:0 0 8px}
+html body small,html body .muted small{font-size:12px}
+html body code{font-size:12px}
+html body .brand{font-size:13px;padding:4px 8px 12px}
+html body .logo{width:24px;height:24px;border-radius:6px;font-size:12px}
+html body .sidebar nav a{font-size:13px;height:28px;padding:0 8px;border-radius:6px;margin-bottom:1px;font-weight:400}
+html body .sidebar nav a.active{font-weight:500}
+html body .scope select{font-size:13px;height:28px;padding:0 8px}
+html body .scope label{font-size:11px}
+html body .nav-label{font-size:11px;padding:12px 8px 4px}
+html body .search{max-width:340px;border-radius:6px}
+html body .search input{font-size:13px;padding:0;height:26px}
+html body .avatar{width:24px;height:24px;font-size:11px}
+html body .who b{font-size:12px}html body .who small{font-size:11px}
+html body .page-head{margin-bottom:12px}
+html body .page-head p{font-size:12px;margin:0}
+html body .stats{gap:8px}
+html body .stat{padding:10px 12px;border-radius:8px}
+html body .stat small{font-size:12px;font-weight:400}
+html body .stat b{font-size:22px;font-weight:600;margin-top:2px}
+html body .stat em{font-size:12px}
+html body .quick a{font-size:13px;padding:8px 10px}
+html body .row{padding:7px 0;font-size:13px}html body .row span{font-size:13px}
+html body .empty,html body .empty p{font-size:13px}
+html body table.list th,html body table.list td{font-size:13px}
+html body table.list th{font-size:12px}
+html body .btn{font-size:13px;height:28px;padding:0 10px;border-radius:6px;font-weight:500}
+html body .btn.sm{height:24px;font-size:12px;padding:0 8px}
+html body .btn.block{height:32px}
+html body input,html body select,html body textarea{font-size:13px;border-radius:6px}
+html body .field>span{font-size:12px;font-weight:400}
+html body .pill{font-size:11px;padding:1px 8px;font-weight:500}
+html body .mchip,html body .idchip{font-size:11px;padding:1px 8px;background:var(--gray-soft);color:var(--ink);font-weight:500}
+html body .chip,html body .chips-static span,html body .tag{font-size:12px}
+html body .crumbs{font-size:12px}
+html body .modal-head h3,html body .drawer-head h3{font-size:14px}
+html body .kv{font-size:13px}
+html body .room-rate,html body .money-strip b{font-size:18px}
+html body .cal-nav h2{font-size:15px}
+html body .login-card h1{font-size:18px}
+html body .timeline li,html body .timeline li b{font-size:13px}html body .timeline small{font-size:12px}
+html body .bubble,html body .composer input,html body .convo{font-size:13px}

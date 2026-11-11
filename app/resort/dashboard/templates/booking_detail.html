@@ -57,7 +57,7 @@
   {% if b.status not in ('cancelled', 'expired', 'failed') and f.balance > 0 %}
     <button type="button" class="btn primary" data-open="pay-dialog">{{ icon('cash') }} {{ 'Record balance payment' if b.paid_amount else 'Record payment' }}</button>
   {% endif %}
-  {% if b.status == 'hold' and not b.paid_amount %}<button type="button" class="btn" data-open="discount-dialog">🏷️ Give discount</button>{% endif %}
+  {% if b.status == 'hold' and not b.paid_amount %}<button type="button" class="btn" data-open="discount-dialog">{{ icon('tag') }} Give discount</button>{% endif %}
   {% if b.status in ('hold', 'expired', 'failed') %}{{ act('resend_link', 'Resend payment link') }}{% endif %}
   {% if left_to_refund > 0 and b.status in ('cancelled', 'checked_in', 'checked_out') %}
     <button type="button" class="btn" data-open="refund-dialog">Record refund</button>
