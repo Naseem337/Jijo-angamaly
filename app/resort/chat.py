@@ -46,6 +46,9 @@ GREETING = re.compile(r"^\W*((hi+|hello+|hey+|hai+|hlo|hola|namaste|namaskar\w*|
                       r"|നമസ്കാരം|ഹായ്|ഹലോ|வணக்கம்|ஹாய்|நமஸ்தே|नमस्ते|हाय|हेलो|हैलो)\W*$", re.IGNORECASE)
 # Styles the AI may report. Fixed messages (payment, ID) use the script language; Latin-script styles get English.
 STYLES = ("en", "ml", "manglish", "hi", "hinglish", "ta", "tanglish")
+# Replies are ALWAYS in English letters (user, 2026-11-11): a guest who writes or speaks Malayalam / Tamil / Hindi gets
+# Manglish / Tanglish / Hinglish, never the native script.
+LATIN_STYLE = {"ml": "manglish", "ta": "tanglish", "hi": "hinglish"}
 STYLE_LANG = {"en": "en", "ml": "ml", "hi": "hi", "ta": "ta", "manglish": "mn", "hinglish": "en", "tanglish": "en"}
 INDIC = re.compile(r"[\u0900-\u097f\u0b80-\u0bff\u0d00-\u0d7f]")
 HELLO = re.compile(r"^\W*(hello+|hey+)", re.IGNORECASE)
@@ -247,7 +250,7 @@ class ChatMixin:
         pull the AI into mixing languages."""
         own = st.get("gs", "")
         if own in LANG_NAMES:
-            style = own
+            style = LATIN_STYLE[own]  # Malayalam / Tamil / Hindi script in -> Manglish / Tanglish / Hinglish out
         elif is_language_neutral(text):
             style = st.get("style") or "en"  # 'ok' / 'hi' / a name: the guest's own language so far
         elif MANGLISH_WORDS.search(text) and not HINGLISH_WORDS.search(text):
@@ -272,12 +275,12 @@ class ChatMixin:
             f"Today is {today.isoformat()} ({today.strftime('%A')}), India time.\n\n"
             "LANGUAGE\n"
             "- Work out the guest's language from their message. Never ask which language they want.\n"
-            "- Reply in the same one: English, Malayalam script, Manglish (Malayalam in English letters), Hindi, "
-            "Hinglish, Tamil script, or Tanglish. If they switch, you switch. Short words like 'ok' or 'hi' keep "
-            "the language so far.\n"
+            "- Reply in the same language but ALWAYS in English letters, never in Malayalam, Tamil or Hindi script: "
+            "English -> English; Malayalam (typed in any script, or spoken) -> Manglish; Tamil -> Tanglish; Hindi -> "
+            "Hinglish. If they switch, you switch. Short words like 'ok' or 'hi' keep the language so far.\n"
             "- Use ONE language per reply, the guest's own. Malayalam typed in English letters ('avde engane und', "
             "'room undo', 'evide', 'ethra aaya') is Manglish: answer in Manglish, in English letters only, NEVER in "
-            "Malayalam script. Malayalam script gets Malayalam script. English gets English. Never mix scripts or "
+            "Malayalam script. Malayalam script gets Manglish too. English gets English. Never mix languages or "
             "languages in one reply; plain English words like room, booking, check-in, payment and price are fine "
             "inside Manglish. Example: guest 'Alleppey il room undo' -> 'Und sir, Alleppey il rooms und. Ethra "
             "aalkkaar und, ethra divasam?'\n"
@@ -420,13 +423,9 @@ class ChatMixin:
         """What is wrong with the AI's reply, as an instruction for one rewrite ('' = nothing)."""
         own = st.get("gs", "")  # ml / ta / hi when the guest writes in that script, else English letters
         present = {k for k, rx in SCRIPTS.items() if rx.search(reply)}
-        if own not in LANG_NAMES:
-            if present:
-                return ("Rewrite that reply using only English letters (Manglish or English). Do not use Malayalam, "
-                        "Tamil or Hindi script.")
-        elif present - {own}:
-            others = " or ".join(LANG_NAMES[k] for k in sorted(present - {own}))
-            return f"Rewrite that reply in {LANG_NAMES[own]} only (English words are fine). Do not use {others} script."
+        if present:
+            want = {"ml": "Manglish", "ta": "Tanglish", "hi": "Hinglish"}.get(own, "Manglish, Tanglish, Hinglish or English, the guest's own language")
+            return f"Rewrite that reply using only English letters ({want}). Do not use Malayalam, Tamil or Hindi script."
         if HINGLISH_WORDS.search(guest_text) and not MANGLISH_WORDS.search(guest_text):
             st["hing"] = True
         if st.get("hing") and not MANGLISH_WORDS.search(guest_text) and MANGLISH_WORDS.search(reply):
@@ -574,7 +573,7 @@ class ChatMixin:
         if style not in STYLES:
             return
         if st.get("gs") in LANG_NAMES:  # the guest writes in this script: that decides, whatever the AI called it
-            st["lang"], st["style"] = st["gs"], st["gs"]
+            st["lang"], st["style"] = st["gs"], LATIN_STYLE[st["gs"]]
             return
         if style in LANG_NAMES:  # a script label for a guest who writes in English letters
             style = {"ml": "manglish", "ta": "tanglish", "hi": "hinglish"}[style]

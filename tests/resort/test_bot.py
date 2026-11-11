@@ -144,9 +144,10 @@ def test_hi_asks_where_with_no_menu_and_no_ai_call(world):
 def test_greeting_in_other_scripts_answers_in_that_language(world):
     w = world
     say(w, "ഹായ്")
-    assert "എവിടെ" in w.wa.texts()[-1] and w.repo.get_state(GUEST)["lang"] == "ml"
+    assert "Evide" in w.wa.texts()[-1] and w.repo.get_state(GUEST)["lang"] == "ml"  # Malayalam in -> Manglish out
     say(w, "नमस्ते", "+919847000099")
-    assert "कहाँ" in w.wa.texts("+919847000099")[-1]
+    assert "Where are you" in w.wa.texts("+919847000099")[-1]  # Hindi in -> English letters out
+    assert not any(ord(c) > 0x900 for c in w.wa.texts("+919847000099")[-1])
 
 
 def test_booking_chat_end_to_end_with_payment_link(world):
@@ -691,8 +692,16 @@ def test_manglish_guest_never_gets_malayalam_script(world):
 
 def test_malayalam_script_guest_is_not_rewritten(world):
     w = world
-    say(w, "അവിടെ എങ്ങനെയുണ്ട്", GUEST, reply("അവിടെ നല്ലതാണ്, ബീച്ച് ഉണ്ട്"))
-    assert w.wa.texts() == ["അവിടെ നല്ലതാണ്, ബീച്ച് ഉണ്ട്"] and len(w.llm.calls) == 1
+    say(w, "അവിടെ എങ്ങനെയുണ്ട്", GUEST, reply("Avide nallathaanu, beach und"))
+    assert w.wa.texts() == ["Avide nallathaanu, beach und"] and len(w.llm.calls) == 1
+    assert "Manglish" in w.llm.calls[0].system.split("REPLY LANGUAGE (")[1]
+
+
+def test_a_native_script_reply_is_rewritten_to_english_letters_for_a_script_guest(world):
+    w = world
+    say(w, "അവിടെ എങ്ങനെയുണ്ട്", GUEST, reply("അവിടെ നല്ലതാണ്"), reply("Avide nallathaanu"))
+    assert w.wa.texts() == ["Avide nallathaanu"]
+    assert "only English letters (Manglish)" in w.llm.calls[1].messages[-1].content
 
 
 def test_ok_after_a_statement_gets_no_reply_but_ok_after_a_question_does(world):
@@ -1022,7 +1031,7 @@ def test_the_guests_own_script_decides_the_fixed_language_whatever_the_ai_calls_
     say(w, "ஆலப்புழாவில் ரூம் இருக்கா? டிசம்பர் 25, 2 பேர்", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-12-25", nights=2, adults=2, language="ml"),
         reply("கிடைக்கும் sir."))
-    assert w.repo.get_state(GUEST)["lang"] == "ta" and w.repo.get_state(GUEST)["style"] == "ta"
+    assert w.repo.get_state(GUEST)["lang"] == "ta" and w.repo.get_state(GUEST)["style"] == "tanglish"
     say(w, "ok", "+919847000021", tool("check_availability", place="Alleppey", check_in="2026-12-25", nights=2,
                                        adults=2, language="ml"), reply("ok"))  # neutral first word, AI says script
     assert w.repo.get_state("+919847000021")["lang"] == "mn"  # an English-letters guest never gets script messages
@@ -1030,10 +1039,10 @@ def test_the_guests_own_script_decides_the_fixed_language_whatever_the_ai_calls_
 
 def test_a_foreign_script_inside_a_reply_gets_one_rewrite(world):
     w = world
-    say(w, "ஆலப்புழாவில் ரூம் இருக்கா?", GUEST, reply("அതെ sir, ரூம் இருக்கு."), reply("ஆமா sir, ரூம் இருக்கு."))
-    assert w.wa.texts() == ["ஆமா sir, ரூம் இருக்கு."]
-    assert "Rewrite that reply in Tamil only" in w.llm.calls[1].messages[-1].content
-    assert "Do not use Malayalam script" in w.llm.calls[1].messages[-1].content
+    say(w, "ஆலப்புழாவில் ரூம் இருக்கா?", GUEST, reply("அതെ sir, ரூம் இருக்கு."), reply("Aama sir, room irukku."))
+    assert w.wa.texts() == ["Aama sir, room irukku."]
+    assert "only English letters (Tanglish)" in w.llm.calls[1].messages[-1].content
+    assert "Do not use Malayalam, Tamil or Hindi script" in w.llm.calls[1].messages[-1].content
 
 
 def test_a_plain_offers_question_never_gets_a_no_offer_answer(world):
@@ -1143,8 +1152,8 @@ def test_the_reply_language_is_decided_from_the_latest_message_only(world):
     say(w, "Do you have a room for 3 people on 20 Nov for 2 nights?", GUEST, reply("Yes, we do."))
     tail = w.llm.calls[-1].system.split("REPLY LANGUAGE (")[1]
     assert "English" in tail and "Manglish" not in tail
-    say(w, "ഒരു റൂം വേണം", GUEST, reply("ശരി."))
-    assert "Malayalam script" in w.llm.calls[-1].system.split("REPLY LANGUAGE (")[1]
+    say(w, "ഒരു റൂം വേണം", GUEST, reply("Sheri."))
+    assert "Manglish" in w.llm.calls[-1].system.split("REPLY LANGUAGE (")[1]
     say(w, "ok", GUEST, reply("[no reply]"))  # a neutral message keeps the guest's own language so far
 
 

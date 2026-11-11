@@ -58,3 +58,10 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - The bot remembers every guest. The prompt always carries a short GUEST RECORDS block (cheap); the chat shown is the current conversation (6 h gap = new one). Older chat is kept and read on demand with the `recall_old_chat` tool (last 30 earlier messages, links hidden); old bookings and payments come from the records or the `my_bookings` tool (last 5).
 - Only when the guest refers to something earlier ("as I told you", "my last booking", "the link you sent", a payment query) does the bot look. Greetings, small talk and timepass get a short polite reply with no lookup (no extra tokens).
 - Payment questions about an old booking are answered politely and plainly (paid, what is left at the property, on hold, expired). An old link is never pasted: only `send_payment_link` sends one, and only for a booking still on hold.
+
+## Always English letters (user, 2026-11-11, replaces "Malayalam script gets Malayalam script")
+Whatever language the guest writes or speaks (typed or voice note), the reply is in English letters only:
+English -> English, Malayalam (any script, or a voice note) -> Manglish, Tamil -> Tanglish, Hindi -> Hinglish.
+Native script is never sent. Code: `LATIN_STYLE` in chat.py (language note, rewrite check, style) and `_LATIN_LANG`
+in i18n.py `t()` (fixed messages: Malayalam -> Manglish, Tamil/Hindi -> English). A reply that still contains
+native script gets one rewrite.

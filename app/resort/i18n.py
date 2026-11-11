@@ -184,7 +184,12 @@ for _key, _text in MN.items():
     S[_key]["mn"] = _text
 
 
+# Fixed messages are never sent in native script (user, 2026-11-11): Malayalam -> Manglish, Tamil / Hindi -> English.
+_LATIN_LANG = {"ml": "mn", "ta": "en", "hi": "en"}
+
+
 def t(key: str, lang: str, **values: object) -> str:
+    lang = _LATIN_LANG.get(lang, lang)
     table = S[key]
     text = table.get(lang) or table["en"]
     return text.format(**values) if values else text
