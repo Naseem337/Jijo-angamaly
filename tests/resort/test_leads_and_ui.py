@@ -85,7 +85,7 @@ def test_home_is_the_simple_front_desk_view(env):
     repo.save_booking(held)
     client, _ = login(app)
     home = client.get(f"{BASE}/").text
-    for want in ("Arrivals today", "Departures today", "In the house", "Occupancy tonight", "Collected today",
+    for want in ("Arrivals today", "Departures today", "In the house", "Collected today",
                  "Waiting for payment", "Give discount", "Next 14 days"):
         assert want in home, want
     assert "Good morning" not in home and "Good afternoon" not in home and "Good evening" not in home and "at a glance" not in home
@@ -95,14 +95,15 @@ def test_home_is_the_simple_front_desk_view(env):
     assert "WhatsApp chats" not in home  # not in the menu either
 
 
-def test_settings_lists_only_what_is_needed(env):
+def test_settings_shows_plain_status_not_variable_names(env):
     _repo, app, _ = env
     client, _ = login(app)
     page = client.get(f"{BASE}/settings").text
-    for need in ("RESORT_WHATSAPP_ACCESS_TOKEN", "RAZORPAY_KEY_ID", "GEMINI_API_KEY", "SESSION_SECRET"):
+    for need in ("WhatsApp bot", "Online payments", "AI assistant", "Rooms are held for payment"):
         assert need in page
-    for extra in ("OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "RESORT_DB_PATH"):
-        assert extra not in page
+    for hidden in ("RESORT_WHATSAPP_ACCESS_TOKEN", "RAZORPAY_KEY_ID", "GEMINI_API_KEY", "SESSION_SECRET", "RESORT_DB_PATH"):
+        assert hidden not in page  # no variable names on the owner's page
+    assert "Occupancy tonight" not in client.get(f"{BASE}/").text
 
 
 def test_collections_has_one_date_range_field_and_no_help_clutter(env):
