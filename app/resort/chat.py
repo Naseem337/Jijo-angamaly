@@ -59,7 +59,7 @@ ACK_WORDS = frozenset("""ok okay okk okey okie k kk kay thanks thank thankyou th
 # Resort words, months and place names: they say nothing about the language (the shared word list is for cars, so
 # "Pozhiyoram rooms available?" used to look like Manglish and an English guest got a Manglish reply).
 RESORT_NEUTRAL = frozenset("""
-room rooms resort resorts stay stays night nights person persons people pax adult adults kid kids child children
+room rooms resort resorts stay stays night nights per person persons people pax adult adults kid kids child children
 deluxe suite suites villa villas cottage cottages pool beach backwater backwaters houseboat lake view ac nonac
 checkin checkout check bed beds extra breakfast food meals wifi parking family couple honeymoon trip tour package
 booking book booked advance balance upi gpay phonepe paytm razorpay link payment id
@@ -80,8 +80,10 @@ def latin_style(text: str, previous: str = "en") -> str:
     english, markers, unknown = _classify_latin([w for w in words if w not in names])
     if markers:
         return "manglish"
-    if english == 0 and unknown <= 1:
-        return previous if previous in ("en", "manglish") else "en"
+    if english + unknown <= 2:  # a short message: English only if it has a real English word ('any pool nearby?')
+        if english and english >= unknown:
+            return "en"
+        return previous if previous in ("en", "manglish") else "en"  # '2 divasam', 'Asha, Kochi'
     return "manglish" if unknown > english else "en"
 
 
@@ -374,6 +376,11 @@ class ChatMixin:
             "where you left off in one short line (for example the next thing you still need). Never ask again what "
             "they already told you.\n"
             "- Always polite, concise and to the point.\n"
+            "- Talk ONLY about our resorts: rooms, prices, dates, bookings, payment, the stay, location and facilities. "
+            "For anything else (general questions, other places, news, jokes, coding, personal chat) say politely in "
+            "one short line that you can help only with resort bookings.\n"
+            "- When the guest's message carries a note that they swiped to reply to an earlier message, answer about "
+            "THAT message.\n"
             "- VERY SIMPLE: easy everyday words a school child understands, short sentences, no fancy or formal "
             "phrases ('kindly', 'we would be delighted', 'nestled', 'serene'), no sales talk. Example: guest 'rooms "
             "available?' -> 'Yes sir. Which dates?'. Room lines look like 'Deluxe - <price from the tool>/night'.\n"
@@ -510,6 +517,9 @@ class ChatMixin:
             return f"Rewrite that reply using only English letters ({want}). Do not use Malayalam, Tamil or Hindi script."
         if st.get("style") == "en" and (MANGLISH_WORDS.search(reply) or re.search(r"(?:milega|chahiye|nahi|kitne|theek|aap|mujhe)", reply, re.I)):
             return "Rewrite that reply in plain English only. The guest's latest message is in English."
+        talk = "\n".join(line for line in reply.splitlines() if not _LIST_LINE.search(line))
+        if st.get("style") == "en" and _classify_latin(_words(talk))[1]:  # Manglish words the short list misses
+            return "Rewrite that reply in plain English only. The guest's latest message is in English."
         if HINGLISH_WORDS.search(guest_text) and not MANGLISH_WORDS.search(guest_text):
             st["hing"] = True
         if st.get("hing") and not MANGLISH_WORDS.search(guest_text) and MANGLISH_WORDS.search(reply):
@@ -520,6 +530,10 @@ class ChatMixin:
         if NO_OFFER.search(reply):
             return ("Rewrite that reply without saying there is no offer or discount and without saying you cannot "
                     "reduce anything: the guest only asked. Just give the price for their dates, or ask for the dates.")
+        if (st.get("style") == "manglish" and not st.get("hing") and chatty_words(reply) >= 6
+                and latin_style(talk) == "en"):
+            return ("Rewrite that reply in Manglish (Malayalam in English letters), the guest's language. Do not "
+                    "answer in English; words like room, booking and payment are fine.")
         if chatty_words(reply) > MAX_CHAT_WORDS:
             return ("Too long. Rewrite it much shorter and simpler: answer only what the guest asked, in one or two "
                     "short lines of easy words. "
@@ -561,12 +575,17 @@ class ChatMixin:
             messages[-1].images = list(images)  # the AI sees the picture this turn only; the chat keeps just "[image]"
         before = st.get("style")
         # the language comes from everything the guest wrote since our last reply ('avde engane und' + 'Alleppey')
-        latest = messages[-1].content if messages and messages[-1].role == "user" else text
+        # only when the newest message is too short to tell (1-2 words); otherwise the newest message alone decides
+        latest = (messages[-1].content if messages and messages[-1].role == "user" and len(_words(text)) <= 2
+                  else text)
         system = self._system_prompt(st, phone, latest, fresh=len(messages) <= 1)
         if before and st.get("style") != before and messages and messages[-1].role == "user":
             # the guest switched language: say it again right on their message, the latest one decides
             note = STYLE_LABELS.get(st["style"], "English")
             messages[-1].content += f"\n\n[Reply ONLY in {note}. Ignore the language of earlier messages.]"
+        quote = getattr(self, "_quotes", {}).pop(phone, None)
+        if quote and messages and messages[-1].role == "user":
+            messages[-1].content += "\n\n" + quote
         reply = ""
         try:
             if self._llm is None:

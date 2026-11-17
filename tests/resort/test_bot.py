@@ -182,6 +182,28 @@ def test_english_with_place_and_room_words_stays_english():
         assert latin_style(text) == "manglish", text
 
 
+def test_a_swipe_reply_tells_the_ai_which_message_the_guest_answers(world):
+    w = world
+    w.wa.send_text = lambda to, text: (w.wa.sent.append((to, "text", text)), f"wamid.out{len(w.wa.sent)}")[1]
+    say(w, "need a room in Pozhiyoram", GUEST, reply("Sure. Which dates?"))
+    quoted = f"wamid.out{len(w.wa.sent)}"
+    say(w, "need a room in Pozhiyoram for 2", GUEST, reply("For how many nights?"))
+    w.llm.script.append(reply("Got it, 20 Dec."))
+    m = InboundMessage("wamid.swipe1", GUEST, "text", datetime(2026, 11, 2, 4, 31), text="20 Dec", context_id=quoted)
+    w.bot.handle(m)
+    last = w.llm.calls[-1].messages[-1].content
+    assert 'swiped to reply to your (the assistant\'s) message: "Sure. Which dates?"' in last
+    say(w, "ok thanks bye", GUEST, reply("[no reply]"))
+    assert "swiped" not in w.llm.calls[-1].messages[-1].content  # only for that one turn
+
+
+def test_manglish_guest_gets_one_rewrite_when_the_ai_answers_in_english(world):
+    w = world
+    say(w, "room undo nale", GUEST, reply("Yes, we have rooms available for tomorrow. How many people are coming?"),
+        reply("Und sir, nale rooms und. Ethra per und?"))
+    assert w.wa.texts()[-1] == "Und sir, nale rooms und. Ethra per und?"
+
+
 def test_an_essay_reply_gets_one_shorter_rewrite(world):
     w = world
     essay = " ".join(["Our resort is a lovely place by the backwaters with many things to enjoy."] * 4)

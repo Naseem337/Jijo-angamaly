@@ -9,6 +9,11 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Any plain greeting ("hi", "hello", "ഹായ്") gets exactly "Hi, How can I assist you?" (client, 2026-11-17; code, no AI call),
   but only at the START of a conversation. A "hi" in the middle of a chat (bot already replied, no 6 h gap) goes to the AI
   with the chat so far and carries on from where it left off (`_chatting_now`). Always polite, concise, to the point.
+- **Swipe-replies (client, 2026-11-17):** when a guest swipes to reply to an earlier message, the AI is told which one
+  (quoted text) and answers about it. Every chat row stores WhatsApp's message id (`chat.wamid`) for this.
+- **Resort topics only (client, 2026-11-17):** anything off-topic gets one polite line: the bot helps only with resort bookings.
+- **No mixed languages:** an English reply with Manglish words, or an English reply to a Manglish guest, gets one rewrite.
+  The newest message decides the language; earlier quick messages count only when it is 1-2 words.
 - **English in, English out (client, 2026-11-17).** The code reads the guest's language (`latin_style`): only real Manglish
   words make a message Manglish; place names, resort words, months and names never do. A message with nothing to go on
   ("Alleppey", "2 divasam") keeps the language so far. The fixed messages (payment, confirmation) follow the same

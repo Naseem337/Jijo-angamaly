@@ -141,6 +141,7 @@ class ChatMessage:
     text: str
     at: datetime
     source: str = "text"  # text | voice | button | system | staff
+    wamid: str = ""  # WhatsApp's id of the message, so a guest's swipe-reply to it can be found
 
 
 @dataclass

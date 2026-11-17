@@ -53,22 +53,32 @@ class BookingBot(IdProofMixin, ChatMixin):
         self.wa = whatsapp
         self.payments = payments
         self.clock = clock
+        self._quotes: dict[str, str] = {}  # phone -> note about the message the guest swipe-replied to
         self._llm = llm
         self._voice_in = voice_in or (lambda: None)
 
     # ------------------------------------------------------------------ sending
 
-    def _log(self, phone: str, text: str, source: str = "text") -> None:
-        self.repo.add_chat(Chat(phone, "out", text, self.clock.now(), source))
+    def _log(self, phone: str, text: str, source: str = "text", wamid: str = "") -> None:
+        self.repo.add_chat(Chat(phone, "out", text, self.clock.now(), source, wamid))
 
     def _text(self, phone: str, text: str) -> bool:
         try:
-            self.wa.send_text(phone, text)
+            wamid = self.wa.send_text(phone, text)
         except WhatsAppError as exc:
             log.error("Could not send to %s: %s", mask_phone(phone), exc)
             return False
-        self._log(phone, text)
+        self._log(phone, text, wamid=wamid if isinstance(wamid, str) else "")
         return True
+
+    def _note_quote(self, phone: str, context_id: str | None) -> None:
+        """A swipe-reply: remember which earlier message the guest is answering, for the AI's next turn."""
+        quoted = self.repo.chat_by_wamid(phone, context_id or "")
+        if quoted is None:
+            self._quotes.pop(phone, None)
+            return
+        who = "your (the assistant's) message" if quoted.direction == "out" else "their own earlier message"
+        self._quotes[phone] = f'[The guest swiped to reply to {who}: "{quoted.text[:400]}". Answer about that.]'
 
     # ------------------------------------------------------------------ entry point
 
@@ -103,7 +113,8 @@ class BookingBot(IdProofMixin, ChatMixin):
             if msg.type not in ("reaction", "sticker"):
                 self._text(phone, t("unsupported", lang))
             return "unsupported"
-        in_id = self.repo.add_chat(Chat(phone, "in", text, now, source))
+        in_id = self.repo.add_chat(Chat(phone, "in", text, now, source, msg.id))
+        self._note_quote(phone, msg.context_id)
 
         paused, since = self.repo.is_paused(phone)
         if paused:

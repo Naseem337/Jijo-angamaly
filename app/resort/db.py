@@ -115,6 +115,9 @@ class ResortRepo:
                          ("room_numbers", "TEXT NOT NULL DEFAULT ''"), ("cancel_reason", "TEXT NOT NULL DEFAULT ''")):
             if col not in have:  # databases created before payment details were stored
                 self._db.execute(f"ALTER TABLE bookings ADD COLUMN {col} {ddl}")
+        if "wamid" not in {r["name"] for r in self._db.execute("PRAGMA table_info(chat)")}:
+            self._db.execute("ALTER TABLE chat ADD COLUMN wamid TEXT NOT NULL DEFAULT ''")
+        self._db.execute("CREATE INDEX IF NOT EXISTS chat_wamid ON chat(wamid)")
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
@@ -326,9 +329,16 @@ class ResortRepo:
     def add_chat(self, m: ChatMessage) -> int:
         """Store a message and return its id (a later message always has a bigger one)."""
         with self._lock:
-            cur = self._db.execute("INSERT INTO chat(phone, direction, text, at, source) VALUES(?,?,?,?,?)",
-                                   (m.phone, m.direction, m.text, _iso(m.at), m.source))
+            cur = self._db.execute("INSERT INTO chat(phone, direction, text, at, source, wamid) VALUES(?,?,?,?,?,?)",
+                                   (m.phone, m.direction, m.text, _iso(m.at), m.source, m.wamid or ""))
             return int(cur.lastrowid)
+
+    def chat_by_wamid(self, phone: str, wamid: str) -> ChatMessage | None:
+        """The stored message with this WhatsApp id (the one a guest swipe-replied to), or None."""
+        if not wamid:
+            return None
+        r = self._one("SELECT * FROM chat WHERE phone=? AND wamid=? ORDER BY id DESC LIMIT 1", (phone, wamid))
+        return ChatMessage(r["phone"], r["direction"], r["text"], _dt(r["at"]), r["source"], r["wamid"]) if r else None  # type: ignore[arg-type]
 
     def last_outbound_text(self, phone: str) -> str | None:
         """The newest message we sent this guest (None if we never wrote to them)."""
