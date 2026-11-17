@@ -185,6 +185,17 @@ local `.env` override can't change test results.
     free) and `tc_still_looking`.
   - They must be submitted again in True Choice's own account at go-live.
 
+## Resort bot hosting (updated 2026-11-17)
+
+- **Live on Railway:** https://resort-bot-production.up.railway.app (project robust-education, service resort-bot, Trial plan,
+  region sfo, auto-deploys from GitHub main). SQLite on a Railway **volume at /data** (`RESORT_DB_PATH=/data/resort.sqlite3`),
+  so dashboard data survives redeploys. Variables: `data/railway_resort.env` (git-ignored); Railway also got the local `.env`
+  pasted, which is harmless.
+- Dashboard: /resort/admin/, login `owner@resort.local` + `RESORT_OWNER_PASSWORD`. Meta webhook points at
+  <railway>/resort/webhook (`scripts/set_resort_webhook.py <url>`). The resort Render service is **suspended**; never run
+  `scripts/dev_resort.py` unless you mean to move WhatsApp to the laptop.
+- WhatsApp token: permanent system-user token (system user "Gijo Angamaly", never expires), 2026-11-17.
+
 ## Hosting (updated 2026-10-21)
 
 - **Testing runs on Render's FREE plan:** https://whatsapp-truechoice.onrender.com (service `whatsapp-truechoice`, Docker, Singapore).
