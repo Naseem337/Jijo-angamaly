@@ -42,6 +42,20 @@ def fmt_date(d: date) -> str:
     return f"{d.day} {d.strftime('%b')} {d.year}"
 
 
+
+# The client wants only the booking confirmation after payment (2026-11-17), so the ID photo request is not sent then.
+# The ID flow itself is kept: set True to ask again right after payment.
+ASK_ID_AFTER_PAYMENT = False
+
+
+def profile_name(raw: str | None) -> str:
+    """The WhatsApp profile name if it looks like a name (2+ letters, no links), else ''. Used for a booking only
+    when the guest gives their number without a name."""
+    name = " ".join((raw or "").split())[:60]
+    if sum(ch.isalpha() for ch in name) < 2 or any(x in name.lower() for x in ("http", "www.", "@")):
+        return ""
+    return name
+
 class BookingBot(IdProofMixin, ChatMixin):
     def __init__(self, config: ResortConfig, repo: ResortRepo, whatsapp: WhatsAppClient, payments: Payments,
                  clock: Any, *, llm: Callable[[], LLMProvider] | None = None,
@@ -99,7 +113,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             return "duplicate"
         st = self.repo.get_state(phone)
         lang = st.get("lang", "en")
-        guest = self.repo.touch_guest(phone, now, language=st.get("lang"))
+        guest = self.repo.touch_guest(phone, now, language=st.get("lang"), name=profile_name(msg.profile_name))
 
         if msg.type in ("image", "document") and st.get("idp"):  # a guest sending the ID photo we asked for
             return self._id_media(phone, st, msg)
@@ -377,13 +391,10 @@ class BookingBot(IdProofMixin, ChatMixin):
         """Tell the guest their booking is confirmed and alert the staff (online or desk payment)."""
         prop = self.repo.get_property(b.property_id)
         rt = self.repo.get_room_type(b.room_type_id)
-        text = t("paid", b.language, id=b.id, property=prop.name if prop else "", check_in=fmt_date(b.check_in),
-                 check_out=fmt_date(b.check_out), rooms=b.rooms, checkin_time=prop.checkin_time if prop else "")
-        if prop and prop.map_url:
-            text += "\n" + t("map_line", b.language, url=prop.map_url)
-        delivered = self._notify_guest(b, text, "paid", self._params(b))
+        # The client's confirmation and nothing more (2026-11-17): no map line, no ID request after it.
+        delivered = self._notify_guest(b, self._confirmed_text(b, prop, rt), "paid", self._params(b))
         try:  # ask for the ID proof once (only inside the 24 h window; the day-before reminder covers the rest)
-            if delivered:
+            if delivered and ASK_ID_AFTER_PAYMENT:
                 self.start_id_request(b)
         except Exception:
             log.exception("ID request for %s failed", b.id)

@@ -227,7 +227,6 @@ TOOLS = [
         {"type": "object", "properties": {
             "guest_name": {"type": "string", "description": "the name the guest gave"},
             "mobile": {"type": "string", "description": "the mobile number the guest gave ('same' if they said this number)"},
-            "room_type": {"type": "string", "description": "only when there are several room types: the one chosen"},
             "rooms": {"type": "integer", "description": "only if the guest asked for a number of rooms"},
             "extra_beds": {"type": "integer", "description": "only if the guest asked for extra beds"},
             "early_checkin": EARLY_FIELD,
@@ -539,8 +538,9 @@ class ChatMixin:
             "in the resort's details and the enquiry summary. Give a price only if the guest asks for it.\n"
             "5. When the guest gives their name and mobile number, call create_booking right away (no 'shall I "
             "confirm?'). The enquiry summary and the payment link are sent automatically: reply [no reply]. Never "
-            "write the summary, the link, the advance amount or a percent yourself. If they say 'this number', "
-            "pass mobile 'same'.\n"
+            "write the summary, the link, the advance amount or a percent yourself. If they say 'this number' "
+            "or 'same number', pass mobile 'same'. If they give only the number (or 'same number') without a name, "
+            "call create_booking anyway with an empty name: their WhatsApp name is used.\n"
             "- Photos: when the guest asks for photos or to see the place or a room, call send_photos.\n"
             "- Early check-in: only if the guest asks. Tell them the time and charge from the FACTS and pass "
             "early_checkin true to create_booking if they want it.\n"
@@ -995,11 +995,12 @@ class ChatMixin:
         fits = self._fits(prop, bk)
         chosen = next(((rt, o) for rt, o in fits if rt.name.lower() == wanted or rt.id.lower() == wanted), None) or next(
             ((rt, o) for rt, o in fits if wanted and (wanted in rt.name.lower() or rt.name.lower() in wanted)), None)
-        if chosen is None and fits and (len(fits) == 1 or not wanted):
-            chosen = fits[0]  # no room type named: the owner's top-priority one
+        if chosen is None and fits:
+            # No room type named, or one that is not free: the owner's top-priority free one. The guest is never
+            # told about other room types or asked to pick (client, 2026-11-17).
+            chosen = fits[0]
         if chosen is None:
-            return {"error": "that room type is not free any more or not offered",
-                    "free_room_types": [rt.name for rt, _ in fits]}
+            return {"error": "no room is free for these dates any more; say so in one short line and suggest other dates"}
         rt, options = chosen
         rooms, beds = self._int(a, "rooms", options[0]), self._int(a, "extra_beds")
         early = bool(a.get("early_checkin")) and str(a.get("early_checkin")).lower() not in ("false", "0", "no")
@@ -1067,16 +1068,52 @@ class ChatMixin:
                       f"Ie - {advance:,}", "", "Balance can be paid during the time of check in."]
         return "\n".join(lines)
 
+    def _confirmed_text(self, b: Booking, prop: Property | None, rt: RoomType | None) -> str:
+        """The client's booking confirmation (2026-11-17): the ONLY message the guest gets once the advance is paid.
+        Always English, the same layout as the enquiry summary, with the given room number(s)."""
+        notes = b.notes or ""
+        mobile = re.search(r"Mobile: ([+\d][\d ]{6,})", notes)
+        early = re.search(r"Early check-in ([^:;]+): ₹([\d,]+)", notes)
+        beds = re.search(r"Extra beds: (\d+)", notes)
+        fee = int(early.group(2).replace(",", "")) if early else 0
+        bed_cost = int(beds.group(1)) * (prop.extra_bed_rate if prop else 0) * b.nights if beds else 0
+        plural = lambda n, word: f"{n} {word}{'s' if n != 1 else ''}"  # noqa: E731
+        lines = ["Following are the glimpse of your booking,", ""]
+        if b.guest_name:
+            lines.append(f"Guest - {b.guest_name}")
+        lines.append(self._show_mobile(mobile.group(1).strip() if mobile else b.guest_phone))
+        lines.append(f"Check in - {self._ordinal_date(b.check_in)}")
+        if early:
+            lines.append(f"*Early Check-in @ {early.group(1).strip()}*")
+        lines += [f"Check out - {self._ordinal_date(b.check_out)}", plural(b.nights, "Night"),
+                  f"{b.adults + b.children} PAX", plural(b.rooms, "Room")]
+        if b.room_numbers:
+            lines.append("*" + ", ".join(f"#{n}" for n in av.split_rooms(b.room_numbers)) + "*")
+        if prop and rt and len(self.repo.list_room_types(prop.id)) > 1:
+            lines.append(f"*{rt.name}*")
+        if prop and prop.meal_plan:
+            lines.append(f"*{prop.meal_plan}*")
+        lines.append(f"Room Cost - {b.total - fee - bed_cost:,}")
+        if bed_cost:
+            lines.append(f"Extra Bed - {bed_cost:,}")
+        if fee:
+            lines.append(f"Early Check-in Charges - {fee:,}")
+        lines += [f"Total Cost - {b.total:,}", "", f"Advance Paid - {b.paid_amount:,}",
+                  f"Balance Payable - {b.balance:,}", "*Booking Confirmed ✅*"]
+        return "\n".join(lines)
+
     def _tool_create(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st, phone = ctx.st, ctx.phone
         self._set_style(st, a)
         bk = st.get("bk") or {}
         if not bk:
             return {"error": "call check_availability first"}
-        if not bk.get("chosen") or any(a.get(k) for k in ("room_type", "rooms", "extra_beds", "early_checkin")):
-            picked = {k: a[k] for k in ("room_type", "rooms", "extra_beds", "early_checkin") if a.get(k)}
+        # The room type is never taken from create_booking (the AI guessed one once and the guest was asked to pick):
+        # it is the one locked by prepare_booking, else the owner's top-priority free one.
+        if not bk.get("chosen") or any(a.get(k) for k in ("rooms", "extra_beds", "early_checkin")):
+            picked = {k: a[k] for k in ("rooms", "extra_beds", "early_checkin") if a.get(k)}
             prior = bk.get("chosen") or {}
-            if prior and "room_type" not in picked:
+            if prior:
                 picked["room_type"] = prior["room_type_id"]
             done = self._tool_prepare(ctx, {"room_type": "", **picked, "language": a.get("language")})
             if "error" in done:
@@ -1085,15 +1122,19 @@ class ChatMixin:
         chosen = bk["chosen"]
         now = self.clock.now()
         guest = self.repo.touch_guest(phone, now, language=st.get("lang"))
+        # "same number" = the WhatsApp number; with no name given, the guest's WhatsApp profile name is used
         name = (a.get("guest_name") or "").strip()[:60] or guest.name
-        if not name:
-            return {"error": "ask the guest's name and mobile number for the booking"}
         raw_mobile = str(a.get("mobile") or "").strip()
-        same = raw_mobile.lower() in ("same", "this", "this number", "same number", "whatsapp")
-        mobile = phone if same else (try_normalize_phone(raw_mobile) or "")
+        same = raw_mobile.lower() in ("same", "this", "this number", "same number", "whatsapp", "same no", "this no")
+        mobile = phone if same else (try_normalize_phone(raw_mobile) or bk.get("mobile", ""))
+        if mobile:
+            bk["mobile"] = mobile
         if not mobile:
-            return {"error": "ask the guest's mobile number for the booking" if not raw_mobile
+            return {"error": ("ask the guest's name and mobile number for the booking" if not name else
+                              "ask the guest's mobile number for the booking") if not raw_mobile
                     else "that mobile number does not look right; ask the guest to send it again"}
+        if not name:
+            return {"error": "the mobile number is saved; ask ONLY the guest's name, in a few words"}
         if name != guest.name:
             guest.name = name
             self.repo.upsert_guest(guest)

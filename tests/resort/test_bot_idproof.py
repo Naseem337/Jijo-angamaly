@@ -68,7 +68,9 @@ class FakeWA:
 
 
 @pytest.fixture()
-def world(tmp_path):
+def world(tmp_path, monkeypatch):
+    from app.resort import flow
+    monkeypatch.setattr(flow, "ASK_ID_AFTER_PAYMENT", True)  # off in production (client, 2026-11-17); these test the ID flow
     repo = ResortRepo(tmp_path / "r.sqlite3")
     prop = repo.save_property(Property("Pozhiyoram Resort", city="Kerala", advance_pct=50, staff_numbers=[STAFF]))
     rt = repo.save_room_type(RoomType(prop.id, "Deluxe", units=5, max_adults=2, max_children=1, max_occupancy=3,

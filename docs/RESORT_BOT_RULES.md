@@ -92,6 +92,17 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Premium look: `static/premium.css` (ocean teal + sand gold, Fraunces headings), sun-and-waves logo (`logo.svg`,
   `logo_mark` macro, regenerated PWA icons via scripts/make_pwa_icons.py).
 
+## After payment: one confirmation only (client, 2026-11-17)
+- Once the advance is paid (online or at the desk) the guest gets ONLY "Following are the glimpse of your booking,"
+  (`_confirmed_text`): guest, mobile, dates, early check-in, nights, PAX, rooms, the given room number(s) (*#104*),
+  meal plan, costs, Advance Paid, Balance Payable, *Booking Confirmed ✅*. No map line and no ID request after it
+  (`flow.ASK_ID_AFTER_PAYMENT = False`; the ID flow is kept for later).
+
+## Name and number (client, 2026-11-17)
+- "same number" = the WhatsApp number. With no name given, the WhatsApp profile name is used; if there is none, the
+  bot asks only for the name (the number is kept). `create_booking` has no room type: the AI once guessed one that was
+  full and asked the guest to pick. A requested room that is not free falls back to the top-priority free one.
+
 ## Room priority (client, 2026-11-17)
 - Each room type has a **Priority** (1 = first). The bot offers ONLY the top-priority room type that is free and fits
   the party, and never asks the guest which room (`check_availability` returns one option; `prepare_booking` and

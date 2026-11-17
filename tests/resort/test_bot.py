@@ -369,6 +369,36 @@ def test_the_bot_offers_only_the_owners_top_priority_room_type_and_never_asks_wh
     assert "Never ask which room type" in w.llm.calls[0].system
 
 
+def test_same_number_without_a_name_books_with_the_whatsapp_name_and_never_asks_to_pick_a_room(world):
+    w = world
+    w.repo.save_room_type(RoomType(**{**w.family.__dict__, "units": 0}))  # Family Suite is full
+    say(w, "Alleppey, 10 Nov 2 nights, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="en"),
+        reply("[no reply]"))
+    m = InboundMessage(f"wamid.{next(_ids)}", GUEST, "text", datetime(2026, 11, 2, 4, 31), text="same number",
+                       profile_name="Rahul K")
+    w.llm.script.extend([tool("create_booking", guest_name="", mobile="same", room_type="Family Suite"),
+                         reply("[no reply]")])
+    w.bot.handle(m)
+    assert last_tool(w)["ok"] is True
+    booking = w.repo.list_bookings(phone=GUEST)[0]
+    assert booking.guest_name == "Rahul K" and booking.room_type_id == w.deluxe.id  # the AI's guessed room is ignored
+    texts = w.wa.texts()
+    assert texts[-1].startswith("Please pay") and "Which one" not in " ".join(texts)
+
+
+def test_no_name_anywhere_asks_only_for_the_name_and_keeps_the_number(world):
+    w = world
+    say(w, "Alleppey, 10 Nov 2 nights, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="en"),
+        reply("[no reply]"))
+    say(w, "same number", GUEST, tool("create_booking", guest_name="", mobile="same"), reply("Your name please sir?"))
+    assert "ask ONLY the guest's name" in last_tool(w)["error"]
+    say(w, "Asha", GUEST, tool("create_booking", guest_name="Asha", mobile=""), reply("[no reply]"))
+    booking = w.repo.list_bookings(phone=GUEST)[0]
+    assert booking.guest_name == "Asha" and "Mobile:" in booking.notes
+
+
 def test_system_prompt_has_the_rules_and_facts(world):
     w = world
     say(w, "do you allow pets?", GUEST, reply("Sorry, I am not sure about pets."))
@@ -615,13 +645,22 @@ def test_stop_and_start(world):
     assert say(w, "START") == "opt_in"
 
 
-def test_paid_message_carries_the_map_link(world):
+def test_after_payment_the_guest_gets_only_the_clients_confirmation_with_the_room_number(world):
     w = world
+    w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "room_list": ["104", "105"]}))
     hold(w, rooms=1)
     b = w.repo.list_bookings(phone=GUEST)[0]
+    before = len(w.wa.to(GUEST))
     w.bot.mark_paid(booking_id=b.id)
-    paid = next(x for x in w.wa.texts() if "confirmed" in x)
-    assert "Location: https://maps.app.goo.gl/abc" in paid
+    sent = w.wa.to(GUEST)[before:]
+    assert len(sent) == 1  # only the confirmation: no map line, no ID request
+    assert sent[0][2] == "\n".join([
+        "Following are the glimpse of your booking,", "",
+        "Guest - Asha Menon", "98470 12345",
+        "Check in - 10th Nov 26", "Check out - 12th Nov 26", "2 Nights", "2 PAX", "1 Room",
+        "*#104*", "*Deluxe*",
+        "Room Cost - 8,000", "Total Cost - 8,000", "",
+        "Advance Paid - 4,000", "Balance Payable - 4,000", "*Booking Confirmed ✅*"])
 
 
 # --------------------------------------------------------------------------- payments
@@ -633,8 +672,7 @@ def test_paid_event_confirms_booking_and_alerts_staff(world):
     assert w.bot.mark_paid(link_id=b.payment_link_id, payment_id="pay_1") == "paid"
     b = w.repo.get_booking(b.id)
     assert b.status == "paid" and b.razorpay_payment_id == "pay_1" and b.paid_at
-    confirmed = next(x for x in w.wa.texts() if "confirmed" in x)
-    assert b.id in confirmed and "ID proof" in w.wa.texts()[-1]  # the ID request follows in plain chat
+    assert w.wa.texts()[-1].endswith("*Booking Confirmed ✅*")  # the last message: no ID request after it
     assert "PAID" in w.wa.texts(STAFF)[-1]
     assert w.bot.mark_paid(link_id=b.payment_link_id) == "already_paid"  # webhook retries are harmless
 
@@ -961,7 +999,7 @@ def test_missed_webhook_is_caught_by_asking_razorpay(world):
     assert w.bot.sweep()["paid_found"] == 1
     paid = w.repo.get_booking(b.id)
     assert paid.status == "paid" and paid.razorpay_payment_id == "pay_77"
-    assert any("confirmed" in text for text in w.wa.texts())
+    assert any("Booking Confirmed" in text for text in w.wa.texts())
     assert "paid_found" not in w.bot.sweep()  # only once
 
 
@@ -1041,7 +1079,7 @@ def test_a_failed_attempt_followed_by_a_good_payment_only_confirms(world):
     w.pay.paid_links[b.payment_link_id] = "pay_ok"
     w.bot.sweep()
     new = w.wa.texts()[before:]
-    assert w.repo.get_booking(b.id).status == "paid" and any("confirmed" in t for t in new)
+    assert w.repo.get_booking(b.id).status == "paid" and any("Booking Confirmed" in t for t in new)
     assert not any("didn't go through" in t for t in new)
 
 
