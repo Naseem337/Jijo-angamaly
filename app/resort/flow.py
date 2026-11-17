@@ -139,9 +139,12 @@ class BookingBot(IdProofMixin, ChatMixin):
             pass
         return self._dispatch(phone, st, text, None if source != "button" else msg.reply_id, source, guest.name, in_id)
 
+    # Client, 2026-11-17: images are not read by the AI for now and get no reply. Set True to bring it back.
+    READ_IMAGES = False
+
     def _image_turn(self, phone: str, st: dict[str, Any], msg, now) -> str:
-        """An image from a guest with no ID request open: ask Razorpay about their unpaid holds first (a paid one is
-        confirmed right away, exactly like the webhook), then let the AI read the picture. Only Razorpay confirms."""
+        """An image from a guest with no ID request open. It is saved in the chat and gets NO reply (client rule).
+        Razorpay is still asked about unpaid holds: a payment that really went through gets its normal confirmation."""
         import base64
         caption = (msg.text or "").strip()
         self.repo.add_chat(Chat(phone, "in", f"[image] {caption}".strip(), now, "text"))
@@ -152,6 +155,12 @@ class BookingBot(IdProofMixin, ChatMixin):
             self.wa.mark_read(msg.id)
         except Exception:
             pass
+        if not self.READ_IMAGES:
+            try:
+                self.check_payments()
+            except Exception as exc:
+                log.warning("Payment check failed: %s", exc)
+            return "image_ignored"
         try:
             data, mime = self.wa.download_media(msg.media_id, max_bytes=5_000_000)
         except Exception as exc:

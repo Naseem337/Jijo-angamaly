@@ -19,6 +19,9 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
   the total and the advance. Meal plan line from `Property.meal_plan` ("Stay Only").
 - **Never the same message twice (client, 2026-11-17, strict):** `BookingBot._text` refuses any message already sent in
   the current conversation (6 h gap = new one). Only a payment link the guest asks for again may repeat.
+- **Images get no reply (client, 2026-11-17):** a guest's photo (no ID request open) is kept in the chat as "[image]"
+  and is not read by the AI. Razorpay is still asked about unpaid holds, so a real payment gets its normal
+  confirmation. Switch back on with `BookingBot.READ_IMAGES = True` in flow.py. ID photos the bot asked for are still saved.
 - A mid-chat "hi" is never left unanswered: if the AI stays silent, "Hi sir, how can I help you further?".
 
 ## Conversation

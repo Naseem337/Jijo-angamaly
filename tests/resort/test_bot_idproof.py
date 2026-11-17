@@ -224,8 +224,19 @@ def test_second_paid_booking_waits_its_turn(world):
     assert "idp" not in w.repo.get_state(GUEST)
 
 
-def test_image_without_an_open_request_goes_to_the_ai_which_sees_the_picture(world):
+def test_image_without_an_open_request_gets_no_reply_and_no_ai_call(world):
     w = world
+    llm = MockLLM([])
+    w.bot._llm = lambda: llm
+    before = len(w.wa.of("text"))
+    assert send_image(w) == "image_ignored"
+    assert len(w.wa.of("text")) == before and llm.calls == []  # client rule: images are not read or answered
+    assert w.repo.list_chat(GUEST)[-1].text.startswith("[image]")  # kept in the chat for the dashboard
+
+
+def test_image_reading_can_be_switched_back_on(world, monkeypatch):
+    w = world
+    monkeypatch.setattr(type(w.bot), "READ_IMAGES", True)
     llm = MockLLM([MockLLM.text("Thanks sir, the booking is confirmed automatically once Razorpay shows the payment.")])
     w.bot._llm = lambda: llm
     assert send_image(w) == "answered"
