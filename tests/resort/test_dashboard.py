@@ -303,7 +303,7 @@ def test_property_page_says_what_the_whatsapp_bot_still_needs(env):
     repo, app, (p1, p2, rt1, rt2) = env
     client, _ = login(app)
     page = client.get(f"{BASE}/properties/{p1.id}").text
-    assert "Needs attention" in page and "Owner contact numbers" in page and "Photos, sent when" in page
+    assert "Needs attention" in page and "Owner contact numbers" in page and "General photos, sent to every guest" in page
     p = repo.get_property(p1.id)
     p.city, p.contact_numbers, p.intro, p.photo_urls = "Alleppey", ["+919497861924"], "Welcome", ["/resort/media/x"]
     repo.save_property(p)

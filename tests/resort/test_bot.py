@@ -231,6 +231,44 @@ def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_t
     assert "already sent" in last_tool(w)["error"] and len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 6
 
 
+def test_general_photos_go_to_every_guest_who_picks_the_property_then_the_form(world, tmp_path, monkeypatch):
+    from app.resort import photos as ph
+    monkeypatch.setenv("RESORT_DB_PATH", str(tmp_path / "r.sqlite3"))
+    monkeypatch.setattr(ph, "_shrink", lambda data: None)
+    w = world
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 50
+    general = [ph.save_photo(png) for _ in range(8)]
+    room = [ph.save_photo(png)]
+    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": general}))
+    w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "photo_urls": room}))
+    say(w, "I need a resort", GUEST, tool("ask_location"), reply("[no reply]"))
+    assert say(w, "Alleppey") == "form"
+    kinds = [k for _, k, _ in w.wa.to(GUEST)][1:]
+    assert kinds == ["image"] * 6 + ["text"]  # 6 general photos (owner's order), then the form; no room photos
+    assert w.wa.texts()[-1].startswith("Please share these details")
+    # asking for room photos sends the room's own first, then general ones not sent yet; never one twice
+    say(w, "room photos?", GUEST, tool("send_photos", place="Alleppey", room_type="Deluxe"), reply("[no reply]"))
+    images = [p for _, k, p in w.wa.to(GUEST) if k == "image"]
+    assert len(images) == 9 and len(set(images)) == 9  # 6 general + the room photo + the 2 general left
+
+
+def test_a_guest_who_skips_the_form_still_gets_the_general_photos_before_the_glimpse(world, tmp_path, monkeypatch):
+    from app.resort import photos as ph
+    monkeypatch.setenv("RESORT_DB_PATH", str(tmp_path / "r.sqlite3"))
+    monkeypatch.setattr(ph, "_shrink", lambda data: None)
+    w = world
+    for rt in w.repo.list_room_types(w.p1.id):  # one room type, like Pozhiyoram
+        if rt.name != "Deluxe":
+            w.repo.save_room_type(RoomType(**{**rt.__dict__, "active": False}))
+    general = [ph.save_photo(b"\x89PNG\r\n\x1a\n" + b"y" * 40) for _ in range(2)]
+    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": general, "intro": "Glimpse"}))
+    say(w, "Alleppey 10 Nov 2 nights 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2), reply("[no reply]"))
+    sent = [(k, p) for _, k, p in w.wa.to(GUEST)]
+    assert [k for k, _ in sent] == ["text", "image", "image", "text", "text"]
+    assert sent[0][1].startswith("Yes, rooms are available") and sent[3][1] == "Glimpse"
+
+
 def test_the_bot_uses_whatever_the_dashboard_says_now(world):
     """Owner edits reach the bot on the next message: no training, no restart."""
     w = world

@@ -83,6 +83,7 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
   rates, season prices, owner numbers, glimpse, meal plan, early check-in and photos saved in the dashboard reach
   WhatsApp on the next message. A new property is named in the location question; it is bookable once Active with a
   priced room type. The property page shows a "WhatsApp bot" checklist of what is still missing.
+- **General vs room photos (client, 2026-11-17):** the property page's "General photos" (outside, beach, common areas) are sent AUTOMATICALLY to every guest who picks the property (first 6, owner's order): before the form, or before the glimpse if the guest skipped the form. Room photos (room type pages) go only when a guest asks to see the rooms (`send_photos`, room asked first, max 4). No photo is ever sent twice in a conversation.
 - Photos: uploaded on the property and room pages (`app/resort/photos.py`), shrunk to JPEG with ffmpeg, stored next
   to the database (`/data/photos` on Railway), public at /resort/media/<name>. The bot's `send_photos` tool sends up
   to 4 (room type first), only when the guest asks for pictures, never one already sent in the conversation.

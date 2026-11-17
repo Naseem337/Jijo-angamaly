@@ -860,7 +860,7 @@ def bot_readiness(repo, p: Property) -> list[tuple[bool, str]]:
         (bool(priced), "A price per night on the room type(s)"),
         (bool(p.contact_numbers), "Owner contact numbers, given to guests for questions the bot can't answer"),
         (bool(p.intro), "Welcome message (glimpse), sent when rooms are found"),
-        (bool(p.photo_urls or any(rt.photo_urls for rt in rooms)), "Photos, sent when a guest asks for pictures"),
+        (bool(p.photo_urls), "General photos, sent to every guest who picks this property"),
     ]
 
 

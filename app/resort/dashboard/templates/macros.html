@@ -46,9 +46,9 @@
 </svg>
 {%- endmacro %}
 
-{% macro photo_gallery(photos, action, csrf, hint='') -%}
+{% macro photo_gallery(photos, action, csrf, hint='', title='Photos', badge='') -%}
 <section class="card" id="photos">
-  <div class="card-head"><div><h3>{{ icon('image') }} Photos</h3><p class="muted">{{ hint or 'The first photo is the cover. The bot sends these on WhatsApp when a guest asks for pictures.' }}</p></div></div>
+  <div class="card-head"><div><h3>{{ icon('image') }} {{ title }}{% if badge %} <span class="pill paid">{{ badge }}</span>{% endif %}</h3><p class="muted">{{ hint or 'The first photo is the cover. The bot sends these on WhatsApp when a guest asks for pictures.' }}</p></div></div>
   {% if photos %}<div class="gallery">
   {% for ref in photos %}<figure class="ph{{ ' cover' if loop.first }}">
     <a href="{{ ref }}" target="_blank" rel="noopener"><img src="{{ ref }}" alt="Photo {{ loop.index }}" loading="lazy"></a>

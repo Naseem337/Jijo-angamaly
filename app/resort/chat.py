@@ -88,6 +88,8 @@ def latin_style(text: str, previous: str = "en") -> str:
     return "manglish" if unknown > english else "en"
 
 
+MAX_GENERAL_PHOTOS = 6  # general photos sent automatically when a guest picks a property
+
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
 MAX_CHAT_WORDS = 30  # "very simple" (client, 2026-11-17)
 _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s", re.IGNORECASE)
@@ -159,7 +161,7 @@ class _Turn:
     pay_message: str = ""
     summary_message: str = ""
     handed_off: bool = False
-    after: list[str] = field(default_factory=list)  # fixed messages sent after the AI's line (form, glimpse, ask name)
+    after: list[Any] = field(default_factory=list)  # fixed messages after the AI's line: text, or a list of photos
     resend: bool = False  # the guest asked for their payment link again
     silent: bool = False  # a fixed step message replaces the AI's own line this turn
     photos: list[str] = field(default_factory=list)  # uploaded photo references to send after the reply
@@ -287,19 +289,30 @@ class ChatMixin:
                 towns.append(town)
         return towns
 
+    def _sent_photos(self, phone: str) -> set[str]:
+        """Photos already sent in the current conversation (never send one twice)."""
+        rows = self.repo.list_chat(phone, limit=120)
+        return {m.text[len("[photo] "):] for m in rows[self._session_start(rows):]
+                if m.direction == "out" and m.text.startswith("[photo] ")}
+
+    def _general_photos(self, phone: str, prop: Property) -> list[str]:
+        """The property's general photos (outside, beach, common areas) not yet sent: they go to EVERY guest who
+        picks the property (client, 2026-11-17), in the owner's order, at most MAX_GENERAL_PHOTOS."""
+        sent = self._sent_photos(phone)
+        return [r for r in prop.photo_urls if r not in sent][:MAX_GENERAL_PHOTOS]
+
     def _tool_photos(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
-        """Up to 4 of the owner's photos (room type first if asked, else the property's), never one already sent."""
+        """Up to 4 photos on request: the room type asked about, else every room type's photos, then any general
+        photo not yet sent. Never one already sent."""
         prop = self._find_property(a.get("place", ""))
         if prop is None:
             return {"error": "unknown place", "places": [self._place_label(p) for p in self._places()]}
         rooms = self.repo.list_room_types(prop.id)
         wanted = str(a.get("room_type") or "").lower().strip()
         room = next((rt for rt in rooms if wanted and (wanted in rt.name.lower() or rt.name.lower() in wanted)), None)
-        refs = list(room.photo_urls) if room else []
-        refs += list(prop.photo_urls) + [rt.photo_urls[0] for rt in rooms if rt.photo_urls and rt is not room]
-        rows = self.repo.list_chat(ctx.phone, limit=80)
-        sent = {m.text[len("[photo] "):] for m in rows[self._session_start(rows):]
-                if m.direction == "out" and m.text.startswith("[photo] ")}
+        refs = list(room.photo_urls) if room else [r for rt in rooms for r in rt.photo_urls]
+        refs += list(prop.photo_urls)
+        sent = self._sent_photos(ctx.phone)
         fresh = [r for r in dict.fromkeys(refs) if r not in sent][:4]
         if not fresh:
             numbers = ", ".join(display_phone(n) for n in prop.contact_numbers) or "the owner"
@@ -343,6 +356,7 @@ class ChatMixin:
             return None
         st["form_place"] = prop.id
         self._save(phone, st)
+        self._send_photos(phone, self._general_photos(phone, prop))  # every guest who picks it sees the place
         self._text(phone, t("form", st.get("lang", "en")))
         return "form"
 
@@ -756,6 +770,9 @@ class ChatMixin:
             self._send_photos(phone, ctx.photos)
         asked = {t("ask_contact", lang) for lang in ("en", "mn")}
         for message in ctx.after:
+            if isinstance(message, list):  # a batch of photos in its place in the order
+                self._send_photos(phone, message)
+                continue
             if ctx.summary_message and message in asked:  # they already gave name and mobile in this turn
                 continue
             self._text(phone, message)
@@ -850,6 +867,8 @@ class ChatMixin:
                     "open_resorts": [self._place_label(p) for p in self._places()]}
         ctx.st["form_place"] = prop.id
         if t("form", "en") not in ctx.after:
+            if general := self._general_photos(ctx.phone, prop):
+                ctx.after.append(general)  # the general photos first, then the form
             ctx.after.append(t("form", ctx.st.get("lang", "en")))
         ctx.silent = True
         return {"ok": True, "resort": self._place_label(prop),
@@ -949,6 +968,8 @@ class ChatMixin:
             st["checked"] = key
             ctx.after.append(t("rooms_ok", lang))
             ctx.silent = True
+            if general := self._general_photos(ctx.phone, prop):  # a guest who skipped the form still sees them
+                ctx.after.append(general)
             if prop.intro and st.get("intro_sent") != prop.id:
                 price = options[0].get("price_per_night") or round(
                     options[0]["total_for_stay"] / max(1, out["nights"] * options[0]["quoted_for_rooms"]))

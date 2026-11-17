@@ -6,7 +6,7 @@
 <nav class="subnav">
   <a href="#details">Details</a>
   <a href="#rooms">Rooms{% if not is_new %} <b>{{ rooms|length }}</b>{% endif %}</a>
-  {% if not is_new %}<a href="#photos">Photos <b>{{ p.photo_urls|length }}</b></a>{% endif %}
+  {% if not is_new %}<a href="#photos">General photos <b>{{ p.photo_urls|length }}</b></a>{% endif %}
   <a href="#payment">Payment</a>
   <a href="#staff">Staff &amp; policies</a>
 </nav>
@@ -34,7 +34,7 @@
   </a>{% endfor %}</div>
   {% else %}{{ empty("No room types yet. Add the first one so the bot can offer rooms.") }}{% endif %}
 </section>
-{{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "Photos of the whole property (beach, garden, outside). The first one is the cover. The bot sends them on WhatsApp when a guest asks for pictures.") }}
+{{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "Outside, beach, garden and common areas. The bot sends these AUTOMATICALLY to every guest who picks this property, in this order (the first 6). Room pictures go under each room type below.", "General photos", "Sent to everyone") }}
 {% else %}
 <section class="card hint-card" id="rooms"><h3>Rooms &amp; rates</h3><p class="muted">Save the property first. Then you can add room types, rates and seasonal prices here.</p></section>
 {% endif %}
