@@ -185,9 +185,10 @@
     {% for w in warnings %}<div class="callout warn">{{ w }}</div>{% else %}<div class="callout ok">ID is verified and nothing is due.</div>{% endfor %}
     <div class="field"><span>Room numbers given</span>
       <div class="chipbox" data-chips="room_numbers" data-kind="text" data-max="20">
-        <textarea name="room_numbers" hidden></textarea><div class="chip-list"></div>
+        <textarea name="room_numbers" hidden>{{ b.room_numbers.replace(', ', '
+') }}</textarea><div class="chip-list"></div>
         <div class="chip-add"><input type="text" maxlength="12" placeholder="e.g. 101"><button type="button" class="btn">Add</button></div></div>
-      <small>{{ b.rooms }} room{{ 's' if b.rooms != 1 }} booked. Press Enter after each number.</small></div>
+      <small>{{ b.rooms }} room{{ 's' if b.rooms != 1 }} booked.{% if b.room_numbers %} Given by priority; change them if needed.{% endif %} Press Enter after each number.</small></div>
     <div class="modal-actions"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Check in</button></div>
   </form>
 </dialog>

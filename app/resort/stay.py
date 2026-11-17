@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 from app.core.clock import IST
+from app.resort.availability import split_rooms
 from app.resort.billing import IN_HOUSE_STATES, Folio
 from app.resort.db import ResortRepo
 from app.resort.models import Booking, Charge, IdProof

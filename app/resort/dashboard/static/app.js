@@ -35,16 +35,24 @@
   document.querySelectorAll('[data-chips]').forEach(function (box) {
     var store = box.querySelector('textarea'), list = box.querySelector('.chip-list'),
         input = box.querySelector('input'), add = box.querySelector('button'),
-        kind = box.dataset.kind, max = +box.dataset.max || 20;
+        kind = box.dataset.kind, max = +box.dataset.max || 20, ordered = 'order' in box.dataset;
     var items = store.value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean);
     function sync() {
       store.value = items.join('\n');
       list.textContent = '';
       items.forEach(function (v, i) {
         var c = document.createElement('span'); c.className = 'chip';
+        if (ordered) {  // a priority list: number each chip and let it move up
+          var n = document.createElement('b'); n.className = 'chip-rank'; n.textContent = (i + 1) + '.'; c.appendChild(n);
+        }
         c.appendChild(document.createTextNode(kind === 'phone' ? v.replace(/^(\+\d{2})(\d{5})(\d+)$/, '$1 $2 $3') : v));
         var x = document.createElement('button'); x.type = 'button'; x.setAttribute('aria-label', 'Remove'); x.textContent = '×';
         x.onclick = function () { items.splice(i, 1); sync(); };
+        if (ordered && i > 0) {
+          var up = document.createElement('button'); up.type = 'button'; up.setAttribute('aria-label', 'Move up'); up.textContent = '‹';
+          up.onclick = function () { items.splice(i - 1, 0, items.splice(i, 1)[0]); sync(); };
+          c.insertBefore(up, c.firstChild);
+        }
         c.appendChild(x); list.appendChild(c);
       });
       list.classList.toggle('empty', !items.length);

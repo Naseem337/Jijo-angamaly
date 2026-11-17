@@ -47,7 +47,7 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
   fixed payment and ID messages were shortened too. Code guard: more than 30 words outside room/price lines, list items and
   links (`chatty_words`, `MAX_CHAT_WORDS` in chat.py) gets one "much shorter" rewrite.
 - Ask in order: check-in date (or nights), number of persons, number of rooms. Never assume persons, rooms or nights.
-- Quote by the guest's dates. If several room types are free, list each on its own line with its price and let them choose.
+- Quote by the guest's dates. ~~If several room types are free, list each and let them choose.~~ Replaced by room priority (below).
 - Before payment: send the booking summary (always English, one fact per line), ask for confirmation, then send the payment link.
 - Third person: do not add an extra bed automatically (Rs 500), ask first.
 - Messages that follow each other are one conversation. Use chat history ("avde" then "engane und" then "Alleppey" is one question).
@@ -91,6 +91,15 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Overlapping season prices: the shortest date range wins (festival inside a season).
 - Premium look: `static/premium.css` (ocean teal + sand gold, Fraunces headings), sun-and-waves logo (`logo.svg`,
   `logo_mark` macro, regenerated PWA icons via scripts/make_pwa_icons.py).
+
+## Room priority (client, 2026-11-17)
+- Each room type has a **Priority** (1 = first). The bot offers ONLY the top-priority room type that is free and fits
+  the party, and never asks the guest which room (`check_availability` returns one option; `prepare_booking` and
+  `create_booking` with no room type take it). A guest who names another room type still gets it.
+- Each room type can list its **room numbers in priority order** (room page, ‹ moves a room up; the room count then
+  follows the list). When a booking becomes paid (Razorpay, desk payment or a walk-in booked as paid) it gets the
+  highest-priority room(s) free on every night of its stay (`availability.allocate_rooms`, `ResortRepo.assign_rooms`).
+  The check-in form starts with those rooms; staff can change them there.
 
 ## Dashboard
 - Login manager@gmail.com / 1234 (env vars `RESORT_OWNER_EMAIL`, `RESORT_OWNER_PASSWORD`).

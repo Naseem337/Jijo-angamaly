@@ -143,3 +143,7 @@ html body .login-card h1{font-size:28px}
 
 @media(max-width:860px){html body .content{padding:18px 14px}html body .topbar{padding:0 14px}html body h1{font-size:22px}
   .uploader{flex-direction:column}.uploader .btn{align-self:stretch;justify-content:center}}
+
+/* Priority lists (room numbers): rank number and a move-up button on each chip */
+.chip .chip-rank{font-weight:700;opacity:.55;margin-right:2px}
+.chip button[aria-label="Move up"]:hover{background:var(--accent,#0f4c5c);color:#fff}

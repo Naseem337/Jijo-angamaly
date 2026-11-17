@@ -103,6 +103,25 @@ def free_units(rt: RoomType, bookings: list[Booking], check_in: date, check_out:
     return max(rt.units - worst, 0)
 
 
+def split_rooms(text: str) -> list[str]:
+    """'101, 102' or one per line -> ['101', '102'] (no blanks, no repeats, order kept)."""
+    out: list[str] = []
+    for part in text.replace("\n", ",").split(","):
+        if part.strip() and part.strip() not in out:
+            out.append(part.strip())
+    return out
+
+
+def allocate_rooms(rt: RoomType, b: Booking, others: list[Booking], now: datetime) -> list[str]:
+    """The highest-priority rooms of rt.room_list that no other live booking holds on any night of b's stay.
+    Returns at most b.rooms numbers (fewer if the list is short or the rooms are taken)."""
+    taken = {num for o in others
+             if o.id != b.id and o.room_type_id == rt.id and booking_blocks(o, now)
+             and o.check_in < b.check_out and o.check_out > b.check_in
+             for num in split_rooms(o.room_numbers)}
+    return [num for num in rt.room_list if num not in taken][:b.rooms]
+
+
 def check_dates(check_in: date, check_out: date, today: date) -> str | None:
     """Why these dates can't be booked, or None. Messages are for the bot's logic, not shown raw."""
     if check_in < today:

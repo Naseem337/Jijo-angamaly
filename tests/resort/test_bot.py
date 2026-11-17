@@ -334,13 +334,14 @@ def test_booking_chat_end_to_end_with_payment_link(world):
     w = world
     say(w, "Alleppey, 10 Nov 2 nights, 2 persons", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="en"),
-        reply("Deluxe is Rs 4,000 a night, Family Suite Rs 8,000. Which one?"))
+        reply("Rooms are available sir."))
     res = last_tool(w)
     assert res["place"] == "Pozhiyoram, Alleppey" and res["check_out"] == "2026-11-12"
-    deluxe = next(o for o in res["options"] if o["room_type"] == "Deluxe")
+    [deluxe] = res["options"]  # only the owner's top-priority room type is offered; the guest is never asked to pick
+    assert deluxe["room_type"] == "Deluxe"
     assert deluxe["total_for_stay"] == 8000 and deluxe["advance_now"] == 4000 and deluxe["rooms_possible"] == [1, 2]
-    assert w.wa.texts()[-1].startswith("Deluxe is Rs 4,000")
-    say(w, "deluxe, 1 room", GUEST, tool("prepare_booking", room_type="deluxe", rooms=1), reply("Summary. Confirm?"))
+    assert w.wa.texts()[-1] == "Please share your name and mobile number to proceed."
+    say(w, "1 room", GUEST, tool("prepare_booking", rooms=1), reply("Name and mobile please."))
     summary = last_tool(w)
     assert (summary["total"], summary["advance_now"], summary["balance_at_property"]) == (8000, 4000, 4000)
     assert w.repo.list_bookings(phone=GUEST) == []  # nothing booked yet
@@ -353,6 +354,19 @@ def test_booking_chat_end_to_end_with_payment_link(world):
     assert texts[-1].startswith("Please pay") and "https://rzp.io/mock/" in texts[-1]
     assert {k for _, k, _ in w.wa.to(GUEST)} == {"text"}  # never a list or button
     assert "bk" not in w.repo.get_state(GUEST)
+
+
+def test_the_bot_offers_only_the_owners_top_priority_room_type_and_never_asks_which(world):
+    w = world
+    w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "priority": 2}))  # the owner puts Family Suite first
+    say(w, "Alleppey, 10 Nov 2 nights, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="en"),
+        reply("[no reply]"))
+    assert [o["room_type"] for o in last_tool(w)["options"]] == ["Family Suite"]
+    say(w, "Asha, same number", GUEST, tool("create_booking", guest_name="Asha", mobile="same"), reply("[no reply]"))
+    booking = w.repo.list_bookings(phone=GUEST)[0]
+    assert booking.room_type_id == w.family.id
+    assert "Never ask which room type" in w.llm.calls[0].system
 
 
 def test_system_prompt_has_the_rules_and_facts(world):
@@ -1049,7 +1063,8 @@ def test_casual_words_get_no_reply_but_real_talk_does(world):
     w = world
     say(w, "Alleppey il room undo?", GUEST, reply("Und bro. Ethra aalkkaar?"))
     say(w, "2 per, 10 nu", GUEST, tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=1, adults=2,
-                                       language="manglish"), reply("Deluxe 4000 aanu. Ethu mathi."))
+                                       language="manglish"), reply("Room und."))
+    say(w, "beach adutha?", GUEST, reply("Athe, beach view aanu."))
     assert w.wa.texts()[-1].endswith(".")  # a statement: nothing is being asked now
     before, calls = len(w.wa.to(GUEST)), len(w.llm.calls)
     for casual in ("ok", "thanks a lot", "nice", "adipoli", "haha 😄", "okay then", "ok will see", "super bro", "kollam", "👍"):

@@ -489,9 +489,8 @@ class ChatMixin:
             "three short lines. No introductions, no explanations they did not ask for, no repeating, no closing "
             "lines like 'let me know if you need anything'. Simple, lively and friendly, like a quick WhatsApp reply "
             "from a real person.\n"
-            "- Asked about rooms? Name the room types (one short line each, who it fits) and ask their dates in a "
-            "few words. Asked the location? Send the Maps link with a few words. Asked a yes/no question? Start with "
-            "yes or no.\n"
+            "- Asked about rooms? Answer in one short line and ask their dates in a few words. Asked the "
+            "location? Send the Maps link with a few words. Asked a yes/no question? Start with yes or no.\n"
             "- Call the guest \"sir\", now and then and never in every message (\"madam\" only if they are clearly a woman). "
             "Never bro, dear, da, chetta, chechi, machane or their name.\n"
             "- Each room type on its own line when you list prices. Never one long paragraph.\n"
@@ -534,7 +533,8 @@ class ChatMixin:
             "fewest rooms the group needs unless the guest asked for more. If rooms are available, say ONLY that in "
             "one short line; the resort's details and the request for name and mobile number are sent automatically. "
             "If not available, say so and suggest other dates.\n"
-            "4. With several room types, name each (no prices) and let the guest pick (prepare_booking).\n"
+            "4. Never ask which room type: the resort gives the room by its own priority. Only if the guest asks for "
+            "a particular room type, call prepare_booking with it.\n"
             "- Never state prices, totals or the advance while checking availability; the price reaches the guest "
             "in the resort's details and the enquiry summary. Give a price only if the guest asks for it.\n"
             "5. When the guest gives their name and mobile number, call create_booking right away (no 'shall I "
@@ -961,10 +961,13 @@ class ChatMixin:
             out["note"] += (f" {wanted} room(s) is not possible for {adults + children} guest(s); "
                             "rooms_possible lists the counts that work.")
         out["available"] = True
+        # The owner's priority (2026-11-17): offer ONE room type, the top-priority one that is free and fits. The guest
+        # is never asked to pick; one who names another room type still gets it through prepare_booking.
+        options = out["options"] = options[:1]
         # the client's flow: "rooms available" -> the resort's glimpse -> ask name and mobile, once per set of dates
         key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}"
         lang = st.get("lang", "en")
-        if len(options) == 1 and st.get("checked") != key:
+        if st.get("checked") != key:
             st["checked"] = key
             ctx.after.append(t("rooms_ok", lang))
             ctx.silent = True
@@ -977,11 +980,8 @@ class ChatMixin:
                 st["intro_sent"] = prop.id
             ctx.after.append(t("ask_contact", lang))
             out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
-        elif len(options) == 1:
-            out["note"] += " Rooms are still available. Answer only what the guest asked, in one short line."
         else:
-            out["note"] += (" Rooms ARE available. Name each room type in one short line WITHOUT prices and ask "
-                            "which one, and ask their name and mobile number.")
+            out["note"] += " Rooms are still available. Answer only what the guest asked, in one short line."
         return out
 
     def _tool_prepare(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
@@ -995,8 +995,8 @@ class ChatMixin:
         fits = self._fits(prop, bk)
         chosen = next(((rt, o) for rt, o in fits if rt.name.lower() == wanted or rt.id.lower() == wanted), None) or next(
             ((rt, o) for rt, o in fits if wanted and (wanted in rt.name.lower() or rt.name.lower() in wanted)), None)
-        if chosen is None and len(fits) == 1:
-            chosen = fits[0]
+        if chosen is None and fits and (len(fits) == 1 or not wanted):
+            chosen = fits[0]  # no room type named: the owner's top-priority one
         if chosen is None:
             return {"error": "that room type is not free any more or not offered",
                     "free_room_types": [rt.name for rt, _ in fits]}

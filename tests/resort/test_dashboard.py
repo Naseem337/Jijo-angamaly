@@ -308,3 +308,31 @@ def test_property_page_says_what_the_whatsapp_bot_still_needs(env):
     p.city, p.contact_numbers, p.intro, p.photo_urls = "Alleppey", ["+919497861924"], "Welcome", ["/resort/media/x"]
     repo.save_property(p)
     assert "Live on WhatsApp" in client.get(f"{BASE}/properties/{p1.id}").text
+
+
+def test_room_priority_list_allocates_the_highest_free_room_on_payment(env):
+    repo, app, (p1, _, rt1, _) = env
+    client, token = login(app)
+    client.post(f"{BASE}/properties/{p1.id}/rooms/{rt1.id}", data={
+        "csrf": token, "name": rt1.name, "units": "9", "max_adults": "2", "max_children": "1", "max_occupancy": "3",
+        "base_rate": "4000", "priority": "2", "room_list": "105\n101\n101\n", "active": "on"})
+    saved = repo.get_room_type(rt1.id)
+    assert saved.room_list == ["105", "101"] and saved.units == 2 and saved.priority == 2  # the count follows the list
+    page = client.get(f"{BASE}/properties/{p1.id}/rooms/{rt1.id}").text
+    assert "data-order" in page and "105\n101" in page
+    first = booking(p1, rt1, 9, status="hold")
+    repo.create_hold(first, now_utc())
+    client.post(f"{BASE}/bookings/{first.id}/action", data={"csrf": token, "action": "mark_paid"})
+    assert repo.get_booking(first.id).room_numbers == "105"  # the top room
+    walk_in = booking(p1, rt1, 9, status="paid")  # paid at the desk, same dates
+    repo.add_manual_booking(walk_in, now_utc())
+    assert repo.get_booking(walk_in.id).room_numbers == "101"  # 105 is taken, so the next one
+    detail = client.get(f"{BASE}/bookings/{first.id}").text
+    assert ">105</textarea>" in detail  # the check-in form starts with the given room
+
+
+def test_room_types_are_listed_by_priority(env):
+    repo, _, (p1, _, rt1, _) = env
+    second = repo.save_room_type(RoomType(p1.id, "Suite", units=1, base_rate=9000, priority=1))
+    repo.save_room_type(RoomType(**{**rt1.__dict__, "priority": 3}))
+    assert [t.id for t in repo.list_room_types(p1.id)][0] == second.id

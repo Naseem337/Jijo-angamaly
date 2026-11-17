@@ -1019,6 +1019,10 @@ async def room_save(property_id: str, room_id: str, request: Request, auth: Auth
     rt.base_rate = _int(f, "base_rate", 0)
     rt.weekend_rate = _int(f, "weekend_rate") if f.get("weekend_rate", "").strip() else None
     rt.description, rt.amenities = f.get("description", "").strip(), f.get("amenities", "").strip()
+    rt.priority = _int(f, "priority", 1, 1, 99)
+    rt.room_list = av.split_rooms(f.get("room_list", ""))[:200]
+    if rt.room_list:  # the listed rooms are the rooms: the count always matches them
+        rt.units = len(rt.room_list)
     rt.active = f.get("active") == "on"  # photos are managed by the photo gallery (room_photos)
     repo.save_room_type(rt)
     raise redirect(toast_url(f"{BASE}/properties/{prop.id}/rooms/{rt.id}", "Room type saved"))

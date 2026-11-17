@@ -19,7 +19,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.resort.availability import free_units
+from app.resort.availability import allocate_rooms, free_units
 from app.resort.models import (BLOCKING, Booking, Charge, ChatMessage, DashboardUser, Guest, IdProof, Property,
                                RateRule, Refund, RoomType)
 
@@ -177,7 +177,7 @@ class ResortRepo:
 
     def list_room_types(self, property_id: str, active_only: bool = True) -> list[RoomType]:
         rows = self._all("SELECT data FROM room_types WHERE property_id=? ORDER BY rowid", (property_id,))
-        types = [RoomType(**json.loads(r["data"])) for r in rows]
+        types = sorted((RoomType(**json.loads(r["data"])) for r in rows), key=lambda t: t.priority)  # ties: order added
         return [t for t in types if t.active or not active_only]
 
     def delete_room_type(self, room_type_id: str) -> None:
@@ -221,8 +221,11 @@ class ResortRepo:
             rows = db.execute(f"SELECT * FROM bookings WHERE room_type_id=? AND status IN ({marks}) "
                               "AND check_in < ? AND check_out > ?",
                               (b.room_type_id, *BLOCKING, b.check_out.isoformat(), b.check_in.isoformat())).fetchall()
-            if free_units(rt, [_booking(r) for r in rows], b.check_in, b.check_out, now) < b.rooms:
+            live = [_booking(r) for r in rows]
+            if free_units(rt, live, b.check_in, b.check_out, now) < b.rooms:
                 raise SoldOut(f"only fewer than {b.rooms} room(s) free")
+            if b.status == "paid" and not b.room_numbers and rt.room_list:  # a desk booking paid on the spot
+                b.room_numbers = ", ".join(allocate_rooms(rt, b, live, now))
             self._insert_booking(db, b)
         return b
 
@@ -244,7 +247,10 @@ class ResortRepo:
              b.received_by, _iso(b.checked_in_at), _iso(b.checked_out_at), b.room_numbers, b.cancel_reason))
 
     def save_booking(self, b: Booking) -> Booking:
-        """Update an existing booking (status, payment ids, notes...)."""
+        """Update an existing booking (status, payment ids, notes...). A paid booking with no rooms yet gets the
+        highest-priority free rooms of its room type (RoomType.room_list), so every way of paying allocates."""
+        if b.status == "paid" and not b.room_numbers:
+            self.assign_rooms(b)
         self._run(
             "UPDATE bookings SET guest_name=?, language=?, status=?, hold_expires_at=?, paid_at=?, "
             "payment_link_id=?, payment_link_url=?, razorpay_payment_id=?, notes=?, total=?, advance=?, payment_method=?, "
@@ -255,6 +261,16 @@ class ResortRepo:
              b.amount_paid, b.payment_note, b.received_by, _iso(b.checked_in_at), _iso(b.checked_out_at),
             b.room_numbers, b.cancel_reason, b.id))
         return b
+
+    def assign_rooms(self, b: Booking, now: datetime | None = None) -> list[str]:
+        """Fill b.room_numbers (not saved here) from the room type's priority list. Empty if no list is set."""
+        rt = self.get_room_type(b.room_type_id)
+        if rt is None or not rt.room_list:
+            return []
+        rooms = allocate_rooms(rt, b, self.blocking_bookings(rt.id, b.check_in, b.check_out),
+                               now or datetime.now(timezone.utc))
+        b.room_numbers = ", ".join(rooms)
+        return rooms
 
     def get_booking(self, booking_id: str) -> Booking | None:
         row = self._one("SELECT * FROM bookings WHERE id=?", (booking_id,))
