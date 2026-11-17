@@ -6,7 +6,13 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 
 ## Conversation
 - Free-text chat like a human at the front desk. No menus, buttons or tap lists.
-- Any plain greeting ("hi", "hello", "ഹായ്") gets exactly "Hi, How can I assist you?" (client, 2026-11-17; code, no AI call).
+- Any plain greeting ("hi", "hello", "ഹായ്") gets exactly "Hi, How can I assist you?" (client, 2026-11-17; code, no AI call),
+  but only at the START of a conversation. A "hi" in the middle of a chat (bot already replied, no 6 h gap) goes to the AI
+  with the chat so far and carries on from where it left off (`_chatting_now`). Always polite, concise, to the point.
+- **English in, English out (client, 2026-11-17).** The code reads the guest's language (`latin_style`): only real Manglish
+  words make a message Manglish; place names, resort words, months and names never do. A message with nothing to go on
+  ("Alleppey", "2 divasam") keeps the language so far. The fixed messages (payment, confirmation) follow the same
+  decision; the AI's own language label can no longer override it.
 - When they want a booking or ask about rooms without naming a resort, ask only: "Vibes Kanthalloor or Pozhiyoram Resort, Alleppey?"
   (names come from all properties, open or not). Vibes Kanthalloor has no online booking until its data is entered: if the
   guest picks it, the bot gives the owner's numbers in one line.

@@ -195,7 +195,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             return outcome
         if is_ack(text) and not self._bot_asked_something(phone, st):
             return "quiet"  # "ok" / "thanks" after a statement: no reply, the guest will write if they want more
-        if GREETING.match(text) and not st.get("bk") and self._places():
+        if GREETING.match(text) and not st.get("bk") and self._places() and not self._chatting_now(phone):
             self._save(phone, st)
             return self._greet(phone, st, text)
         return self._converse(phone, st, text, in_id)

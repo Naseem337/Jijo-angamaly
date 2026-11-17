@@ -23,7 +23,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from app.core.clock import to_ist
-from app.core.language import detect_language, is_language_neutral
+from app.core.language import _classify_latin, _words, is_language_neutral
 from app.providers.llm import ChatMessage, LLMError, ToolCall, ToolSpec
 from app.resort import availability as av
 from app.resort import leads
@@ -56,6 +56,35 @@ ACK_WORDS = frozenset("""ok okay okk okey okie k kk kay thanks thank thankyou th
     super awesome perfect lovely beautiful excellent superb welcome then will see later now bro sir madam da dear anna chetta
     chechi sheri sari shari shaari seri athe aanu nannayi kollam adipoli polichu mathi ശരി ഓക്കെ ഓകെ താങ്ക്സ് നന്ദി കൊള്ളാം
     ठीक है धन्यवाद शुक्रिया अच्छा சரி நன்றி""".split())
+# Resort words, months and place names: they say nothing about the language (the shared word list is for cars, so
+# "Pozhiyoram rooms available?" used to look like Manglish and an English guest got a Manglish reply).
+RESORT_NEUTRAL = frozenset("""
+room rooms resort resorts stay stays night nights person persons people pax adult adults kid kids child children
+deluxe suite suites villa villas cottage cottages pool beach backwater backwaters houseboat lake view ac nonac
+checkin checkout check bed beds extra breakfast food meals wifi parking family couple honeymoon trip tour package
+booking book booked advance balance upi gpay phonepe paytm razorpay link payment id
+jan feb mar apr may jun jul aug sep sept oct nov dec january february march april june july august september october
+november december mon tue wed thu fri sat sun weekend weekday
+pozhiyoram vibes kanthalloor alleppey alappuzha allepey aleppey munnar kerala kochi cochin kumarakom vagamon idukki
+""".split())
+
+
+def latin_style(text: str, previous: str = "en") -> str:
+    """'manglish' or 'en' for a message in English letters. Only real Manglish words make it Manglish; place names,
+    resort words and other names never do, so an English guest always gets English. A message with nothing to go
+    on ('Alleppey', '2 divasam', 'Asha') keeps the guest's language so far."""
+    if MANGLISH_WORDS.search(text):
+        return "manglish"
+    words = [w for w in _words(text) if w not in RESORT_NEUTRAL]
+    names = {w.lower().strip(".,!?") for w in text.split()[1:] if w[:1].isupper()}  # 'Asha', 'Thrissur' mid-sentence
+    english, markers, unknown = _classify_latin([w for w in words if w not in names])
+    if markers:
+        return "manglish"
+    if english == 0 and unknown <= 1:
+        return previous if previous in ("en", "manglish") else "en"
+    return "manglish" if unknown > english else "en"
+
+
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
 MAX_CHAT_WORDS = 40
 _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s", re.IGNORECASE)
@@ -288,11 +317,13 @@ class ChatMixin:
         elif HINGLISH_WORDS.search(text) and not MANGLISH_WORDS.search(text):
             style = "hinglish"
         else:
-            style = {"en": "en", "manglish": "manglish"}.get(detect_language(text, "en"), "en")
+            style = latin_style(text, st.get("style") or "en")
         if style not in STYLE_LABELS:
             style = "en"
         if not is_language_neutral(text):
             st["style"] = style
+            if own not in LANG_NAMES:  # English letters: the fixed messages (payment, confirmation) follow too
+                st["lang"] = STYLE_LANG[style]
         extra = " Plain English words like room, booking and payment are fine inside it." if style != "en" else ""
         return (f"REPLY LANGUAGE (decided from the guest's latest message): {STYLE_LABELS[style]}. Write the whole "
                 f"reply in it and no other language.{extra}")
@@ -339,6 +370,10 @@ class ChatMixin:
             "- Do not paste the property description. Do not mention offers, discounts or 'special' deals. Just "
             "state the price.\n"
             "- Never repeat details the guest already gave, except in the final summary.\n"
+            "- A 'hi' or 'hello' in the middle of a chat is NOT a new start: use the chat so far and carry on from "
+            "where you left off in one short line (for example the next thing you still need). Never ask again what "
+            "they already told you.\n"
+            "- Always polite, concise and to the point.\n"
             "- Reply only when it is necessary: a question, a request, a booking detail, a payment problem, a complaint, "
             "or an answer to something you asked. For anything else send no reply at all, answer with exactly "
             "[no reply]: 'ok', 'thanks', a thumbs up, compliments, jokes, 'will tell my family', 'let me check and "
@@ -436,6 +471,12 @@ class ChatMixin:
                 return i
         return 0
 
+    def _chatting_now(self, phone: str) -> bool:
+        """True when we already talked in this conversation (no long gap): a 'hi' then continues, never restarts."""
+        rows = self.repo.list_chat(phone, limit=HISTORY)
+        rows = rows[self._session_start(rows):]
+        return any(m.direction == "out" for m in rows)
+
     def _history(self, phone: str) -> list[ChatMessage]:
         merged: list[ChatMessage] = []
         rows = self.repo.list_chat(phone, limit=HISTORY)
@@ -515,7 +556,9 @@ class ChatMixin:
         if images and messages and messages[-1].role == "user":
             messages[-1].images = list(images)  # the AI sees the picture this turn only; the chat keeps just "[image]"
         before = st.get("style")
-        system = self._system_prompt(st, phone, text, fresh=len(messages) <= 1)
+        # the language comes from everything the guest wrote since our last reply ('avde engane und' + 'Alleppey')
+        latest = messages[-1].content if messages and messages[-1].role == "user" else text
+        system = self._system_prompt(st, phone, latest, fresh=len(messages) <= 1)
         if before and st.get("style") != before and messages and messages[-1].role == "user":
             # the guest switched language: say it again right on their message, the latest one decides
             note = STYLE_LABELS.get(st["style"], "English")
@@ -625,6 +668,9 @@ class ChatMixin:
             return
         if st.get("gs") in LANG_NAMES:  # the guest writes in this script: that decides, whatever the AI called it
             st["lang"], st["style"] = st["gs"], LATIN_STYLE[st["gs"]]
+            return
+        if st.get("style") in STYLE_LANG:  # the code already read the guest's latest message: English stays English
+            st["lang"] = STYLE_LANG[st["style"]]
             return
         if style in LANG_NAMES:  # a script label for a guest who writes in English letters
             style = {"ml": "manglish", "ta": "tanglish", "hi": "hinglish"}[style]

@@ -164,6 +164,24 @@ def test_a_booking_request_is_asked_which_resort_including_one_not_open_online(w
     assert "online booking is not open yet" in system
 
 
+def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
+    w = world
+    assert say(w, "hi") == "greeting"
+    say(w, "need a room in Pozhiyoram", GUEST, reply("Sure. Which dates?"))
+    assert say(w, "hi", GUEST, reply("Which dates would you like?")) == "answered"
+    assert w.wa.texts()[-1] == "Which dates would you like?"
+    assert any("need a room in Pozhiyoram" in m.content for m in w.llm.calls[-1].messages)  # it saw the chat so far
+
+
+def test_english_with_place_and_room_words_stays_english():
+    from app.resort.chat import latin_style
+    for text in ("Pozhiyoram rooms available?", "Alleppey, 10 Nov 2 nights, 2 persons", "resort booking",
+                 "what is the price for deluxe room"):
+        assert latin_style(text) == "en", text
+    for text in ("room undo", "nale check in cheyyan pattumo", "ethra aakum"):
+        assert latin_style(text) == "manglish", text
+
+
 def test_an_essay_reply_gets_one_shorter_rewrite(world):
     w = world
     essay = " ".join(["Our resort is a lovely place by the backwaters with many things to enjoy."] * 4)
