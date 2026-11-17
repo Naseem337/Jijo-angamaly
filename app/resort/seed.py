@@ -15,6 +15,30 @@ from datetime import date
 from app.resort.db import ResortRepo, check_password, hash_password
 from app.resort.models import DashboardUser, Property, RateRule, RoomType
 
+# The owner's own "glimpse" (2026-11-17), sent once rooms are found. {price} is filled with the price for the guest's dates.
+ALLEPPEY_INTRO = """Your Beachfront Hideout Awaits! 🌊🐚
+
+*Looking to escape the hustle and bustle .?*
+Come find your "home away from home" on our peaceful 1-acre property. It's Very Simple, No Luxury, Kerala Traditional Style property and perfect for those who just want to unplug and listen to the waves.
+
+*What makes us special:*
+Wake up to the Ocean: Every single room has a beach view! 🌅
+
+*Sandy Toes Anytime:* You'll have direct, 24/7 access to the shore from the property.
+
+*Stay Cool:* All 9 rooms are fully Air-Conditioned for your comfort. ❄️
+
+*A Note on Dining:🍴*
+While we don't have an in-house restaurant, we love the "picnic" vibe! You can order all your favorites via Swiggy or Zomato, and they'll deliver right to our gates.
+
+*Special Stay Rate: ✨* Beach View Standard Room - {price}/Night/Room
+
+*Ready to relax?*
+We'd love to have you! Call or WhatsApp us to reserve your spot:
+📞 9497861924
+📞 9995855789"""
+ALLEPPEY_EXTRAS = dict(intro=ALLEPPEY_INTRO, meal_plan="Stay Only", early_checkin_time="06:00", early_checkin_rate=1000)
+
 ALLEPPEY = dict(
     name="Pozhiyoram Resort", city="Alleppey, Kerala", place="Pozhiyoram, Alleppey",
     description=("A peaceful 1-acre beachfront property in simple Kerala traditional style, no luxury, for guests who "
@@ -24,7 +48,7 @@ ALLEPPEY = dict(
     highlights=["Beach view from every room", "Direct 24/7 beach access", "All 9 rooms air-conditioned",
                 "Peaceful 1-acre property"],
     contact_numbers=["+919497861924", "+919995855789"], extra_bed_rate=500, advance_pct=50,
-    map_url="https://maps.app.goo.gl/4x1rKZhq8wh2Pugw8")
+    map_url="https://maps.app.goo.gl/4x1rKZhq8wh2Pugw8", **ALLEPPEY_EXTRAS)
 # room, units, adults, children, max occupancy, base rate; rates by date: (start, end, rate)
 ALLEPPEY_ROOM = ("Beach View AC Room", 9, 3, 3, 3, 2500)
 ALLEPPEY_SEASONS = [(date(2026, 12, 1), date(2026, 12, 14), 3000, "Dec"),
@@ -100,6 +124,11 @@ def seed(repo: ResortRepo) -> list[str]:
                 _tidy_old(repo, repo.get_property(p.id))  # the switched-off old rooms lose the stand-in wording too
             elif _tidy_old(repo, p):
                 out.append(f"{p.name}: old stand-in text removed, switched off until its data is entered.")
+            if p.name == ALLEPPEY["name"] and not (p := repo.get_property(p.id)).intro:  # made before the glimpse existed
+                for key, value in ALLEPPEY_EXTRAS.items():
+                    setattr(p, key, value)
+                repo.save_property(p)
+                out.append(f"{p.name}: welcome message, meal plan and early check-in added.")
         if not out:
             out.append("Properties already exist: nothing seeded.")
     email = (os.environ.get("RESORT_OWNER_EMAIL") or DEFAULT_OWNER_EMAIL).strip().lower()

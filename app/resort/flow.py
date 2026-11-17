@@ -62,7 +62,18 @@ class BookingBot(IdProofMixin, ChatMixin):
     def _log(self, phone: str, text: str, source: str = "text", wamid: str = "") -> None:
         self.repo.add_chat(Chat(phone, "out", text, self.clock.now(), source, wamid))
 
-    def _text(self, phone: str, text: str) -> bool:
+    def _already_sent(self, phone: str, text: str) -> bool:
+        """True when this exact message already went to the guest in the current conversation (client rule,
+        2026-11-17: never send any message twice)."""
+        rows = self.repo.list_chat(phone, limit=60)
+        rows = rows[self._session_start(rows):]
+        wanted = " ".join(text.split())
+        return any(m.direction == "out" and " ".join(m.text.split()) == wanted for m in rows)
+
+    def _text(self, phone: str, text: str, *, repeat_ok: bool = False) -> bool:
+        if not repeat_ok and self._already_sent(phone, text):
+            log.info("Not sending a message twice to %s", mask_phone(phone))
+            return False
         try:
             wamid = self.wa.send_text(phone, text)
         except WhatsAppError as exc:

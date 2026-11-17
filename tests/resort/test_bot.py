@@ -121,8 +121,8 @@ def to_summary(w, *, place="Alleppey", adults=2, nights=2, rt="Deluxe", rooms=1,
 
 
 def confirm(w, phone=GUEST):
-    return say(w, "yes confirm, Asha Menon", phone, tool("create_booking", guest_name="Asha Menon"),
-               reply("Done, your rooms are held."))
+    return say(w, "Asha Menon, 9847012345", phone, tool("create_booking", guest_name="Asha Menon", mobile="9847012345"),
+               reply("[no reply]"))
 
 
 def hold(w, rooms=1, nights=2, rt="Deluxe", phone=GUEST):
@@ -204,6 +204,23 @@ def test_manglish_guest_gets_one_rewrite_when_the_ai_answers_in_english(world):
     assert w.wa.texts()[-1] == "Und sir, nale rooms und. Ethra per und?"
 
 
+def test_a_mid_chat_hi_is_never_left_unanswered(world):
+    w = world
+    say(w, "room und?", GUEST, reply("Which dates, sir?"))
+    assert say(w, "hi", GUEST, reply("[no reply]")) == "answered"
+    assert w.wa.texts()[-1] == "Hi sir, how can I help you further?"
+
+
+def test_no_message_is_ever_sent_twice_in_a_conversation(world):
+    w = world
+    say(w, "room und?", GUEST, reply("Which dates, sir?"))
+    say(w, "hmm?", GUEST, reply("Which dates, sir?"))
+    assert w.wa.texts().count("Which dates, sir?") == 1
+    w.clock.advance(minutes=60 * 7)  # a new conversation after a long gap may say it again
+    say(w, "room und?", GUEST, reply("Which dates, sir?"))
+    assert w.wa.texts().count("Which dates, sir?") == 2
+
+
 def test_an_essay_reply_gets_one_shorter_rewrite(world):
     w = world
     essay = " ".join(["Our resort is a lovely place by the backwaters with many things to enjoy."] * 4)
@@ -231,13 +248,14 @@ def test_booking_chat_end_to_end_with_payment_link(world):
     say(w, "deluxe, 1 room", GUEST, tool("prepare_booking", room_type="deluxe", rooms=1), reply("Summary. Confirm?"))
     summary = last_tool(w)
     assert (summary["total"], summary["advance_now"], summary["balance_at_property"]) == (8000, 4000, 4000)
-    assert summary["guest_name_known"] is False and w.repo.list_bookings(phone=GUEST) == []  # nothing booked yet
+    assert w.repo.list_bookings(phone=GUEST) == []  # nothing booked yet
     assert confirm(w) == "payment_link"
     booking = w.repo.list_bookings(phone=GUEST)[0]
     assert (booking.status, booking.advance, booking.total, booking.rooms) == ("hold", 4000, 8000, 1)
     assert booking.guest_name == "Asha Menon" and w.pay.created[0]["amount"] == 4000
     texts = w.wa.texts()
-    assert texts[-2] == "Done, your rooms are held." and "https://rzp.io/mock/" in texts[-1] and "4,000" in texts[-1]
+    assert texts[-2].startswith("Following are the glimpse") and "Ie - 4,000" in texts[-2]
+    assert texts[-1].startswith("Please pay") and "https://rzp.io/mock/" in texts[-1]
     assert {k for _, k, _ in w.wa.to(GUEST)} == {"text"}  # never a list or button
     assert "bk" not in w.repo.get_state(GUEST)
 
@@ -258,8 +276,8 @@ def test_a_decided_guest_gets_the_payment_link_in_the_same_turn_without_a_second
     say(w, "book deluxe 10 Nov 2 nights for 2", GUEST,
         tool("check_availability", place="alleppey", check_in="2026-11-10", nights=2, adults=2),
         tool("prepare_booking", room_type="Deluxe", rooms=1),
-        tool("create_booking", guest_name="Asha"),
-        reply("Please complete the payment to confirm."))
+        tool("create_booking", guest_name="Asha", mobile="same"),
+        reply("[no reply]"))
     assert last_tool(w)["ok"] is True
     assert len(w.repo.list_bookings(phone=GUEST)) == 1 and len(w.pay.created) == 1
     assert "https://rzp.io/mock/" in w.wa.texts()[-1]
@@ -268,7 +286,7 @@ def test_a_decided_guest_gets_the_payment_link_in_the_same_turn_without_a_second
 def test_create_needs_a_prepared_booking_and_a_name(world):
     w = world
     say(w, "yes book it", GUEST, tool("create_booking", guest_name="Asha"), reply("Which dates?"))
-    assert "no prepared booking" in last_tool(w)["error"]
+    assert "check_availability" in last_tool(w)["error"]
     to_summary(w)
     say(w, "yes", GUEST, tool("create_booking"), reply("May I have your name?"))
     assert "name" in last_tool(w)["error"] and w.repo.list_bookings(phone=GUEST) == []
@@ -367,7 +385,7 @@ def test_soldout_race_is_reported_to_the_ai(world):
     other = Booking(w.p1.id, w.deluxe.id, "+919811111111", date(2026, 11, 10), date(2026, 11, 12), 2, 0, 2, 8000,
                     4000, w.clock.now(), hold_expires_at=w.clock.now() + timedelta(minutes=15))
     w.repo.create_hold(other, w.clock.now())  # someone else grabbed both Deluxe rooms first
-    say(w, "yes, Asha", GUEST, tool("create_booking", guest_name="Asha"), reply("Sorry, those rooms just went."))
+    say(w, "yes, Asha", GUEST, tool("create_booking", guest_name="Asha", mobile="same"), reply("Sorry, those rooms just went."))
     assert "just taken" in last_tool(w)["error"] and w.repo.list_bookings(phone=GUEST) == []
     assert w.pay.created == []
 
@@ -392,7 +410,7 @@ def test_payment_link_failure_hands_off(world, monkeypatch):
         raise PaymentError("razorpay down")
 
     monkeypatch.setattr(w.pay, "create_payment_link", boom)
-    say(w, "yes, Asha", GUEST, tool("create_booking", guest_name="Asha"), reply("never shown"))
+    say(w, "yes, Asha", GUEST, tool("create_booking", guest_name="Asha", mobile="same"), reply("never shown"))
     assert w.repo.is_paused(GUEST)[0] and "payment link" in w.wa.texts(STAFF)[-1]
     assert "payment link" in w.wa.texts()[-1] and "never shown" not in " ".join(w.wa.texts())
     assert w.repo.list_bookings(phone=GUEST)[0].status == "failed"
@@ -650,7 +668,7 @@ def test_resend_payment_link_while_on_hold(world):
     assert say(w, "link not opening, send again", GUEST, tool("send_payment_link"),
                reply("Sure, sending it again.")) == "payment_link"
     last = w.wa.texts()[-1]
-    assert b.payment_link_url in last and "10 minutes" in last and "UPI" in last
+    assert b.payment_link_url in last and last.startswith("Please pay")
 
 
 def test_resend_refused_after_the_hold_ran_out(world):
@@ -701,7 +719,7 @@ def test_the_chat_saves_a_lead_at_every_step(world):
     assert lead["property_id"] == w.p1.id and lead["booking_id"] == ""
     say(w, "deluxe", GUEST, tool("prepare_booking", room_type="Deluxe", rooms=1), reply("Summary. Confirm?"))
     assert leads.get_lead(w.repo, GUEST)["stage"] == "summary" and leads.get_lead(w.repo, GUEST)["room_type"] == "Deluxe"
-    say(w, "yes, Asha Menon from Kochi", GUEST, tool("create_booking", guest_name="Asha Menon", from_city="Kochi"),
+    say(w, "yes, Asha Menon from Kochi", GUEST, tool("create_booking", guest_name="Asha Menon", mobile="same", from_city="Kochi"),
         reply("Held."))
     booking = w.repo.list_bookings(phone=GUEST)[0]
     lead = leads.get_lead(w.repo, GUEST)
@@ -721,20 +739,20 @@ def test_manglish_guest_gets_manglish_fixed_messages_and_no_booked_before_paymen
         tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="manglish"),
         reply("Und bro. Deluxe 4000, Family Suite 8000. Ethu mathi?"))
     say(w, "deluxe mathi", GUEST, tool("prepare_booking", room_type="Deluxe", rooms=1, language="manglish"), reply("Summary"))
-    say(w, "ok confirm, Asha", GUEST, tool("create_booking", guest_name="Asha", language="manglish"),
-        reply("Payment complete cheythaal booking confirm aakum."))
+    say(w, "Asha, 9847012345", GUEST, tool("create_booking", guest_name="Asha", mobile="9847012345", language="manglish"),
+        reply("[no reply]"))
     pay_text = w.wa.texts()[-1]
-    assert "payment complete cheyyuka" in pay_text and "UPI" in pay_text and w.repo.get_state(GUEST)["lang"] == "mn"
+    assert pay_text.startswith("Ee link vazhi advance pay cheyyuka") and w.repo.get_state(GUEST)["lang"] == "mn"
     for banned in ("held", "booked", "reserved"):
         assert banned not in pay_text.lower()
-    assert "Booking RB-" not in w.wa.texts()[-2]  # the AI's own line does not claim a confirmed booking either
+    assert w.wa.texts()[-2].startswith("Following are the glimpse")  # the summary is always English
 
 
-def test_english_payment_message_asks_to_complete_payment_not_to_trust_a_hold(world):
+def test_english_payment_message_only_asks_to_pay(world):
     w = world
     hold(w, rooms=1)
     text = w.wa.texts()[-1]
-    assert "complete the payment" in text and "confirm your booking" in text
+    assert text.startswith("Please pay the advance using this link:\nhttps://") and "%" not in text
     for banned in ("held", "is booked", "reserved"):
         assert banned not in text.lower()
 
@@ -788,7 +806,8 @@ def test_ok_after_a_statement_gets_no_reply_but_ok_after_a_question_does(world):
 def test_ok_is_an_answer_while_a_booking_summary_waits_for_confirmation(world):
     w = world
     to_summary(w)
-    assert say(w, "ok", GUEST, tool("create_booking", guest_name="Asha"), reply("Please complete the payment.")) == "payment_link"
+    assert say(w, "ok", GUEST, tool("create_booking", guest_name="Asha", mobile="same"),
+               reply("[no reply]")) == "payment_link"
 
 
 def test_the_ai_can_choose_to_stay_quiet(world):
@@ -1021,28 +1040,75 @@ def test_the_summary_is_built_in_english_laid_out_line_by_line_and_sent_before_t
     say(w, "Alleppey il 10 nu 2 divasam, 2 per", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="manglish"),
         reply("Deluxe 8000 aanu sir."))
-    say(w, "deluxe mathi", GUEST, tool("prepare_booking", room_type="Deluxe", rooms=1, language="manglish"),
-        reply("Confirm cheyyatte sir? Name-um city-um parayamo?"))
+    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "meal_plan": "Stay Only",
+                                     "early_checkin_time": "06:00", "early_checkin_rate": 1000}))
+    say(w, "deluxe mathi, early check-in venam", GUEST,
+        tool("prepare_booking", room_type="Deluxe", rooms=1, early_checkin=True, language="manglish"),
+        reply("Name-um mobile number-um parayamo?"))
+    assert w.wa.texts()[-1] == "Name-um mobile number-um parayamo?" and w.repo.list_bookings(phone=GUEST) == []
+    say(w, "Kavana Priya, 80886 78167", GUEST,
+        tool("create_booking", guest_name="Kavana Priya", mobile="80886 78167", language="manglish"), reply("[no reply]"))
     texts = w.wa.texts()
-    assert texts[-1] == "Confirm cheyyatte sir? Name-um city-um parayamo?"  # the AI's own short line comes last
     assert texts[-2] == "\n".join([
-        "*Booking summary*", "",
-        "Place: Pozhiyoram, Alleppey",
-        "Room: Deluxe x 1",
-        "Check-in: Tue, 10 Nov 2026, from 2:00 PM",
-        "Check-out: Thu, 12 Nov 2026, by 11:00 AM",
-        "Stay: 2 nights, 2 guests", "",
-        "Total: ₹8,000",
-        "Pay now (advance): ₹4,000",
-        "Pay at the property: ₹4,000"])
-    assert "next_step" in last_tool(w) and "Do NOT write it" in last_tool(w)["next_step"]
+        "Following are the glimpse of your enquiry,", "",
+        "Guest - Kavana Priya",
+        "80886 78167",
+        "Check in - 10th Nov 26",
+        "*Early Check-in @ 6am*",
+        "Check out - 12th Nov 26",
+        "2 Nights",
+        "2 PAX",
+        "1 Room",
+        "*Deluxe*",
+        "*Stay Only*",
+        "Room Cost - 8,000",
+        "Early Check-in Charges - 1,000",
+        "Total Cost - 9,000", "",
+        "As a procedure you may need to pay an advance to block the room.", "",
+        "Ie - 4,500", "",
+        "Balance can be paid during the time of check in."])
+    assert texts[-1].startswith("Please pay") or texts[-1].startswith("Ee link")
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    assert (b.total, b.advance) == (9000, 4500) and "Mobile: 8088678167" in b.notes and "Early check-in" in b.notes
+    assert w.pay.created[0]["amount"] == 4500
 
 
 def test_extra_bed_shows_in_the_summary(world):
     w = world
     to_summary(w, beds=1, adults=2)
-    summary = next(t for t in w.wa.texts() if t.startswith("*Booking summary*"))
-    assert "Room: Deluxe x 1 (+ 1 extra bed)" in summary and "Stay: 2 nights, 2 guests" in summary and "Total: ₹9,000" in summary
+    confirm(w)
+    summary = next(t for t in w.wa.texts() if t.startswith("Following are the glimpse"))
+    assert "Extra Bed - 1,000" in summary and "2 PAX" in summary and "Total Cost - 9,000" in summary
+
+
+def test_the_form_then_glimpse_then_ask_name_in_the_clients_order(world):
+    w = world
+    for p in (w.p1, w.p2):
+        w.repo.save_property(Property(**{**w.repo.get_property(p.id).__dict__, "active": p is w.p1}))
+    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__,
+                                     "intro": "Your Beachfront Hideout Awaits!\nRoom - {price}/Night/Room"}))
+    for rt in w.repo.list_room_types(w.p1.id):  # one room type, like Pozhiyoram
+        if rt.name != "Deluxe":
+            w.repo.save_room_type(RoomType(**{**rt.__dict__, "active": False}))
+    say(w, "Pozhiyoram", GUEST, tool("ask_stay_details", place="Pozhiyoram"), reply("[no reply]"))
+    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
+    say(w, "Check in : 10 Nov\nCheck out : 12 Nov\nNumber of persons : 2", GUEST,
+        tool("check_availability", place="Pozhiyoram", check_in="2026-11-10", check_out="2026-11-12", adults=2),
+        reply("[no reply]"))
+    assert w.wa.texts()[-3:] == ["Yes, rooms are available for your dates.",
+                                 "Your Beachfront Hideout Awaits!\nRoom - ₹4,000/Night/Room",
+                                 "Please share your name and mobile number to proceed."]
+    say(w, "Asha, same number", GUEST, tool("create_booking", guest_name="Asha", mobile="same"), reply("[no reply]"))
+    texts = w.wa.texts()
+    assert texts[-2].startswith("Following are the glimpse") and "*Deluxe*" not in texts[-2]  # one room type: no name
+    assert texts[-1].startswith("Please pay") and "9847012345"[:5] in texts[-2]
+    say(w, "dates again 1 Dec 1 night 2", GUEST,
+        tool("check_availability", place="Pozhiyoram", check_in="2026-12-01", nights=1, adults=2), reply("Yes, available."))
+    assert not any("Beachfront" in x for x in w.wa.texts()[-3:])  # the glimpse goes once
+    say(w, "Asha, 9847012345, early check in?", GUEST,
+        tool("check_availability", place="Pozhiyoram", check_in="2026-12-01", nights=1, adults=2),
+        tool("create_booking", guest_name="Asha", mobile="9847012345"), reply("[no reply]"))
+    assert "Please share your name" not in " ".join(w.wa.texts()[-2:])  # not asked again with the summary
 
 
 def test_a_per_night_price_is_given_only_when_every_night_costs_the_same(world):
@@ -1144,8 +1210,9 @@ def test_the_guest_is_never_called_by_name_in_any_script():
 def test_the_prompt_never_lets_the_ai_assume_the_guest_count(world):
     w = world
     say(w, "room und?", GUEST, reply("Und sir. Ethra per?"))
-    assert "Never assume the number of persons, rooms or nights" in w.llm.calls[0].system
-    assert "never assume 1" in str(w.llm.calls[0].tools[0].parameters)
+    assert "Never assume the number of persons or nights" in w.llm.calls[0].system
+    check = next(tl for tl in w.llm.calls[0].tools if tl.name == "check_availability")
+    assert "never assume 1" in str(check.parameters)
 
 
 def test_discount_before_payment_makes_a_new_total_a_new_link_and_closes_the_old_one(world):

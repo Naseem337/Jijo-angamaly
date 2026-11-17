@@ -100,7 +100,10 @@ class IdProofMixin:
     def _send_id_ask(self, phone: str, st: dict[str, Any], b: Booking) -> bool:
         lang, n, m = self._id_lang(st, b), st["idp"]["guest_no"], b.adults
         key = "id_body_first" if n == 1 else "id_body_next"
-        return self._text(phone, t(key, lang, n=n, m=m, days=KEEP_DAYS))
+        text = t(key, lang, n=n, m=m, days=KEEP_DAYS)
+        if self._already_sent(phone, text):  # a second booking: same words, so name the stay (never a repeat)
+            text = f"For your stay from {b.check_in.day} {b.check_in.strftime('%b %Y')}:\n{text}"
+        return self._text(phone, text)
 
     def _id_finish(self, phone: str, st: dict[str, Any], lang: str, *, later: bool) -> str:
         st.pop("idp", None)

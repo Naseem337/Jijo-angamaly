@@ -36,8 +36,14 @@ S: dict[str, dict[str, str]] = {
     # the client's own words (2026-11-17), the same for every language
     "greet": _t("Hi, How can I assist you?", "Hi, How can I assist you?", "Hi, How can I assist you?",
                 "Hi, How can I assist you?"),
+    # the client's booking form (2026-11-17), always this English template
+    "form": _t(*["Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"] * 4),
+    "ask_contact": _t(*["Please share your name and mobile number to proceed."] * 4),
+    "rooms_ok": _t(*["Yes, rooms are available for your dates."] * 4),
+    "greet_again": _t(*["Hi sir, how can I help you further?"] * 4),
     "or": _t("or", "അല്ലെങ്കിൽ", "அல்லது", "या"),
-    "pay": _t('Please complete the payment of ₹{advance} in {minutes} minutes to confirm your booking (UPI, card or net banking):\n{url}\n\nBooking ID: {id}',
+    # the client wants no talk about payment here (2026-11-17): just the link and "please pay"
+    "pay": _t('Please pay the advance using this link:\n{url}',
                 'ബുക്കിംഗ് ഉറപ്പിക്കാൻ {minutes} മിനിറ്റിനുള്ളിൽ ₹{advance} പേയ്മെന്റ് പൂർത്തിയാക്കൂ. UPI (GPay, PhonePe, Paytm), കാർഡ്, നെറ്റ് ബാങ്കിംഗ് എല്ലാം ഉപയോഗിക്കാം:\n{url}\n\nബുക്കിംഗ് ID: {id}',
                 'முன்பதிவை உறுதிசெய்ய {minutes} நிமிடங்களுக்குள் ₹{advance} கட்டணத்தை முடிக்கவும். UPI (GPay, PhonePe, Paytm), கார்டு, நெட் பேங்கிங் அனைத்தும் பயன்படுத்தலாம்:\n{url}\n\nமுன்பதிவு ID: {id}',
                 'बुकिंग कन्फर्म करने के लिए {minutes} मिनट में ₹{advance} का पेमेंट पूरा करें। UPI (GPay, PhonePe, Paytm), कार्ड और नेट बैंकिंग सब चलेगा:\n{url}\n\nबुकिंग ID: {id}'),
@@ -151,8 +157,9 @@ S.update({
 MN = {
     "discount": "Nalla vaartha: owner ningalkku special price tharunnu. Puthiya total ₹{total}, ippol pay cheyyenda advance ₹{advance}.",
     "or": "allenkil",
-    "pay": "Booking confirm aakaan {minutes} minute-nullil ₹{advance} payment complete cheyyuka (UPI, card, net banking):\n{url}\n\n"
-           "Booking ID: {id}",
+    "pay": "Ee link vazhi advance pay cheyyuka:\n{url}",
+    "rooms_ok": "Und, ningalude dates-il rooms available aanu.",
+    "ask_contact": "Munnottu pokaan ningalude name-um mobile number-um ayakkamo?",
     "paid": "Payment kitti. Ningalude booking {id} confirmed aayi!\n{property}\n{check_in} to {check_out}, {rooms} room.\n"
             "Check-in {checkin_time} muthal. Ningale kaanaan kaathirikkunnu.",
     "failed": "Payment nadannilla ennu thonnunnu. Onnu koodi try cheyyuka:",

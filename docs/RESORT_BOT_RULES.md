@@ -4,6 +4,23 @@ These rules are enforced by our own prompt and code (`app/resort/chat.py`, `flow
 Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the model, run
 `.venv\Scripts\python.exe scripts\live_eval_resort.py` and read `data/eval/resort_<lang>.txt`.
 
+## Booking flow (client, 2026-11-17; replaces the older order below where they differ)
+1. "Hi" -> "Hi, How can I assist you?"
+2. Wants a resort -> "Pozhiyoram Resort, Alleppey or Vibes Kanthalloor?"
+3. Resort known -> the form (fixed, `ask_stay_details` tool): "Please share these details: Check in : / Check out : / Number of persons :"
+4. Filled -> `check_availability`. Available -> fixed "Yes, rooms are available for your dates." -> the resort's glimpse
+   (`Property.intro`, editable in the dashboard; `{price}` = the real per-night price for their dates; sent once) ->
+   "Please share your name and mobile number to proceed." Not available -> the AI says so and suggests other dates.
+5. Name + mobile -> `create_booking` -> "Following are the glimpse of your enquiry," summary (guest, mobile, dates as
+   "15th Nov 26", early check-in line, nights, PAX, rooms, meal plan, Room Cost, extras, Total Cost, then "As a procedure
+   you may need to pay an advance to block the room. Ie - <amount>. Balance can be paid during the time of check in.")
+   -> "Please pay the advance using this link: <link>". No percent, no other payment talk.
+- Early check-in only when the guest asks: `Property.early_checkin_time` / `early_checkin_rate` (per room), added to
+  the total and the advance. Meal plan line from `Property.meal_plan` ("Stay Only").
+- **Never the same message twice (client, 2026-11-17, strict):** `BookingBot._text` refuses any message already sent in
+  the current conversation (6 h gap = new one). Only a payment link the guest asks for again may repeat.
+- A mid-chat "hi" is never left unanswered: if the AI stays silent, "Hi sir, how can I help you further?".
+
 ## Conversation
 - Free-text chat like a human at the front desk. No menus, buttons or tap lists.
 - Any plain greeting ("hi", "hello", "ഹായ്") gets exactly "Hi, How can I assist you?" (client, 2026-11-17; code, no AI call),

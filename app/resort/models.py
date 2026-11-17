@@ -37,6 +37,10 @@ class Property:
     extra_bed_rate: int = 0  # per bed per night, rupees; 0 = no extra beds offered
     highlights: list[str] = field(default_factory=list)  # short selling points: "Infinity pool", "Mountain view"
     policies: str = ""  # cancellation / refund / house rules, in the resort's own words
+    intro: str = ""  # the "glimpse" sent once rooms are found for the guest's dates; {price} = the per-night price
+    meal_plan: str = ""  # shown on the enquiry summary, e.g. "Stay Only"
+    early_checkin_time: str = ""  # e.g. "06:00"; empty = early check-in not offered
+    early_checkin_rate: int = 0  # rupees per room
     gstin: str = ""  # shown on invoices
     invoice_prefix: str = "INV"
     # Refund of the amount paid, by days left before check-in (first row whose days_before <= days left wins).

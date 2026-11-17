@@ -44,6 +44,14 @@
     <div class="chip-list"></div>
     <div class="chip-add"><input type="text" maxlength="40" placeholder="e.g. Infinity pool, Mountain view, Campfire"><button type="button" class="btn">Add</button></div>
   </div></div>
+<label class="field"><span>Welcome message (glimpse)</span>
+  <textarea name="intro" rows="10" maxlength="3000" placeholder="Sent to the guest once rooms are found for their dates.">{{ p.intro }}</textarea>
+  <small>Sent as it is, once rooms are found for the guest's dates. Write {price} where the room price for their dates should go.</small></label>
+<div class="cols">
+  {{ field("Meal plan", "meal_plan", p.meal_plan, "text", "Shown on the enquiry summary, e.g. Stay Only", attrs='maxlength="40"') }}
+  {{ field("Early check-in from", "early_checkin_time", p.early_checkin_time, "time", "Leave empty if not offered") }}
+  {{ field("Early check-in charge (per room, ₹)", "early_checkin_rate", p.early_checkin_rate, "number", attrs='min="0"') }}
+</div>
 <label class="check"><input type="checkbox" name="active" {{ 'checked' if p.active }}> Active (the bot offers this property)</label></section>
 
 <section class="card" id="payment"><h3>Payment, invoices and cancellation</h3><div class="cols">

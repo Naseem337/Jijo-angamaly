@@ -18,12 +18,13 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
 from app.core.clock import to_ist
 from app.core.language import _classify_latin, _words, is_language_neutral
+from app.core.phone import try_normalize_phone
 from app.providers.llm import ChatMessage, LLMError, ToolCall, ToolSpec
 from app.resort import availability as av
 from app.resort import leads
@@ -158,12 +159,23 @@ class _Turn:
     pay_message: str = ""
     summary_message: str = ""
     handed_off: bool = False
+    after: list[str] = field(default_factory=list)  # fixed messages sent after the AI's line (form, glimpse, ask name)
+    resend: bool = False  # the guest asked for their payment link again
 
 
 LANGUAGE_FIELD = {"type": "string", "enum": list(STYLES),
                   "description": "the language style of the guest's latest message (Manglish = Malayalam in English letters)"}
 
+EARLY_FIELD = {"type": "boolean", "description": "true only if the guest asked for early check-in"}
+
 TOOLS = [
+    ToolSpec(
+        "ask_stay_details",
+        "Send the guest the booking form (Check in / Check out / Number of persons) for the resort they chose. Use it "
+        "once the resort is known and the guest has not yet given their dates and number of persons. The form is "
+        "sent automatically; your reply must then be exactly [no reply].",
+        {"type": "object", "properties": {"place": {"type": "string", "description": "the resort the guest chose"}},
+         "required": ["place"]}),
     ToolSpec(
         "check_availability",
         "Check which rooms are free for the guest's stay and what they cost. Call it as soon as you know the place, "
@@ -181,22 +193,29 @@ TOOLS = [
          "required": ["place", "check_in", "adults"]}),
     ToolSpec(
         "prepare_booking",
-        "After the guest has chosen a room type (and how many rooms), lock the figures and get the exact summary "
-        "numbers. Then show the guest the full summary and ask them to confirm. Does not book anything.",
+        "Lock the room type and figures when the guest picks one of several room types, or asks for extra beds or "
+        "early check-in. Does not book anything and sends nothing.",
         {"type": "object", "properties": {
             "room_type": {"type": "string", "description": "room type name as shown by check_availability"},
             "rooms": {"type": "integer"},
             "extra_beds": {"type": "integer", "description": "extra beds the guest asked for (default 0)"},
+            "early_checkin": EARLY_FIELD,
             "language": LANGUAGE_FIELD},
-         "required": ["room_type", "rooms"]}),
+         "required": ["room_type"]}),
     ToolSpec(
         "create_booking",
-        "Create the booking and the payment link. Only after the guest has seen the summary from prepare_booking "
-        "and replied that they confirm. The payment link is sent automatically right after your reply.",
+        "Create the booking as soon as rooms are available and the guest has given their name and mobile number. "
+        "The enquiry summary and the payment link are sent automatically; your reply must then be exactly [no reply].",
         {"type": "object", "properties": {
-            "guest_name": {"type": "string", "description": "name for the booking, if not already known"},
+            "guest_name": {"type": "string", "description": "the name the guest gave"},
+            "mobile": {"type": "string", "description": "the mobile number the guest gave ('same' if they said this number)"},
+            "room_type": {"type": "string", "description": "only when there are several room types: the one chosen"},
+            "rooms": {"type": "integer", "description": "only if the guest asked for a number of rooms"},
+            "extra_beds": {"type": "integer", "description": "only if the guest asked for extra beds"},
+            "early_checkin": EARLY_FIELD,
             "from_city": {"type": "string", "description": "the city they are coming from, only if they said it"},
-            "language": LANGUAGE_FIELD}}),
+            "language": LANGUAGE_FIELD},
+         "required": ["guest_name", "mobile"]}),
     ToolSpec(
         "send_payment_link",
         "Send the guest their payment link again (they lost it, it did not open, or they ask for it). Only works "
@@ -271,6 +290,11 @@ class ChatMixin:
                        f"{p.advance_pct}% online now; the rest is paid at the property.")
             if p.extra_bed_rate:
                 out.append(f"  Extra bed: {_money(p.extra_bed_rate)} per bed per night.")
+            if p.early_checkin_time and p.early_checkin_rate:
+                out.append(f"  Early check-in (only if asked): from {self._short_time(p.early_checkin_time)}, "
+                           f"{_money(p.early_checkin_rate)} per room.")
+            if p.meal_plan:
+                out.append(f"  Meal plan: {p.meal_plan}.")
             if p.policies:
                 out.append(f"  Policies: {p.policies}")
             out.append(f"  Owner's phone/WhatsApp numbers: {numbers}")
@@ -372,9 +396,9 @@ class ChatMixin:
             "- Do not paste the property description. Do not mention offers, discounts or 'special' deals. Just "
             "state the price.\n"
             "- Never repeat details the guest already gave, except in the final summary.\n"
-            "- A 'hi' or 'hello' in the middle of a chat is NOT a new start: use the chat so far and carry on from "
-            "where you left off in one short line (for example the next thing you still need). Never ask again what "
-            "they already told you.\n"
+            "- A 'hi' or 'hello' in the middle of a chat is NOT a new start and always gets a reply (never [no reply]): "
+            "use the chat so far and carry on from where you left off in one short line (for example the next thing "
+            "you still need, or 'Hi sir, how can I help?'). Never ask again what they already told you.\n"
             "- Always polite, concise and to the point.\n"
             "- Talk ONLY about our resorts: rooms, prices, dates, bookings, payment, the stay, location and facilities. "
             "For anything else (general questions, other places, news, jokes, coding, personal chat) say politely in "
@@ -398,22 +422,22 @@ class ChatMixin:
             "BOOKING, in this order, skipping what the guest already told you\n"
             "1. Which resort. When the guest wants a booking or asks about rooms and has not named a resort, ask "
             f"only that, in one short line: {' or '.join(self._resort_names())}?\n"
-            "2. Check-in date, and how many nights or the check-out date. If the date has no year, use the next "
-            "time it comes. Work from today's date.\n"
-            "3. How many persons. Never assume the number of persons, rooms or nights: if the guest has not said it, ask.\n"
-            "4. How many rooms. Tell them how many rooms their group needs at least, and let them choose.\n"
-            "5. Call check_availability. Then offer what is free in plain words: each room type with the total for "
-            "THEIR dates (and price_per_night when the tool gives it). With more than one room type, put each on its "
-            "own line and let the guest pick.\n"
-            "6. When they choose a room (or say yes to your suggestion), call prepare_booking. The full English "
-            "booking summary is sent automatically; do not write it.\n"
-            "7. Do NOT ask 'shall I confirm?' again. A guest who has chosen the room and given dates and persons has "
-            "already decided: in the SAME turn, right after prepare_booking, call create_booking. Then, WITHOUT starting with "
-            "'Done' or 'All set', tell them in one short line to complete the payment to confirm the booking; the "
-            "payment link follows. Do not write the link or the advance amount yourself, it is sent automatically. "
-            "If you do not know their name, ask it first (one short line, plus the city they come from, optional, "
-            "never insist) and create the booking as soon as they reply. Ask for confirmation only when something "
-            "is still unclear (room type, rooms, dates). Never ask the same thing twice.\n"
+            "2. As soon as the resort is known and the guest has not given their dates and persons, call "
+            "ask_stay_details: it sends the form (Check in / Check out / Number of persons). Reply [no reply]. If they "
+            "gave only part of it, ask just the missing part in a few words. If a date has no year, use the next time "
+            "it comes. Never assume the number of persons or nights.\n"
+            "3. When you have check-in, check-out (or nights) and persons, call check_availability. Rooms: use the "
+            "fewest rooms the group needs unless the guest asked for more. If rooms are available, say ONLY that in "
+            "one short line; the resort's details and the request for name and mobile number are sent automatically. "
+            "If not available, say so and suggest other dates.\n"
+            "4. With several room types, list each (name - price per night) and let the guest pick (prepare_booking).\n"
+            "5. When the guest gives their name and mobile number, call create_booking right away (no 'shall I "
+            "confirm?'). The enquiry summary and the payment link are sent automatically: reply [no reply]. Never "
+            "write the summary, the link, the advance amount or a percent yourself. If they say 'this number', "
+            "pass mobile 'same'.\n"
+            "- Early check-in: only if the guest asks. Tell them the time and charge from the FACTS and pass "
+            "early_checkin true to create_booking if they want it.\n"
+            "- Never ask the same thing twice.\n"
             "- Before the payment is received, NEVER say the room or booking is booked, confirmed, reserved or done. "
             "Say it will be confirmed once the payment is complete. The confirmation message arrives on its own.\n"
             "- If the party does not fit or the dates are sold out, say so and suggest another date, fewer rooms "
@@ -609,28 +633,41 @@ class ChatMixin:
         self._save(phone, st)
         if ctx.handed_off:
             return "handoff"
-        if NO_REPLY in reply.lower():
+        queued = bool(ctx.after or ctx.summary_message or ctx.pay_message)
+        quiet = NO_REPLY in reply.lower()
+        if quiet and not queued and GREETING.match(text):  # a mid-chat "hi" always gets an answer
+            reply, quiet = t("greet_again", st.get("lang", "en")), False
+        if quiet and not queued:
             return "quiet"
-        if not reply:
+        if not reply and not queued:
             self._text(phone, t("ai_down", st.get("lang", "en")))
             self.alert_staff(f"Bot could not answer a message from {phone}: {text[:200]}", st.get("bk", {}).get("property_id"))
             return "ai_down"
+        # the client's order: the AI's short line, then the fixed messages (form / glimpse / ask name), then the
+        # enquiry summary, then the payment link
+        if reply and not quiet:
+            guest = self.repo.get_guest(phone)
+            clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
+            self._text(phone, self._ease_sir(phone, clean))
+        asked = {t("ask_contact", lang) for lang in ("en", "mn")}
+        for message in ctx.after:
+            if ctx.summary_message and message in asked:  # they already gave name and mobile in this turn
+                continue
+            self._text(phone, message)
         if ctx.summary_message and ctx.summary_message != st.get("last_summary"):  # never the same summary twice
             st["last_summary"] = ctx.summary_message
             self._save(phone, st)
-            self._text(phone, ctx.summary_message)  # the English summary first, then the AI's short line to confirm
-        guest = self.repo.get_guest(phone)
-        clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
-        self._text(phone, self._ease_sir(phone, clean))
-        if ctx.pay_message:
-            self._text(phone, ctx.pay_message)
+            self._text(phone, ctx.summary_message)
+        if ctx.pay_message:  # the guest asked for the link again: the only message that may repeat
+            self._text(phone, ctx.pay_message, repeat_ok=ctx.resend)
             return "payment_link"
         return "answered"
 
     # ------------------------------------------------------------------ tools
 
     def _run_tool(self, ctx: _Turn, call: ToolCall) -> tuple[str, bool]:
-        handlers = {"check_availability": self._tool_check, "prepare_booking": self._tool_prepare,
+        handlers = {"ask_stay_details": self._tool_form,
+                    "check_availability": self._tool_check, "prepare_booking": self._tool_prepare,
                     "create_booking": self._tool_create, "my_bookings": self._tool_bookings,
                     "send_payment_link": self._tool_resend, "recall_old_chat": self._tool_recall}
         handler = handlers.get(call.name)
@@ -699,6 +736,47 @@ class ChatMixin:
             style = {"ml": "manglish", "ta": "tanglish", "hi": "hinglish"}[style]
         st["lang"], st["style"] = STYLE_LANG[style], style
 
+    def _tool_form(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        """The client's booking form: Check in / Check out / Number of persons, as a fixed message."""
+        prop = self._find_property(a.get("place", ""))
+        if prop is None:
+            return {"error": "that resort has no online booking: give the owner's numbers from the FACTS",
+                    "open_resorts": [self._place_label(p) for p in self._places()]}
+        ctx.st["form_place"] = prop.id
+        if t("form", "en") not in ctx.after:
+            ctx.after.append(t("form", ctx.st.get("lang", "en")))
+        return {"ok": True, "resort": self._place_label(prop),
+                "note": "the form is sent automatically; reply exactly [no reply]"}
+
+    @staticmethod
+    def _ordinal_date(d: date) -> str:
+        """15th Nov 26."""
+        suffix = "th" if 10 <= d.day % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(d.day % 10, "th")
+        return f"{d.day}{suffix} {d.strftime('%b')} {d.strftime('%y')}"
+
+    @staticmethod
+    def _short_time(hhmm: str) -> str:
+        """06:00 -> 6am, 18:30 -> 6:30pm."""
+        try:
+            hour, minute = (int(x) for x in hhmm.split(":")[:2])
+        except ValueError:
+            return hhmm
+        return f"{hour % 12 or 12}{f':{minute:02d}' if minute else ''}{'am' if hour < 12 else 'pm'}"
+
+    @staticmethod
+    def _show_mobile(number: str) -> str:
+        """+918088678167 -> 80886 78167."""
+        digits = display_phone(number)
+        return f"{digits[:5]} {digits[5:]}" if len(digits) == 10 and digits.isdigit() else digits
+
+    def _price(self, prop: Property, rt: RoomType, ci: date, co: date, rooms: int, beds: int,
+               early: bool) -> tuple[av.Quote, int, int, int]:
+        """(quote, early check-in fee, total, advance). The advance is the property's share of the full total."""
+        q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, rooms, beds)
+        fee = prop.early_checkin_rate * rooms if early else 0
+        total = q.total + fee
+        return q, fee, total, round(total * prop.advance_pct / 100) if fee else q.advance
+
     def _tool_check(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st = ctx.st
         self._set_style(st, a)
@@ -752,9 +830,29 @@ class ChatMixin:
         if not options:
             out["available"] = False
             out["reason"] = "no room type is free for this many guests on these dates (sold out or too many guests)"
-        elif wanted and not any(wanted in o["rooms_possible"] for o in options):
+            return out
+        if wanted and not any(wanted in o["rooms_possible"] for o in options):
             out["note"] += (f" {wanted} room(s) is not possible for {adults + children} guest(s); "
                             "rooms_possible lists the counts that work.")
+        out["available"] = True
+        # the client's flow: "rooms available" -> the resort's glimpse -> ask name and mobile, once per set of dates
+        key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}"
+        lang = st.get("lang", "en")
+        if len(options) == 1 and st.get("checked") != key:
+            st["checked"] = key
+            ctx.after.append(t("rooms_ok", lang))
+            if prop.intro and st.get("intro_sent") != prop.id:
+                price = options[0].get("price_per_night") or round(
+                    options[0]["total_for_stay"] / max(1, out["nights"] * options[0]["quoted_for_rooms"]))
+                ctx.after.append(prop.intro.replace("{price}", _money(price)))
+                st["intro_sent"] = prop.id
+            ctx.after.append(t("ask_contact", lang))
+            out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
+        elif len(options) == 1:
+            out["note"] += " Rooms are still available. Answer only what the guest asked, in one short line."
+        else:
+            out["note"] += (" Rooms ARE available. List each room type in one short line with its price per night "
+                            "and ask which one, and ask their name and mobile number.")
         return out
 
     def _tool_prepare(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
@@ -775,28 +873,27 @@ class ChatMixin:
                     "free_room_types": [rt.name for rt, _ in fits]}
         rt, options = chosen
         rooms, beds = self._int(a, "rooms", options[0]), self._int(a, "extra_beds")
+        early = bool(a.get("early_checkin")) and str(a.get("early_checkin")).lower() not in ("false", "0", "no")
         if rooms not in options:
             return {"error": f"{rooms} room(s) is not possible; choose one of {options}"}
         if beds and (not prop.extra_bed_rate or beds > rooms):
             return {"error": "extra beds are not available" if not prop.extra_bed_rate
                     else f"at most one extra bed per room ({rooms})"}
+        if early and not (prop.early_checkin_time and prop.early_checkin_rate):
+            return {"error": "early check-in is not offered here; the owner can tell them (give the owner's numbers)"}
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
-        q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, rooms, beds)
-        bk["chosen"] = {"room_type_id": rt.id, "rooms": rooms, "extra_beds": beds, "total": q.total,
-                        "advance": q.advance, "turn": st["turn"]}
+        q, fee, total, advance = self._price(prop, rt, ci, co, rooms, beds, early)
+        bk["chosen"] = {"room_type_id": rt.id, "rooms": rooms, "extra_beds": beds, "early": early, "total": total,
+                        "advance": advance, "turn": st["turn"]}
         leads.save_lead(self.repo, ctx.phone, self.clock.now(), room_type=rt.name, rooms=rooms, stage="summary")
-        guest = self.repo.get_guest(ctx.phone)
-        ctx.summary_message = self._summary_text(prop, rt, rooms, beds, ci, co, q, bk["adults"] + bk["children"])
         out = {"place": self._place_label(prop), "room_type": rt.name, "rooms": rooms, "extra_beds": beds,
-               "nights": q.nights, "total": q.total, "advance_now": q.advance, "balance_at_property": q.total - q.advance,
-               "guest_name_known": bool(guest and guest.name),
-               "next_step": ("The English booking summary is sent to the guest automatically just before your reply. Do "
-                             "NOT write it or repeat its figures. In your reply, in the guest's language, in one or two "
-                             "short lines, ask them to confirm. If guest_name_known is false, also ask their name and "
-                             "which city they are coming from (optional)."),
-               }
+               "nights": q.nights, "total": total, "advance_now": advance, "balance_at_property": total - advance,
+               "next_step": ("Nothing is sent yet. If you do not have the guest's name and mobile number, ask for them "
+                             "in one short line; once you have both, call create_booking.")}
         if beds:
             out["extra_bed_cost"] = beds * prop.extra_bed_rate * q.nights
+        if fee:
+            out["early_checkin"] = f"from {self._short_time(prop.early_checkin_time)}, {_money(fee)}"
         return out
 
     @staticmethod
@@ -808,48 +905,90 @@ class ChatMixin:
         return f"{hour % 12 or 12}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
 
     def _summary_text(self, prop: Property, rt: RoomType, rooms: int, beds: int, ci: date, co: date, q: av.Quote,
-                      guests: int) -> str:
-        """The booking summary, always English, one fact per line (a record both sides can check)."""
-        day = lambda d: f"{d.strftime('%a')}, {d.day} {d.strftime('%b %Y')}"  # noqa: E731
-        lines = ["*Booking summary*", "",
-                 f"Place: {self._place_label(prop)}",
-                 f"Room: {rt.name} x {rooms}" + (f" (+ {beds} extra bed{'s' if beds != 1 else ''})" if beds else ""),
-                 f"Check-in: {day(ci)}, from {self._clock12(prop.checkin_time)}",
-                 f"Check-out: {day(co)}, by {self._clock12(prop.checkout_time)}",
-                 f"Stay: {q.nights} night{'s' if q.nights != 1 else ''}, {guests} guest{'s' if guests != 1 else ''}", "",
-                 f"Total: {_money(q.total)}",
-                 f"Pay now (advance): {_money(q.advance)}"]
-        if q.total > q.advance:
-            lines.append(f"Pay at the property: {_money(q.total - q.advance)}")
+                      guests: int, *, name: str = "", mobile: str = "", fee: int = 0, total: int | None = None,
+                      advance: int | None = None) -> str:
+        """The client's "glimpse of your enquiry" (2026-11-17), always English, one fact per line. The advance is
+        shown as an amount, never as a percent."""
+        total = q.total if total is None else total
+        advance = q.advance if advance is None else advance
+        bed_cost = beds * prop.extra_bed_rate * q.nights
+        plural = lambda n, word: f"{n} {word}{'s' if n != 1 else ''}"  # noqa: E731
+        lines = ["Following are the glimpse of your enquiry,", ""]
+        if name:
+            lines.append(f"Guest - {name}")
+        if mobile:
+            lines.append(self._show_mobile(mobile))
+        lines.append(f"Check in - {self._ordinal_date(ci)}")
+        if fee:
+            lines.append(f"*Early Check-in @ {self._short_time(prop.early_checkin_time)}*")
+        lines += [f"Check out - {self._ordinal_date(co)}", plural(q.nights, "Night"), f"{guests} PAX",
+                  plural(rooms, "Room")]
+        if len(self.repo.list_room_types(prop.id)) > 1:
+            lines.append(f"*{rt.name}*")
+        if prop.meal_plan:
+            lines.append(f"*{prop.meal_plan}*")
+        lines.append(f"Room Cost - {q.total - bed_cost:,}")
+        if bed_cost:
+            lines.append(f"Extra Bed - {bed_cost:,}")
+        if fee:
+            lines.append(f"Early Check-in Charges - {fee:,}")
+        lines.append(f"Total Cost - {total:,}")
+        if total > advance:
+            lines += ["", "As a procedure you may need to pay an advance to block the room.", "",
+                      f"Ie - {advance:,}", "", "Balance can be paid during the time of check in."]
         return "\n".join(lines)
 
     def _tool_create(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st, phone = ctx.st, ctx.phone
         self._set_style(st, a)
         bk = st.get("bk") or {}
-        chosen = bk.get("chosen")
-        if not chosen:
-            return {"error": "no prepared booking: call check_availability and prepare_booking first"}
+        if not bk:
+            return {"error": "call check_availability first"}
+        if not bk.get("chosen") or any(a.get(k) for k in ("room_type", "rooms", "extra_beds", "early_checkin")):
+            picked = {k: a[k] for k in ("room_type", "rooms", "extra_beds", "early_checkin") if a.get(k)}
+            prior = bk.get("chosen") or {}
+            if prior and "room_type" not in picked:
+                picked["room_type"] = prior["room_type_id"]
+            done = self._tool_prepare(ctx, {"room_type": "", **picked, "language": a.get("language")})
+            if "error" in done:
+                return done
+            bk = st.get("bk") or {}
+        chosen = bk["chosen"]
         now = self.clock.now()
         guest = self.repo.touch_guest(phone, now, language=st.get("lang"))
         name = (a.get("guest_name") or "").strip()[:60] or guest.name
         if not name:
-            return {"error": "ask the guest's name for the booking"}
+            return {"error": "ask the guest's name and mobile number for the booking"}
+        raw_mobile = str(a.get("mobile") or "").strip()
+        same = raw_mobile.lower() in ("same", "this", "this number", "same number", "whatsapp")
+        mobile = phone if same else (try_normalize_phone(raw_mobile) or "")
+        if not mobile:
+            return {"error": "ask the guest's mobile number for the booking" if not raw_mobile
+                    else "that mobile number does not look right; ask the guest to send it again"}
         if name != guest.name:
             guest.name = name
             self.repo.upsert_guest(guest)
         prop = self.repo.get_property(bk["property_id"])
         rt = self.repo.get_room_type(chosen["room_type_id"])
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
-        q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, chosen["rooms"], chosen["extra_beds"])
-        if q.total != chosen["total"]:  # a rate changed since the summary: the guest must see the new total
+        early = bool(chosen.get("early"))
+        q, fee, total, advance = self._price(prop, rt, ci, co, chosen["rooms"], chosen["extra_beds"], early)
+        if total != chosen["total"]:  # a rate changed since the figures were locked
             bk.pop("chosen", None)
-            return {"error": "the price changed since the summary; call prepare_booking again and re-confirm"}
+            return {"error": "the price changed; call create_booking again"}
         lang = st.get("lang", "en")
         hold = timedelta(minutes=self.config.hold_minutes)
-        booking = Booking(prop.id, rt.id, phone, ci, co, bk["adults"], bk["children"], chosen["rooms"], q.total,
-                          q.advance, now, guest_name=name, language=lang, hold_expires_at=now + hold,
-                          notes=f"Extra beds: {chosen['extra_beds']}" if chosen["extra_beds"] else "")
+        notes = [f"Mobile: {display_phone(mobile)}"]
+        if chosen["extra_beds"]:
+            notes.append(f"Extra beds: {chosen['extra_beds']}")
+        if fee:
+            notes.append(f"Early check-in {self._short_time(prop.early_checkin_time)}: {_money(fee)}")
+        booking = Booking(prop.id, rt.id, phone, ci, co, bk["adults"], bk["children"], chosen["rooms"], total,
+                          advance, now, guest_name=name, language=lang, hold_expires_at=now + hold,
+                          notes="; ".join(notes))
+        summary = self._summary_text(prop, rt, chosen["rooms"], chosen["extra_beds"], ci, co, q,
+                                     bk["adults"] + bk["children"], name=name, mobile=mobile, fee=fee,
+                                     total=total, advance=advance)
         try:
             self.repo.create_hold(booking, now)
         except SoldOut:
@@ -874,11 +1013,11 @@ class ChatMixin:
         st.pop("bk", None)
         leads.save_lead(self.repo, phone, now, stage="held", booking_id=booking.id,
                         from_city=(a.get("from_city") or "").strip()[:60] or None)
+        ctx.summary_message = summary
         ctx.pay_message = t("pay", lang, id=booking.id, minutes=self.config.hold_minutes,
                             advance=f"{booking.advance:,}", url=link.url)
-        return {"ok": True, "booking_id": booking.id, "rooms_held_minutes": self.config.hold_minutes,
-                "note": "the payment link and amount are sent automatically after your reply; do not write them. "
-                         "The booking is NOT confirmed yet: tell the guest to complete the payment to confirm it"}
+        return {"ok": True, "booking_id": booking.id,
+                "note": "the enquiry summary and the payment link are sent automatically. Reply exactly [no reply]."}
 
     def _tool_recall(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         rows = self.repo.list_chat(ctx.phone, limit=80)
@@ -917,6 +1056,7 @@ class ChatMixin:
                              "use my_bookings to see its status, or start a new booking"}
         b = live[0]
         minutes = max(1, int((b.hold_expires_at - now).total_seconds() // 60))
+        ctx.resend = True
         ctx.pay_message = t("pay", ctx.st.get("lang", "en"), id=b.id, minutes=minutes, advance=f"{b.advance:,}",
                             url=b.payment_link_url)
         return {"ok": True, "booking_id": b.id, "minutes_left": minutes,
