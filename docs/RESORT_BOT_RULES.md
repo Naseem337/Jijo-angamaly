@@ -5,8 +5,8 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 `.venv\Scripts\python.exe scripts\live_eval_resort.py` and read `data/eval/resort_<lang>.txt`.
 
 ## Booking flow (client, 2026-11-17; replaces the older order below where they differ)
-1. "Hi" -> "Hi, How can I assist you?"
-2. Wants a resort -> "Pozhiyoram Resort, Alleppey or Vibes Kanthalloor?"
+1. "Hi" -> "Hi, How may I assist you?"
+2. Wants a resort -> fixed (`ask_location` tool) "Sure, Kindly confirm the Location 📍 / Alleppey or Kanthalloor.?" (towns from the properties in the dashboard; a new property is added automatically). On every fixed step the AI's own line is not sent.
 3. Resort known -> the form (fixed, `ask_stay_details` tool): "Please share these details: Check in : / Check out : / Number of persons :"
 4. Filled -> `check_availability`. Available -> fixed "Yes, rooms are available for your dates." -> the resort's glimpse
    (`Property.intro`, editable in the dashboard; `{price}` = the real per-night price for their dates; sent once) ->

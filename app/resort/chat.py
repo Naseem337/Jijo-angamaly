@@ -161,6 +161,7 @@ class _Turn:
     handed_off: bool = False
     after: list[str] = field(default_factory=list)  # fixed messages sent after the AI's line (form, glimpse, ask name)
     resend: bool = False  # the guest asked for their payment link again
+    silent: bool = False  # a fixed step message replaces the AI's own line this turn
 
 
 LANGUAGE_FIELD = {"type": "string", "enum": list(STYLES),
@@ -169,6 +170,11 @@ LANGUAGE_FIELD = {"type": "string", "enum": list(STYLES),
 EARLY_FIELD = {"type": "boolean", "description": "true only if the guest asked for early check-in"}
 
 TOOLS = [
+    ToolSpec(
+        "ask_location",
+        "When the guest wants a resort, a booking or rooms and has not said which location, call this: it sends the "
+        "owner's question 'Sure, Kindly confirm the Location' with the towns. Your reply must then be exactly [no reply].",
+        {"type": "object", "properties": {}}),
     ToolSpec(
         "ask_stay_details",
         "Send the guest the booking form (Check in / Check out / Number of persons) for the resort they chose. Use it "
@@ -261,6 +267,20 @@ class ChatMixin:
             town = (p.city or "").split(",")[0].strip()
             names.append(p.name if not town or town.lower() in p.name.lower() else f"{p.name}, {town}")
         return names
+
+    def _towns(self) -> list[str]:
+        """Where the resorts are, from the dashboard: 'Alleppey', 'Kanthalloor' (city's first part, or the name)."""
+        towns: list[str] = []
+        for p in self.repo.list_properties(active_only=False):
+            town = (p.city or p.place or p.name).split(",")[0].strip()
+            if town and town.lower() not in (x.lower() for x in towns):
+                towns.append(town)
+        return towns
+
+    def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        ctx.after.append(t("ask_location", ctx.st.get("lang", "en"), towns=" or ".join(self._towns())))
+        ctx.silent = True
+        return {"ok": True, "note": "the location question is sent automatically; reply exactly [no reply]"}
 
     def _closed_facts(self) -> list[str]:
         """Resorts the guest may pick that have no online booking yet: the owner takes those."""
@@ -420,8 +440,9 @@ class ChatMixin:
             "If the guest wrote 'avde engane und' and then 'Alleppey', they are asking how Alleppey is: answer that, "
             "do not start over or ask the same thing again.\n\n"
             "BOOKING, in this order, skipping what the guest already told you\n"
-            "1. Which resort. When the guest wants a booking or asks about rooms and has not named a resort, ask "
-            f"only that, in one short line: {' or '.join(self._resort_names())}?\n"
+            "1. Which location. When the guest wants a resort, a booking or rooms and has not said where, call "
+            f"ask_location (it asks: {' or '.join(self._towns())}) and reply [no reply]. A town or resort name "
+            f"means that resort ({'; '.join(self._resort_names())}).\n"
             "2. As soon as the resort is known and the guest has not given their dates and persons, call "
             "ask_stay_details: it sends the form (Check in / Check out / Number of persons). Reply [no reply]. If they "
             "gave only part of it, ask just the missing part in a few words. If a date has no year, use the next time "
@@ -647,9 +668,8 @@ class ChatMixin:
             return "ai_down"
         # the client's order: the AI's short line, then the fixed messages (form / glimpse / ask name), then the
         # enquiry summary, then the payment link
-        availability = {t("rooms_ok", lang) for lang in ("en", "mn")}
-        if any(m in availability for m in ctx.after):  # the fixed "rooms are available" turn: the AI's own line
-            quiet = True  # would repeat it and add prices (client, 2026-11-17)
+        if ctx.silent:  # a fixed step (location, form, rooms available) was sent: the AI's own line would repeat
+            quiet = True  # it or add prices (client, 2026-11-17)
         if reply and not quiet:
             guest = self.repo.get_guest(phone)
             clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
@@ -671,7 +691,7 @@ class ChatMixin:
     # ------------------------------------------------------------------ tools
 
     def _run_tool(self, ctx: _Turn, call: ToolCall) -> tuple[str, bool]:
-        handlers = {"ask_stay_details": self._tool_form,
+        handlers = {"ask_location": self._tool_location, "ask_stay_details": self._tool_form,
                     "check_availability": self._tool_check, "prepare_booking": self._tool_prepare,
                     "create_booking": self._tool_create, "my_bookings": self._tool_bookings,
                     "send_payment_link": self._tool_resend, "recall_old_chat": self._tool_recall}
@@ -750,6 +770,7 @@ class ChatMixin:
         ctx.st["form_place"] = prop.id
         if t("form", "en") not in ctx.after:
             ctx.after.append(t("form", ctx.st.get("lang", "en")))
+        ctx.silent = True
         return {"ok": True, "resort": self._place_label(prop),
                 "note": "the form is sent automatically; reply exactly [no reply]"}
 
@@ -846,6 +867,7 @@ class ChatMixin:
         if len(options) == 1 and st.get("checked") != key:
             st["checked"] = key
             ctx.after.append(t("rooms_ok", lang))
+            ctx.silent = True
             if prop.intro and st.get("intro_sent") != prop.id:
                 price = options[0].get("price_per_night") or round(
                     options[0]["total_for_stay"] / max(1, out["nights"] * options[0]["quoted_for_rooms"]))

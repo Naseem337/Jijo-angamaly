@@ -137,16 +137,16 @@ def hold(w, rooms=1, nights=2, rt="Deluxe", phone=GUEST):
 def test_hi_gets_the_owners_greeting_with_no_menu_and_no_ai_call(world):
     w = world
     assert say(w, "hii") == "greeting"
-    assert w.wa.last() == (GUEST, "text", "Hi, How can I assist you?")
+    assert w.wa.last() == (GUEST, "text", "Hi, How may I assist you?")
     assert [k for _, k, _ in w.wa.to(GUEST)] == ["text"] and w.llm.calls == []
 
 
 def test_greeting_in_other_scripts_gets_the_same_line_in_english_letters(world):
     w = world
     say(w, "ഹായ്")
-    assert w.wa.texts()[-1] == "Hi, How can I assist you?" and w.repo.get_state(GUEST)["lang"] == "ml"
+    assert w.wa.texts()[-1] == "Hi, How may I assist you?" and w.repo.get_state(GUEST)["lang"] == "ml"
     say(w, "नमस्ते", "+919847000099")
-    assert w.wa.texts("+919847000099")[-1] == "Hi, How can I assist you?"
+    assert w.wa.texts("+919847000099")[-1] == "Hi, How may I assist you?"
 
 
 def test_fixed_messages_are_never_in_native_script():
@@ -158,10 +158,11 @@ def test_fixed_messages_are_never_in_native_script():
 def test_a_booking_request_is_asked_which_resort_including_one_not_open_online(world):
     w = world
     w.repo.save_property(Property(**{**w.p2.__dict__, "active": False}))  # Kanthalloor: no online booking yet
-    say(w, "resort booking", GUEST, reply("Pozhiyoram Resort, Alleppey or Kanthalloor?"))
-    system = w.llm.calls[0].system
-    assert "in one short line: " in system and " or " in system.split("in one short line: ")[1].split("\n")[0]
-    assert "online booking is not open yet" in system
+    say(w, "resort booking", GUEST, tool("ask_location"), reply("Which one sir, Alleppey or Munnar?"))
+    sent = w.wa.texts()
+    towns = [(p.city or p.name).split(",")[0].strip() for p in w.repo.list_properties(active_only=False)]
+    assert sent == [f"Sure, Kindly confirm the Location 📍\n{' or '.join(towns)}.?"]  # the AI's own line is not sent
+    assert len(towns) == 2 and "online booking is not open yet" in w.llm.calls[0].system
 
 
 def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
@@ -431,7 +432,7 @@ def test_every_string_exists_in_all_four_languages():
     for key, table in S.items():
         assert {"en", "ml", "ta", "hi"} <= set(table) <= {"en", "ml", "ta", "hi", "mn"}, key
         assert all(v.strip() for v in table.values()), key
-    assert t("greet", "xx") == "Hi, How can I assist you?"  # unknown language: English
+    assert t("greet", "xx") == "Hi, How may I assist you?"  # unknown language: English
 
 
 def test_voice_note_is_transcribed_and_used(world):
@@ -616,7 +617,7 @@ def test_meta_webhook_verify_and_signature(world, monkeypatch):
     assert client.post("/resort/webhook", content=body, headers={"x-hub-signature-256": "sha256=bad"}).status_code == 403
     sig = "sha256=" + _signed(body, "appsecret")
     assert client.post("/resort/webhook", content=body, headers={"x-hub-signature-256": sig}).json() == {"received": 1}
-    assert w.wa.last()[1] == "text" and w.wa.last()[2] == "Hi, How can I assist you?"
+    assert w.wa.last()[1] == "text" and w.wa.last()[2] == "Hi, How may I assist you?"
 
 
 # --------------------------------------------------------------------------- WhatsApp client / parse
@@ -761,12 +762,12 @@ def test_every_greeting_gets_the_same_line_with_one_place_open(world):
     w = world
     w.repo.save_property(Property(**{**w.p2.__dict__, "active": False}))  # Kanthalloor switched off
     assert say(w, "hi") == "greeting"
-    assert w.wa.texts()[-1] == "Hi, How can I assist you?"
+    assert w.wa.texts()[-1] == "Hi, How may I assist you?"
     say(w, "Hello", "+919847000011")
-    assert w.wa.texts("+919847000011")[-1] == "Hi, How can I assist you?"
+    assert w.wa.texts("+919847000011")[-1] == "Hi, How may I assist you?"
     w.repo.set_state("+919847000012", {"lang": "mn"})
     say(w, "hi", "+919847000012")
-    assert w.wa.texts("+919847000012")[-1] == "Hi, How can I assist you?"
+    assert w.wa.texts("+919847000012")[-1] == "Hi, How may I assist you?"
     assert w.llm.calls == []  # greetings never cost an AI call
 
 
