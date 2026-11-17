@@ -36,7 +36,7 @@ S: dict[str, dict[str, str]] = {
     # the client's own words (2026-11-17), the same for every language
     "greet": _t(*["Hi, How may I assist you?"] * 4),
     # the client's words (2026-11-17); {towns} comes from the properties in the dashboard
-    "ask_location": _t(*["Sure, Kindly confirm the Location 📍\n{towns}.?"] * 4),
+    "ask_location": _t(*["Sure,\nKindly confirm the Location 📍\n{towns}.?"] * 4),
     # the client's booking form (2026-11-17), always this English template
     "form": _t(*["Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"] * 4),
     "ask_contact": _t(*["Please share your name and mobile number to proceed."] * 4),

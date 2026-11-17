@@ -161,7 +161,7 @@ def test_a_booking_request_is_asked_which_resort_including_one_not_open_online(w
     say(w, "resort booking", GUEST, tool("ask_location"), reply("Which one sir, Alleppey or Munnar?"))
     sent = w.wa.texts()
     towns = [(p.city or p.name).split(",")[0].strip() for p in w.repo.list_properties(active_only=False)]
-    assert sent == [f"Sure, Kindly confirm the Location 📍\n{' or '.join(towns)}.?"]  # the AI's own line is not sent
+    assert sent == [f"Sure,\nKindly confirm the Location 📍\n{' or '.join(towns)}.?"]  # the AI's own line is not sent
     assert len(towns) == 2 and "online booking is not open yet" in w.llm.calls[0].system
 
 
