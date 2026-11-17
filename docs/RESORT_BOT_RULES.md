@@ -6,7 +6,13 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 
 ## Conversation
 - Free-text chat like a human at the front desk. No menus, buttons or tap lists.
-- "hi" gets "Hi", then ask what they are looking for. Pozhiyoram, Alleppey is the only open property (Vibes Kanthalloor is off until its data is entered).
+- Any plain greeting ("hi", "hello", "ഹായ്") gets exactly "Hi, How can I assist you?" (client, 2026-11-17; code, no AI call).
+- When they want a booking or ask about rooms without naming a resort, ask only: "Vibes Kanthalloor or Pozhiyoram Resort, Alleppey?"
+  (names come from all properties, open or not). Vibes Kanthalloor has no online booking until its data is entered: if the
+  guest picks it, the bot gives the owner's numbers in one line.
+- **No essays (client, 2026-11-17):** answer only what was asked, usually one short line, at most 2-3. Asked about rooms:
+  room types in short lines, then ask the dates. Code guard: more than 40 words outside room/price lines, list items and
+  links (`chatty_words`, `MAX_CHAT_WORDS` in chat.py) gets one "much shorter" rewrite.
 - Ask in order: check-in date (or nights), number of persons, number of rooms. Never assume persons, rooms or nights.
 - Quote by the guest's dates. If several room types are free, list each on its own line with its price and let them choose.
 - Before payment: send the booking summary (always English, one fact per line), ask for confirmation, then send the payment link.

@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import itertools
 import json
+import re
 from datetime import date, datetime, timedelta
 
 import httpx
@@ -133,21 +134,48 @@ def hold(w, rooms=1, nights=2, rt="Deluxe", phone=GUEST):
 # --------------------------------------------------------------------------- the conversation
 
 
-def test_hi_asks_where_with_no_menu_and_no_ai_call(world):
+def test_hi_gets_the_owners_greeting_with_no_menu_and_no_ai_call(world):
     w = world
     assert say(w, "hii") == "greeting"
-    assert w.wa.last() == (GUEST, "text",
-                           'Hi! Where are you looking to stay: "Pozhiyoram, Alleppey" or "Kanthalloor, Munnar"?')
+    assert w.wa.last() == (GUEST, "text", "Hi, How can I assist you?")
     assert [k for _, k, _ in w.wa.to(GUEST)] == ["text"] and w.llm.calls == []
 
 
-def test_greeting_in_other_scripts_answers_in_that_language(world):
+def test_greeting_in_other_scripts_gets_the_same_line_in_english_letters(world):
     w = world
     say(w, "ഹായ്")
-    assert "Evide" in w.wa.texts()[-1] and w.repo.get_state(GUEST)["lang"] == "ml"  # Malayalam in -> Manglish out
+    assert w.wa.texts()[-1] == "Hi, How can I assist you?" and w.repo.get_state(GUEST)["lang"] == "ml"
     say(w, "नमस्ते", "+919847000099")
-    assert "Where are you" in w.wa.texts("+919847000099")[-1]  # Hindi in -> English letters out
-    assert not any(ord(c) > 0x900 for c in w.wa.texts("+919847000099")[-1])
+    assert w.wa.texts("+919847000099")[-1] == "Hi, How can I assist you?"
+
+
+def test_fixed_messages_are_never_in_native_script():
+    for key in S:
+        for lang in ("ml", "ta", "hi", "mn", "en"):
+            assert not re.search(r"[ऀ-෿]", t(key, lang)), (key, lang)
+
+
+def test_a_booking_request_is_asked_which_resort_including_one_not_open_online(world):
+    w = world
+    w.repo.save_property(Property(**{**w.p2.__dict__, "active": False}))  # Kanthalloor: no online booking yet
+    say(w, "resort booking", GUEST, reply("Pozhiyoram Resort, Alleppey or Kanthalloor?"))
+    system = w.llm.calls[0].system
+    assert "in one short line: " in system and " or " in system.split("in one short line: ")[1].split("\n")[0]
+    assert "online booking is not open yet" in system
+
+
+def test_an_essay_reply_gets_one_shorter_rewrite(world):
+    w = world
+    essay = " ".join(["Our resort is a lovely place by the backwaters with many things to enjoy."] * 4)
+    say(w, "tell me about the place", GUEST, reply(essay), reply("Backwater view rooms, pool and a houseboat jetty."))
+    assert w.wa.texts()[-1] == "Backwater view rooms, pool and a houseboat jetty."
+    assert "Too long" in w.llm.calls[-1].messages[-1].content
+
+
+def test_room_price_lines_do_not_count_as_chat_words():
+    from app.resort.chat import MAX_CHAT_WORDS, chatty_words
+    rooms = "\n".join(f"Deluxe room {i} with a lovely backwater view - ₹4,000 a night" for i in range(8))
+    assert chatty_words(rooms + "\nWhich one would you like?") == 5 < MAX_CHAT_WORDS
 
 
 def test_booking_chat_end_to_end_with_payment_link(world):
@@ -345,7 +373,7 @@ def test_every_string_exists_in_all_four_languages():
     for key, table in S.items():
         assert {"en", "ml", "ta", "hi"} <= set(table) <= {"en", "ml", "ta", "hi", "mn"}, key
         assert all(v.strip() for v in table.values()), key
-    assert t("greet_ask", "xx", hi="Hi", places="x") == "Hi! Where are you looking to stay: x?"  # unknown language: English
+    assert t("greet", "xx") == "Hi, How can I assist you?"  # unknown language: English
 
 
 def test_voice_note_is_transcribed_and_used(world):
@@ -530,7 +558,7 @@ def test_meta_webhook_verify_and_signature(world, monkeypatch):
     assert client.post("/resort/webhook", content=body, headers={"x-hub-signature-256": "sha256=bad"}).status_code == 403
     sig = "sha256=" + _signed(body, "appsecret")
     assert client.post("/resort/webhook", content=body, headers={"x-hub-signature-256": sig}).json() == {"received": 1}
-    assert w.wa.last()[1] == "text" and "Where are you looking to stay" in w.wa.last()[2]
+    assert w.wa.last()[1] == "text" and w.wa.last()[2] == "Hi, How can I assist you?"
 
 
 # --------------------------------------------------------------------------- WhatsApp client / parse
@@ -671,16 +699,16 @@ def test_english_payment_message_asks_to_complete_payment_not_to_trust_a_hold(wo
         assert banned not in text.lower()
 
 
-def test_hi_for_hi_and_it_asks_if_they_are_looking_for_a_stay_when_only_one_place_is_open(world):
+def test_every_greeting_gets_the_same_line_with_one_place_open(world):
     w = world
     w.repo.save_property(Property(**{**w.p2.__dict__, "active": False}))  # Kanthalloor switched off
     assert say(w, "hi") == "greeting"
-    assert w.wa.texts()[-1] == "Hi! Are you looking for a stay at Pozhiyoram, Alleppey?"
+    assert w.wa.texts()[-1] == "Hi, How can I assist you?"
     say(w, "Hello", "+919847000011")
-    assert w.wa.texts("+919847000011")[-1].startswith("Hello! Are you looking")
+    assert w.wa.texts("+919847000011")[-1] == "Hi, How can I assist you?"
     w.repo.set_state("+919847000012", {"lang": "mn"})
     say(w, "hi", "+919847000012")
-    assert w.wa.texts("+919847000012")[-1] == "Hi! Pozhiyoram, Alleppey-il stay aanu nokkunnath alle?"
+    assert w.wa.texts("+919847000012")[-1] == "Hi, How can I assist you?"
     assert w.llm.calls == []  # greetings never cost an AI call
 
 
@@ -992,7 +1020,7 @@ def test_the_prompt_hides_rates_and_forbids_a_price_hike_story(world):
     assert "rate" not in system.lower().split("facts")[-1].replace("rated", "")  # no rate table among the facts
     assert "Never tell the guest that rates change" in system and "peak or high season" in system
     assert "Never quote a price from memory" in system
-    assert "Keep messages tidy and easy to read" in system and "each room type on its own line" in system
+    assert "NO essays" in system and "Each room type on its own line" in system
 
 
 # --------------------------------------------------------------------------- found by playing the bot against the real AI

@@ -33,14 +33,9 @@ def _t(en: str, ml: str, ta: str, hi: str) -> dict[str, str]:
 
 S: dict[str, dict[str, str]] = {
     # ---- first message and payment
-    "greet_ask": _t('{hi}! Where are you looking to stay: {places}?',
-                'ഹായ്! എവിടെയാണ് താമസിക്കാൻ ഉദ്ദേശിക്കുന്നത്: {places}?',
-                'வணக்கம்! எங்கே தங்க விரும்புகிறீர்கள்: {places}?',
-                'नमस्ते! आप कहाँ ठहरना चाहते हैं: {places}?'),
-    "greet_one": _t('{hi}! Are you looking for a stay at {place}?',
-                'ഹായ്! {place}-ൽ താമസിക്കാനാണോ നോക്കുന്നത്?',
-                'வணக்கம்! {place}-ல் தங்க பார்க்கிறீர்களா?',
-                'नमस्ते! क्या आप {place} में ठहरने की सोच रहे हैं?'),
+    # the client's own words (2026-11-17), the same for every language
+    "greet": _t("Hi, How can I assist you?", "Hi, How can I assist you?", "Hi, How can I assist you?",
+                "Hi, How can I assist you?"),
     "or": _t("or", "അല്ലെങ്കിൽ", "அல்லது", "या"),
     "pay": _t('Please complete the payment of ₹{advance} within {minutes} minutes to confirm your booking. UPI (GPay, PhonePe, Paytm), cards and net banking all work:\n{url}\n\nBooking ID: {id}',
                 'ബുക്കിംഗ് ഉറപ്പിക്കാൻ {minutes} മിനിറ്റിനുള്ളിൽ ₹{advance} പേയ്മെന്റ് പൂർത്തിയാക്കൂ. UPI (GPay, PhonePe, Paytm), കാർഡ്, നെറ്റ് ബാങ്കിംഗ് എല്ലാം ഉപയോഗിക്കാം:\n{url}\n\nബുക്കിംഗ് ID: {id}',
@@ -155,8 +150,6 @@ S.update({
 # Manglish (Malayalam in English letters) for the fixed messages. Keys not listed here fall back to English.
 MN = {
     "discount": "Nalla vaartha: owner ningalkku special price tharunnu. Puthiya total ₹{total}, ippol pay cheyyenda advance ₹{advance}.",
-    "greet_ask": "{hi}! Evide thaamasikkaan aanu nokkunnath: {places}?",
-    "greet_one": "{hi}! {place}-il stay aanu nokkunnath alle?",
     "or": "allenkil",
     "pay": "Booking confirm cheyyaan {minutes} minute-nullil ₹{advance} payment complete cheyyuka. "
            "UPI (GPay, PhonePe, Paytm), card, net banking ellaam use cheyyam:\n{url}\n\nBooking ID: {id}",

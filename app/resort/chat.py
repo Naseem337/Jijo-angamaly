@@ -51,12 +51,21 @@ STYLES = ("en", "ml", "manglish", "hi", "hinglish", "ta", "tanglish")
 LATIN_STYLE = {"ml": "manglish", "ta": "tanglish", "hi": "hinglish"}
 STYLE_LANG = {"en": "en", "ml": "ml", "hi": "hi", "ta": "ta", "manglish": "mn", "hinglish": "en", "tanglish": "en"}
 INDIC = re.compile(r"[\u0900-\u097f\u0b80-\u0bff\u0d00-\u0d7f]")
-HELLO = re.compile(r"^\W*(hello+|hey+)", re.IGNORECASE)
 ACK_WORDS = frozenset("""ok okay okk okey okie k kk kay thanks thank thankyou thanx thx tnx tq ty you so much lot a very fine cool
     noted got it sure alright all right yes yeah yep ya yup haha hahaha lol hmm hm mm mmm oh ohh ah aah aha wow nice great good
     super awesome perfect lovely beautiful excellent superb welcome then will see later now bro sir madam da dear anna chetta
     chechi sheri sari shari shaari seri athe aanu nannayi kollam adipoli polichu mathi ശരി ഓക്കെ ഓകെ താങ്ക്സ് നന്ദി കൊള്ളാം
     ठीक है धन्यवाद शुक्रिया अच्छा சரி நன்றி""".split())
+# The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
+MAX_CHAT_WORDS = 40
+_LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s", re.IGNORECASE)
+
+
+def chatty_words(reply: str) -> int:
+    """Words in the talk part of a reply; room lines with a price, list items and links don't count."""
+    return sum(len(line.split()) for line in reply.splitlines() if not _LIST_LINE.search(line))
+
+
 # Words a sentence cannot end on: the guest is still typing (a second message is about to arrive)
 DANGLING = frozenset("""oru and or the a an to for of in on at with my i we is are was will can about from if but because so
     njan njangal enikku ente ningal nammal ee aa pinne allenkil athinu ennal avide evide ithinte athinte""".split())
@@ -195,8 +204,29 @@ class ChatMixin:
             lines.append(line + "." + (f" {extras}" if extras else ""))
         return lines
 
-    def _facts(self) -> str:
+    def _resort_names(self) -> list[str]:
+        """Every resort by its full name, open or not ('Vibes Kanthalloor', 'Pozhiyoram Resort, Alleppey')."""
+        names = []
+        for p in self.repo.list_properties(active_only=False):
+            town = (p.city or "").split(",")[0].strip()
+            names.append(p.name if not town or town.lower() in p.name.lower() else f"{p.name}, {town}")
+        return names
+
+    def _closed_facts(self) -> list[str]:
+        """Resorts the guest may pick that have no online booking yet: the owner takes those."""
+        open_props = self._places()
+        fallback = open_props[0].contact_numbers if open_props else []
         out = []
+        for p in self.repo.list_properties(active_only=False):
+            if p.active:
+                continue
+            numbers = ", ".join(display_phone(n) for n in (p.contact_numbers or fallback)) or "not set"
+            out.append(f"RESORT '{p.name}': online booking is not open yet. If the guest picks it, say in one short "
+                       f"line that the owner will help them with it and give the owner's numbers: {numbers}")
+        return out
+
+    def _facts(self) -> str:
+        out = self._closed_facts()
         for p in self._places():
             numbers = ", ".join(display_phone(n) for n in p.contact_numbers) or "not set"
             out.append(f"PLACE '{self._place_label(p)}' (property name {p.name})")
@@ -294,17 +324,21 @@ class ChatMixin:
             "your reply. If one message mixes two languages, answer in the language most of its words are in. The "
             "line \"REPLY LANGUAGE\" at the end of these instructions is the language to use now.\n"
             "- Pass the language style in the `language` field when you call check_availability.\n\n"
-            "HOW TO TALK\n"
+            "HOW TO TALK (the owner's rule: NO essays)\n"
+            "- Answer ONLY what the guest asked, in as few words as possible. Usually ONE short line; at most two or "
+            "three short lines. No introductions, no explanations they did not ask for, no repeating, no closing "
+            "lines like 'let me know if you need anything'. Simple, lively and friendly, like a quick WhatsApp reply "
+            "from a real person.\n"
+            "- Asked about rooms? Name the room types (one short line each, who it fits) and ask their dates in a "
+            "few words. Asked the location? Send the Maps link with a few words. Asked a yes/no question? Start with "
+            "yes or no.\n"
             "- Call the guest \"sir\", now and then and never in every message (\"madam\" only if they are clearly a woman). "
             "Never bro, dear, da, chetta, chechi, machane or their name.\n"
-            "- Keep messages tidy and easy to read: short lines, a blank line between separate points, each room type "
-            "on its own line when you list prices. Never one long paragraph.\n"
-            "- Short, natural messages, like a real person on WhatsApp. One or two sentences. Ask at most one or two "
-            "things at a time. No lists of options, no 'How may I assist you today', no emoji piles (one is fine).\n"
-            "- Say only what was asked or what is needed next. Do not paste the property description. Do not mention "
-            "offers, discounts or 'special' deals. Just state the price.\n"
+            "- Each room type on its own line when you list prices. Never one long paragraph.\n"
+            "- Ask only ONE thing at a time. No lists of options, no emoji piles (one is fine).\n"
+            "- Do not paste the property description. Do not mention offers, discounts or 'special' deals. Just "
+            "state the price.\n"
             "- Never repeat details the guest already gave, except in the final summary.\n"
-            "- Greet back in kind: 'hi' gets a short 'Hi!' and a light question about what they are looking for.\n"
             "- Reply only when it is necessary: a question, a request, a booking detail, a payment problem, a complaint, "
             "or an answer to something you asked. For anything else send no reply at all, answer with exactly "
             "[no reply]: 'ok', 'thanks', a thumbs up, compliments, jokes, 'will tell my family', 'let me check and "
@@ -317,7 +351,8 @@ class ChatMixin:
             "If the guest wrote 'avde engane und' and then 'Alleppey', they are asking how Alleppey is: answer that, "
             "do not start over or ask the same thing again.\n\n"
             "BOOKING, in this order, skipping what the guest already told you\n"
-            "1. Which place. If you have several places, ask which one (name them). If there is only one, don't ask.\n"
+            "1. Which resort. When the guest wants a booking or asks about rooms and has not named a resort, ask "
+            f"only that, in one short line: {' or '.join(self._resort_names())}?\n"
             "2. Check-in date, and how many nights or the check-out date. If the date has no year, use the next "
             "time it comes. Work from today's date.\n"
             "3. How many persons. Never assume the number of persons, rooms or nights: if the guest has not said it, ask.\n"
@@ -386,7 +421,7 @@ class ChatMixin:
             "- Earlier bookings: if they ask about one, answer from the records or my_bookings in plain words: dates, place, rooms, whether it is confirmed, how much was paid and what is left to pay at the property. Paid and upcoming: say you can see it and be warm about their coming stay. Past: a warm thanks or welcome back. ON HOLD and still valid: tell them it is waiting for payment and offer the link (send_payment_link). Expired, cancelled or failed: say so kindly and offer to book again. Payment queries are answered politely and respectfully, never defensively.\n"
             "- When the guest asks for another room or a new stay while a paid booking is upcoming or in progress, say you can see that booking (place, dates) and ask in one friendly line whether the new room is for the same stay or a different one, then follow their answer. With only past stays, treat it as a new booking and add at most one warm welcome-back line.\n"
             "- A new booking always takes its dates, rooms and price from what the guest says now and from the tools, never from an earlier booking. Never paste an old payment link: only the send_payment_link tool sends one, and only for a booking still on hold.\n"
-            "- Warm and easy: short friendly lines, no forms, no jargon.\n"
+            "- Warm and easy: one or two short lines, no forms, no jargon.\n"
             "- Never address them by name.\n\n"
             "FACTS\n" + self._facts() + "\n\n" + self._guest_memory(phone, fresh) + "\n\n"
             + self._language_note(st, text))
@@ -417,15 +452,8 @@ class ChatMixin:
         return merged
 
     def _greet(self, phone: str, st: dict[str, Any], text: str = "") -> str:
-        """'hi' gets 'Hi!', 'hello' gets 'Hello!', then one light question."""
-        lang = st.get("lang", "en")
-        word = "Hello" if HELLO.match(text) and not text.lower().lstrip().startswith("hey") else "Hey" if text.lower().lstrip().startswith("hey") else "Hi"
-        props = self._places()
-        if len(props) == 1:
-            self._text(phone, t("greet_one", lang, hi=word, place=self._place_label(props[0])))
-            return "greeting"
-        places = [f'"{self._place_label(p)}"' for p in props]
-        self._text(phone, t("greet_ask", lang, hi=word, places=f" {t('or', lang)} ".join(places)))
+        """Any plain greeting gets the client's own line: 'Hi, How can I assist you?' (no AI call)."""
+        self._text(phone, t("greet", st.get("lang", "en")))
         return "greeting"
 
     @staticmethod
@@ -448,6 +476,9 @@ class ChatMixin:
         if NO_OFFER.search(reply):
             return ("Rewrite that reply without saying there is no offer or discount and without saying you cannot "
                     "reduce anything: the guest only asked. Just give the price for their dates, or ask for the dates.")
+        if chatty_words(reply) > MAX_CHAT_WORDS:
+            return ("Too long. Rewrite it much shorter: answer only what the guest asked, in one or two short lines. "
+                    "Keep any room lines with prices as they are.")
         return ""
 
     def _fix_reply(self, llm, system: str, messages: list[ChatMessage], reply: str, guest_text: str,

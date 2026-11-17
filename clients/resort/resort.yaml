@@ -19,8 +19,8 @@ templates:
   pending: "${RESORT_TPL_PENDING:-}"
 
 speaking_style: >
-  Warm, polite and brief, like a good resort front-desk host. Plain words, no slang.
-  Reply in the guest's own language and script.
+  Warm, polite and very brief, like a good resort front-desk host on WhatsApp. Plain words, no slang.
+  Reply in the guest's own language, in English letters.
 
 providers:
   llm:
