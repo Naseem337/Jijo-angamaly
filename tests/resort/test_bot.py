@@ -1094,7 +1094,8 @@ def test_the_form_then_glimpse_then_ask_name_in_the_clients_order(world):
     assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
     say(w, "Check in : 10 Nov\nCheck out : 12 Nov\nNumber of persons : 2", GUEST,
         tool("check_availability", place="Pozhiyoram", check_in="2026-11-10", check_out="2026-11-12", adults=2),
-        reply("[no reply]"))
+        reply("Rooms are available sir. Beach View AC Room - 3000 per night, total 6000. Name and mobile please."))
+    assert "3000" not in " ".join(w.wa.texts())  # the AI's own availability line (with prices) is never sent
     assert w.wa.texts()[-3:] == ["Yes, rooms are available for your dates.",
                                  "Your Beachfront Hideout Awaits!\nRoom - ₹4,000/Night/Room",
                                  "Please share your name and mobile number to proceed."]

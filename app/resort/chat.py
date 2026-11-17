@@ -430,7 +430,9 @@ class ChatMixin:
             "fewest rooms the group needs unless the guest asked for more. If rooms are available, say ONLY that in "
             "one short line; the resort's details and the request for name and mobile number are sent automatically. "
             "If not available, say so and suggest other dates.\n"
-            "4. With several room types, list each (name - price per night) and let the guest pick (prepare_booking).\n"
+            "4. With several room types, name each (no prices) and let the guest pick (prepare_booking).\n"
+            "- Never state prices, totals or the advance while checking availability; the price reaches the guest "
+            "in the resort's details and the enquiry summary. Give a price only if the guest asks for it.\n"
             "5. When the guest gives their name and mobile number, call create_booking right away (no 'shall I "
             "confirm?'). The enquiry summary and the payment link are sent automatically: reply [no reply]. Never "
             "write the summary, the link, the advance amount or a percent yourself. If they say 'this number', "
@@ -645,6 +647,9 @@ class ChatMixin:
             return "ai_down"
         # the client's order: the AI's short line, then the fixed messages (form / glimpse / ask name), then the
         # enquiry summary, then the payment link
+        availability = {t("rooms_ok", lang) for lang in ("en", "mn")}
+        if any(m in availability for m in ctx.after):  # the fixed "rooms are available" turn: the AI's own line
+            quiet = True  # would repeat it and add prices (client, 2026-11-17)
         if reply and not quiet:
             guest = self.repo.get_guest(phone)
             clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
@@ -851,8 +856,8 @@ class ChatMixin:
         elif len(options) == 1:
             out["note"] += " Rooms are still available. Answer only what the guest asked, in one short line."
         else:
-            out["note"] += (" Rooms ARE available. List each room type in one short line with its price per night "
-                            "and ask which one, and ask their name and mobile number.")
+            out["note"] += (" Rooms ARE available. Name each room type in one short line WITHOUT prices and ask "
+                            "which one, and ask their name and mobile number.")
         return out
 
     def _tool_prepare(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
