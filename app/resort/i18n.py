@@ -41,6 +41,7 @@ S: dict[str, dict[str, str]] = {
     "form": _t(*["Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"] * 4),
     "ask_contact": _t(*["Please share your name and mobile number to proceed."] * 4),
     "rooms_ok": _t(*["Yes, rooms are available for your dates."] * 4),
+    "rooms_none": _t(*["Sorry, rooms are not available for your dates."] * 4),
     "greet_again": _t(*["Hi sir, how can I help you further?"] * 4),
     "or": _t("or", "അല്ലെങ്കിൽ", "அல்லது", "या"),
     # the client wants no talk about payment here (2026-11-17): just the link and "please pay"
@@ -160,6 +161,7 @@ MN = {
     "or": "allenkil",
     "pay": "Ee link vazhi advance pay cheyyuka:\n{url}",
     "rooms_ok": "Und, ningalude dates-il rooms available aanu.",
+    "rooms_none": "Sorry, ningalude dates-il rooms available alla.",
     "ask_contact": "Munnottu pokaan ningalude name-um mobile number-um ayakkamo?",
     "paid": "Payment kitti. Ningalude booking {id} confirmed aayi!\n{property}\n{check_in} to {check_out}, {rooms} room.\n"
             "Check-in {checkin_time} muthal. Ningale kaanaan kaathirikkunnu.",

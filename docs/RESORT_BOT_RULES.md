@@ -92,6 +92,12 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Premium look: `static/premium.css` (ocean teal + sand gold, Fraunces headings), sun-and-waves logo (`logo.svg`,
   `logo_mark` macro, regenerated PWA icons via scripts/make_pwa_icons.py).
 
+## After the form (client, 2026-11-17, replaces the photo timing below)
+- check_availability sends, in this order and once per set of dates: "Yes, rooms are available for your dates."
+  (or "Sorry, rooms are not available for your dates.") -> the glimpse ({price}, {room} = the offered room) -> the
+  first 6 general photos -> the offered room type's photos (first 6) -> "Please share your name and mobile number to
+  proceed." No photos are sent when the guest picks the location any more. Never a photo twice.
+
 ## After payment: one confirmation only (client, 2026-11-17)
 - Once the advance is paid (online or at the desk) the guest gets ONLY "Following are the glimpse of your booking,"
   (`_confirmed_text`): guest, mobile, dates, early check-in, nights, PAX, rooms, the given room number(s) (*#104*),

@@ -34,7 +34,7 @@
   </a>{% endfor %}</div>
   {% else %}{{ empty("No room types yet. Add the first one so the bot can offer rooms.") }}{% endif %}
 </section>
-{{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "Outside, beach, garden and common areas. The bot sends these AUTOMATICALLY to every guest who picks this property, in this order (the first 6). Room pictures go under each room type below.", "General photos", "Sent to everyone") }}
+{{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "Outside, beach, garden and common areas. The bot sends these AUTOMATICALLY to every guest right after the welcome message (glimpse), in this order (the first 6), then the offered room's photos. Room pictures go under each room type below.", "General photos", "Sent after the glimpse") }}
 {% else %}
 <section class="card hint-card" id="rooms"><h3>Rooms &amp; rates</h3><p class="muted">Save the property first. Then you can add room types, rates and seasonal prices here.</p></section>
 {% endif %}
@@ -57,7 +57,7 @@
   </div></div>
 <label class="field"><span>Welcome message (glimpse)</span>
   <textarea name="intro" rows="10" maxlength="3000" placeholder="Sent to the guest once rooms are found for their dates.">{{ p.intro }}</textarea>
-  <small>Sent as it is, once rooms are found for the guest's dates. Write {price} where the room price for their dates should go.</small></label>
+  <small>Sent as it is, once rooms are found for the guest's dates. Write {price} where the room price for their dates should go, and {room} for the name of the room offered.</small></label>
 <div class="cols">
   {{ field("Meal plan", "meal_plan", p.meal_plan, "text", "Shown on the enquiry summary, e.g. Stay Only", attrs='maxlength="40"') }}
   {{ field("Early check-in from", "early_checkin_time", p.early_checkin_time, "time", "Leave empty if not offered") }}

@@ -231,42 +231,41 @@ def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_t
     assert "already sent" in last_tool(w)["error"] and len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 6
 
 
-def test_general_photos_go_to_every_guest_who_picks_the_property_then_the_form(world, tmp_path, monkeypatch):
+def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then_name(world, tmp_path, monkeypatch):
     from app.resort import photos as ph
     monkeypatch.setenv("RESORT_DB_PATH", str(tmp_path / "r.sqlite3"))
     monkeypatch.setattr(ph, "_shrink", lambda data: None)
     w = world
     png = b"\x89PNG\r\n\x1a\n" + b"x" * 50
     general = [ph.save_photo(png) for _ in range(8)]
-    room = [ph.save_photo(png)]
-    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": general}))
+    room = [ph.save_photo(png) for _ in range(2)]
+    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": general,
+                                     "intro": "Your Beachfront Hideout Awaits!\n{room} - {price}/Night/Room"}))
     w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "photo_urls": room}))
     say(w, "I need a resort", GUEST, tool("ask_location"), reply("[no reply]"))
     assert say(w, "Alleppey") == "form"
-    kinds = [k for _, k, _ in w.wa.to(GUEST)][1:]
-    assert kinds == ["image"] * 6 + ["text"]  # 6 general photos (owner's order), then the form; no room photos
-    assert w.wa.texts()[-1].startswith("Please share these details")
-    # asking for room photos sends the room's own first, then general ones not sent yet; never one twice
-    say(w, "room photos?", GUEST, tool("send_photos", place="Alleppey", room_type="Deluxe"), reply("[no reply]"))
-    images = [p for _, k, p in w.wa.to(GUEST) if k == "image"]
-    assert len(images) == 9 and len(set(images)) == 9  # 6 general + the room photo + the 2 general left
+    assert [k for _, k, _ in w.wa.to(GUEST)] == ["text", "text"]  # no photos before the form any more
+    start = len(w.wa.to(GUEST))
+    say(w, "Check in :dec 12\nCheck out :dec 15\nNumber of persons :2", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-15", adults=2),
+        reply("[no reply]"))
+    sent = [(k, p) for _, k, p in w.wa.to(GUEST)][start:]
+    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 8 + ["text"]
+    assert sent[0][1] == "Yes, rooms are available for your dates."
+    assert sent[1][1] == "Your Beachfront Hideout Awaits!\nDeluxe - ₹4,000/Night/Room"
+    assert sent[-1][1] == "Please share your name and mobile number to proceed."
+    logged = [m.text[len("[photo] "):] for m in w.repo.list_chat(GUEST, limit=100) if m.text.startswith("[photo] ")]
+    assert logged == general[:6] + room  # the first 6 general photos in the owner's order, then the room's own
 
 
-def test_a_guest_who_skips_the_form_still_gets_the_general_photos_before_the_glimpse(world, tmp_path, monkeypatch):
-    from app.resort import photos as ph
-    monkeypatch.setenv("RESORT_DB_PATH", str(tmp_path / "r.sqlite3"))
-    monkeypatch.setattr(ph, "_shrink", lambda data: None)
+def test_no_rooms_for_the_dates_is_said_plainly(world):
     w = world
-    for rt in w.repo.list_room_types(w.p1.id):  # one room type, like Pozhiyoram
-        if rt.name != "Deluxe":
-            w.repo.save_room_type(RoomType(**{**rt.__dict__, "active": False}))
-    general = [ph.save_photo(b"\x89PNG\r\n\x1a\n" + b"y" * 40) for _ in range(2)]
-    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": general, "intro": "Glimpse"}))
-    say(w, "Alleppey 10 Nov 2 nights 2 persons", GUEST,
-        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2), reply("[no reply]"))
-    sent = [(k, p) for _, k, p in w.wa.to(GUEST)]
-    assert [k for k, _ in sent] == ["text", "image", "image", "text", "text"]
-    assert sent[0][1].startswith("Yes, rooms are available") and sent[3][1] == "Glimpse"
+    for rt in w.repo.list_room_types(w.p1.id):
+        w.repo.save_room_type(RoomType(**{**rt.__dict__, "units": 0}))
+    say(w, "Alleppey 12 Dec to 15 Dec, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-15", adults=2),
+        reply("[no reply]"))
+    assert w.wa.texts() == ["Sorry, rooms are not available for your dates."]
 
 
 def test_the_bot_uses_whatever_the_dashboard_says_now(world):

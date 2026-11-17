@@ -29,7 +29,7 @@
 <div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties/{{ prop.id }}">Back</a><button class="btn primary">Save</button></div>
 </form>
 {% if not is_new %}
-{{ photo_gallery(rt.photo_urls, BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/photos", csrf, "Bed, bathroom, view of this room type. The bot sends these when a guest asks to see the rooms (up to 4 at a time).", "Room photos", "Sent when asked") }}
+{{ photo_gallery(rt.photo_urls, BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/photos", csrf, "Bed, bathroom, view of this room type. When this room is offered, the bot sends these after the general photos (the first 6), and again when a guest asks.", "Room photos", "Sent with the glimpse") }}
 <section class="card" id="seasons"><h3>Season prices</h3><p class="muted">Peak seasons or festivals (Onam, Christmas, New Year). A season price replaces the base and weekend rate on those nights. The bot quotes it automatically for guests whose dates fall in it.</p>
   <table class="list"><thead><tr><th>From</th><th>To</th><th>Label</th><th class="r">Rate</th><th></th></tr></thead><tbody>
   {% for r in rules %}<tr><td>{{ r.start.strftime('%d %b %Y') }}</td><td>{{ r.end.strftime('%d %b %Y') }}</td><td>{{ r.label }}</td><td class="r">{{ r.rate|rupees }}</td>

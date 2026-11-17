@@ -88,7 +88,8 @@ def latin_style(text: str, previous: str = "en") -> str:
     return "manglish" if unknown > english else "en"
 
 
-MAX_GENERAL_PHOTOS = 6  # general photos sent automatically when a guest picks a property
+MAX_GENERAL_PHOTOS = 6  # general photos sent automatically after the glimpse
+MAX_ROOM_PHOTOS = 6  # photos of the offered room type, sent right after the general photos
 
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
 MAX_CHAT_WORDS = 30  # "very simple" (client, 2026-11-17)
@@ -295,8 +296,8 @@ class ChatMixin:
                 if m.direction == "out" and m.text.startswith("[photo] ")}
 
     def _general_photos(self, phone: str, prop: Property) -> list[str]:
-        """The property's general photos (outside, beach, common areas) not yet sent: they go to EVERY guest who
-        picks the property (client, 2026-11-17), in the owner's order, at most MAX_GENERAL_PHOTOS."""
+        """The property's general photos (outside, beach, common areas) not yet sent: they go to EVERY guest right
+        after the glimpse (client, 2026-11-17), in the owner's order, at most MAX_GENERAL_PHOTOS."""
         sent = self._sent_photos(phone)
         return [r for r in prop.photo_urls if r not in sent][:MAX_GENERAL_PHOTOS]
 
@@ -355,7 +356,6 @@ class ChatMixin:
             return None
         st["form_place"] = prop.id
         self._save(phone, st)
-        self._send_photos(phone, self._general_photos(phone, prop))  # every guest who picks it sees the place
         self._text(phone, t("form", st.get("lang", "en")))
         return "form"
 
@@ -529,9 +529,9 @@ class ChatMixin:
             "gave only part of it, ask just the missing part in a few words. If a date has no year, use the next time "
             "it comes. Never assume the number of persons or nights.\n"
             "3. When you have check-in, check-out (or nights) and persons, call check_availability. Rooms: use the "
-            "fewest rooms the group needs unless the guest asked for more. If rooms are available, say ONLY that in "
-            "one short line; the resort's details and the request for name and mobile number are sent automatically. "
-            "If not available, say so and suggest other dates.\n"
+            "fewest rooms the group needs unless the guest asked for more. Whether rooms are free, the resort's "
+            "details, the photos and the request for name and mobile number are all sent automatically: reply "
+            "[no reply].\n"
             "4. Never ask which room type: the resort gives the room by its own priority. Only if the guest asks for "
             "a particular room type, call prepare_booking with it.\n"
             "- Never state prices, totals or the advance while checking availability; the price reaches the guest "
@@ -867,8 +867,6 @@ class ChatMixin:
                     "open_resorts": [self._place_label(p) for p in self._places()]}
         ctx.st["form_place"] = prop.id
         if t("form", "en") not in ctx.after:
-            if general := self._general_photos(ctx.phone, prop):
-                ctx.after.append(general)  # the general photos first, then the form
             ctx.after.append(t("form", ctx.st.get("lang", "en")))
         ctx.silent = True
         return {"ok": True, "resort": self._place_label(prop),
@@ -939,8 +937,9 @@ class ChatMixin:
         leads.save_lead(self.repo, ctx.phone, self.clock.now(), property_id=prop.id, check_in=ci.isoformat(),
                         check_out=co.isoformat(), adults=adults, children=children, rooms=wanted, room_type="",
                         stage="asked", booking_id="")
-        options = []
+        options, offered = [], []
         for rt, rooms_ok in self._fits(prop, bk):
+            offered.append(rt)
             rooms = wanted if wanted in rooms_ok else rooms_ok[0]
             q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, rooms)
             option = {"room_type": rt.name, "rooms_possible": rooms_ok, "quoted_for_rooms": rooms,
@@ -956,6 +955,12 @@ class ChatMixin:
         if not options:
             out["available"] = False
             out["reason"] = "no room type is free for this many guests on these dates (sold out or too many guests)"
+            key = f"none|{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}"
+            if st.get("checked") != key:  # the client's flow says plainly whether rooms are free
+                st["checked"] = key
+                ctx.after.append(t("rooms_none", st.get("lang", "en")))
+                ctx.silent = True
+                out["note"] += " The guest is told automatically. Reply exactly [no reply]."
             return out
         if wanted and not any(wanted in o["rooms_possible"] for o in options):
             out["note"] += (f" {wanted} room(s) is not possible for {adults + children} guest(s); "
@@ -964,20 +969,24 @@ class ChatMixin:
         # The owner's priority (2026-11-17): offer ONE room type, the top-priority one that is free and fits. The guest
         # is never asked to pick; one who names another room type still gets it through prepare_booking.
         options = out["options"] = options[:1]
-        # the client's flow: "rooms available" -> the resort's glimpse -> ask name and mobile, once per set of dates
+        # The client's flow, once per set of dates: "rooms available" -> the glimpse -> the general photos -> the offered
+        # room's photos -> ask name and mobile.
         key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}"
         lang = st.get("lang", "en")
         if st.get("checked") != key:
             st["checked"] = key
             ctx.after.append(t("rooms_ok", lang))
             ctx.silent = True
-            if general := self._general_photos(ctx.phone, prop):  # a guest who skipped the form still sees them
-                ctx.after.append(general)
             if prop.intro and st.get("intro_sent") != prop.id:
                 price = options[0].get("price_per_night") or round(
                     options[0]["total_for_stay"] / max(1, out["nights"] * options[0]["quoted_for_rooms"]))
-                ctx.after.append(prop.intro.replace("{price}", _money(price)))
+                ctx.after.append(prop.intro.replace("{price}", _money(price)).replace("{room}", offered[0].name))
                 st["intro_sent"] = prop.id
+            general = self._general_photos(ctx.phone, prop)
+            sent = self._sent_photos(ctx.phone) | set(general)
+            room_photos = [r for r in dict.fromkeys(offered[0].photo_urls) if r not in sent][:MAX_ROOM_PHOTOS]
+            if general + room_photos:
+                ctx.after.append(general + room_photos)  # sent in order: general first, then the room's own
             ctx.after.append(t("ask_contact", lang))
             out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
         else:
