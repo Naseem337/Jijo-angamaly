@@ -26,7 +26,46 @@
 {%- elif name == 'leaf' %}<path d="M11 20A7 7 0 019.8 6.1C15.5 5 17 4.5 19 2c1 2 2 4.2 2 8 0 5.5-4.8 10-10 10z"/><path d="M2 21c0-3 1.9-5.4 5.1-6"/>
 {%- elif name == 'tag' %}<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1"/>
 {%- elif name == 'download' %}<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>
+{%- elif name == 'image' %}<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>
+{%- elif name == 'star' %}<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>
+{%- elif name == 'check' %}<path d="M5 12.5l4.5 4.5L19 7"/>
+{%- elif name == 'alert' %}<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.01"/>
+{%- elif name == 'whatsapp' %}<path d="M4 20l1.3-4A8 8 0 1112 20a8 8 0 01-4-1.1z"/><path d="M9 9.5c.3 2.4 2.1 4.2 4.5 4.6l1-1.1 1.8.8"/>
 {%- endif %}</svg>
+{%- endmacro %}
+
+{% macro logo_mark(size=32) -%}
+<svg class="logo-mark" width="{{ size }}" height="{{ size }}" viewBox="0 0 64 64" aria-hidden="true">
+  <defs><linearGradient id="lm-sea" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0f4c5c"/><stop offset="1" stop-color="#0a2f3a"/></linearGradient>
+  <linearGradient id="lm-sun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3d18b"/><stop offset="1" stop-color="#d4a24e"/></linearGradient></defs>
+  <rect width="64" height="64" rx="16" fill="url(#lm-sea)"/>
+  <circle cx="32" cy="29" r="11" fill="url(#lm-sun)"/>
+  <rect x="10" y="33" width="44" height="22" fill="url(#lm-sea)"/>
+  <path d="M12 39c4-3 8-3 12 0s8 3 12 0 8-3 12 0 4 2 4 2" fill="none" stroke="#f6efe2" stroke-width="3" stroke-linecap="round"/>
+  <path d="M16 47c3.5-2.4 7-2.4 10.5 0s7 2.4 10.5 0 7-2.4 10.5 0" fill="none" stroke="#f6efe2" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/>
+</svg>
+{%- endmacro %}
+
+{% macro photo_gallery(photos, action, csrf, hint='') -%}
+<section class="card" id="photos">
+  <div class="card-head"><div><h3>{{ icon('image') }} Photos</h3><p class="muted">{{ hint or 'The first photo is the cover. The bot sends these on WhatsApp when a guest asks for pictures.' }}</p></div></div>
+  {% if photos %}<div class="gallery">
+  {% for ref in photos %}<figure class="ph{{ ' cover' if loop.first }}">
+    <a href="{{ ref }}" target="_blank" rel="noopener"><img src="{{ ref }}" alt="Photo {{ loop.index }}" loading="lazy"></a>
+    {% if loop.first %}<span class="ph-badge">{{ icon('star') }} Cover</span>{% endif %}
+    <figcaption>
+      {% if not loop.first %}<form method="post" action="{{ action }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="cover"><input type="hidden" name="ref" value="{{ ref }}"><button class="btn sm">Make cover</button></form>{% endif %}
+      <form method="post" action="{{ action }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="remove"><input type="hidden" name="ref" value="{{ ref }}"><button class="btn sm danger" data-confirm="Remove this photo?">Remove</button></form>
+    </figcaption>
+  </figure>{% endfor %}
+  </div>{% endif %}
+  <form method="post" action="{{ action }}" enctype="multipart/form-data" class="uploader">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="upload">
+    <label class="drop">{{ icon('image') }}<span><b>Choose photos</b> or drop them here</span><small>JPG or PNG, up to 12 at a time. Large phone photos are resized automatically.</small>
+      <input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/heic" multiple required></label>
+    <button class="btn primary">{{ icon('plus') }} Upload</button>
+  </form>
+</section>
 {%- endmacro %}
 
 {% macro pill(status) -%}

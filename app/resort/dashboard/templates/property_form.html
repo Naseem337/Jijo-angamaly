@@ -1,15 +1,25 @@
 {% extends "base.html" %}
-{% from "macros.html" import page_head, field, area, csrf_field, empty, icon %}
+{% from "macros.html" import page_head, field, area, csrf_field, empty, icon, photo_gallery %}
 {% block title %}{{ p.name or 'New property' }} · Resort Desk{% endblock %}
 {% block content %}
 {% call page_head(p.name or "New property", "Property details") %}{% endcall %}
 <nav class="subnav">
   <a href="#details">Details</a>
   <a href="#rooms">Rooms{% if not is_new %} <b>{{ rooms|length }}</b>{% endif %}</a>
+  {% if not is_new %}<a href="#photos">Photos <b>{{ p.photo_urls|length }}</b></a>{% endif %}
   <a href="#payment">Payment</a>
   <a href="#staff">Staff &amp; policies</a>
 </nav>
 
+{% if not is_new and ready %}
+{% set missing = ready|rejectattr(0)|list %}
+<section class="card ready-card {{ 'ok' if not missing else 'todo' }}">
+  <div class="card-head"><div><h3>{{ icon('whatsapp') }} WhatsApp bot</h3>
+    <p class="muted">{% if not missing %}Ready: guests can ask about and book this property on WhatsApp. Changes you save here reach the bot instantly.{% else %}{{ missing|length }} thing{{ 's' if missing|length != 1 }} left before the bot can sell this property well. Changes reach the bot instantly, no training needed.{% endif %}</p></div>
+    <span class="pill {{ 'paid' if not missing else 'hold' }}">{{ 'Live on WhatsApp' if not missing else 'Needs attention' }}</span></div>
+  <ul class="checklist">{% for ok, label in ready %}<li class="{{ 'done' if ok else 'miss' }}">{{ icon('check' if ok else 'alert') }}<span>{{ label }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
 {% if not is_new %}
 <section class="card" id="rooms">
   <div class="card-head"><div><h3>Rooms &amp; rates</h3><p class="muted">What guests can book at this property. Open a room to change its rate, capacity and seasonal prices.</p></div>
@@ -24,6 +34,7 @@
   </a>{% endfor %}</div>
   {% else %}{{ empty("No room types yet. Add the first one so the bot can offer rooms.") }}{% endif %}
 </section>
+{{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "Photos of the whole property (beach, garden, outside). The first one is the cover. The bot sends them on WhatsApp when a guest asks for pictures.") }}
 {% else %}
 <section class="card hint-card" id="rooms"><h3>Rooms &amp; rates</h3><p class="muted">Save the property first. Then you can add room types, rates and seasonal prices here.</p></section>
 {% endif %}
@@ -83,7 +94,6 @@
       <div class="chip-add"><span class="prefix">+91</span><input type="tel" inputmode="numeric" placeholder="98xxxxxxxx" maxlength="16"><button type="button" class="btn primary">{{ icon('plus') }} Add number</button></div>
     </div></div>
   {{ area("Policies (cancellation, refund, house rules)", "policies", p.policies, 4) }}
-  {{ area("Photo links (one per line)", "photo_urls", p.photo_urls|join('\n'), 3) }}
 </section>
 <div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties">Back</a>
   {% if not is_new and auth.is_owner %}<button class="btn danger" formaction="{{ BASE }}/properties/{{ p.id }}/delete" data-confirm="Delete this property and its rooms?">Delete</button>{% endif %}

@@ -1,0 +1,145 @@
+/* Premium resort look (2026-11-17). Loaded LAST, after app.css and frappe.css: it only restyles.
+   Deep ocean teal + warm sand, an elegant serif for headings, soft depth. Light by default, dark when chosen. */
+:root{
+  --bg:#f6f3ee;--card:#ffffff;--ink:#1c2b2f;--muted:#6a787c;--line:#e9e3d9;--line-2:#ddd5c8;--soft:#faf8f4;--hover:#f3efe8;
+  --gray-soft:#f1ede6;--control-bg:#ffffff;
+  --brand:#0f4c5c;--brand-d:#0a3945;--brand-soft:#e5eff0;--on-brand:#ffffff;
+  --gold:#c39446;--gold-soft:#f7eedd;
+  --green:#1f7a52;--green-soft:#e2f3ea;--amber:#a8601b;--amber-soft:#fbeedc;--red:#c2413b;--red-soft:#fcebea;
+  --blue:#2a6496;--blue-soft:#e6eff8;--ring:rgba(15,76,92,.22);--bar:rgba(255,255,255,.92);
+  --radius:14px;--radius-sm:10px;--btn-h:34px;
+  --shadow:0 1px 2px rgba(20,45,50,.05),0 6px 20px rgba(20,45,50,.05);--shadow-lg:0 18px 48px rgba(20,45,50,.16);
+  --side-a:#0f4c5c;--side-b:#082a33;--side-ink:#d8e6e6;--side-muted:#8fb0b3;
+  --serif:"Fraunces","Playfair Display",Georgia,serif;
+}
+html[data-theme=dark]{
+  --bg:#0c1517;--card:#121e21;--ink:#e6eeee;--muted:#93a6a9;--line:#1f2f33;--line-2:#2a3d41;--soft:#0f1a1c;--hover:#172629;
+  --gray-soft:#1a2a2d;--control-bg:#0f1a1c;--brand:#5fb3c2;--brand-d:#8fd0db;--brand-soft:#123239;--on-brand:#06181c;
+  --gold:#e0b56a;--gold-soft:#2c2416;--green:#5cc690;--green-soft:#13301f;--amber:#efa766;--amber-soft:#33261a;
+  --red:#f08b84;--red-soft:#3a1c1b;--blue:#86b6e8;--blue-soft:#15263a;--ring:rgba(95,179,194,.3);--bar:rgba(18,30,33,.92);
+  --shadow:0 1px 2px rgba(0,0,0,.3);--shadow-lg:0 18px 48px rgba(0,0,0,.55);--side-a:#0b2a31;--side-b:#061519;
+}
+
+/* type */
+html body{font:14px/1.55 "Plus Jakarta Sans",Inter,-apple-system,"Segoe UI","Noto Sans","Noto Sans Malayalam",sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+html{font-size:14px}
+html body h1{font-family:var(--serif);font-size:26px;font-weight:600;letter-spacing:-.01em;line-height:1.2}
+html body h3,html body .card h3{font-size:14px;font-weight:700;letter-spacing:.005em;display:flex;align-items:center;gap:8px}
+html body h3 .ic{color:var(--gold)}
+html body a{color:var(--brand)}
+html body .muted,html body small{color:var(--muted)}
+
+/* sidebar: deep ocean */
+html body .sidebar{background:linear-gradient(180deg,var(--side-a),var(--side-b));border-right:0;padding:16px 12px;color:var(--side-ink)}
+html body .brand{color:#fff;font-family:var(--serif);font-size:19px;font-weight:600;padding:4px 8px 18px;gap:10px;letter-spacing:.01em}
+html body .brand .logo-mark{flex:none;border-radius:11px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+html body .brand small{display:block;font:500 10px/1 "Plus Jakarta Sans",sans-serif;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);margin-top:3px}
+html body .scope label,html body .nav-label{color:var(--side-muted);letter-spacing:.12em;font-size:10.5px;font-weight:600}
+html body .scope select{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.12);height:34px;border-radius:10px}
+html body .scope select option{color:#1c2b2f}
+html body .sidebar nav a{color:var(--side-ink);height:36px;padding:0 12px;border-radius:10px;font-size:13.5px;font-weight:500;position:relative}
+html body .sidebar nav a .ic{color:var(--side-muted);width:17px;height:17px}
+html body .sidebar nav a:hover{background:rgba(255,255,255,.07);color:#fff}
+html body .sidebar nav a.active{background:rgba(255,255,255,.12);color:#fff;font-weight:600}
+html body .sidebar nav a.active .ic{color:var(--gold)}
+html body .sidebar nav a.active:before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--gold)}
+html[data-theme=dark] body .sidebar nav a:hover,html[data-theme=dark] body .sidebar nav a.active{background:rgba(255,255,255,.07)}
+
+/* top bar */
+html body .topbar{height:60px;background:var(--bar);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line);padding:0 24px}
+html body .search{height:38px;max-width:420px;background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:0 12px}
+html body .search:focus-within{background:var(--card);border-color:var(--brand);box-shadow:0 0 0 3px var(--ring)}
+html body .avatar{width:32px;height:32px;background:linear-gradient(135deg,var(--gold),#a8762e);color:#fff;font-size:13px;font-weight:700}
+html body .who b{font-size:13px}html body .who small{font-size:11.5px}
+html body .content{padding:26px 30px;max-width:1320px}
+html body .crumbs{font-size:12.5px;color:var(--muted)}
+
+/* buttons */
+html body .btn{height:var(--btn-h);padding:0 14px;border-radius:10px;font-size:13.5px;font-weight:600;border:1px solid var(--line-2);background:var(--card);color:var(--ink);transition:background .15s,box-shadow .15s,transform .15s}
+html body .btn:hover{background:var(--hover)}
+html body .btn.primary{background:linear-gradient(180deg,#14606f,var(--brand));border-color:var(--brand-d);color:var(--on-brand);box-shadow:0 1px 0 rgba(255,255,255,.15) inset,0 4px 12px rgba(15,76,92,.25)}
+html body .btn.primary:hover{opacity:1;filter:brightness(1.08);transform:translateY(-1px)}
+html[data-theme=dark] body .btn.primary{background:var(--brand);color:var(--on-brand)}
+html body .btn.danger{color:var(--red)}html body .btn.danger:hover{background:var(--red-soft)}
+html body .btn.sm{height:28px;font-size:12.5px;padding:0 10px;border-radius:8px}
+html body .btn.block{height:42px;font-size:14px}
+
+/* forms */
+html body input,html body select,html body textarea{background:var(--control-bg);border:1px solid var(--line-2);border-radius:10px;height:var(--btn-h);padding:0 11px;font-size:13.5px}
+html body textarea{height:auto;padding:9px 11px;line-height:1.5}
+html body input:focus,html body select:focus,html body textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--ring);background:var(--card)}
+html body .field>span{font-size:12.5px;font-weight:600;color:var(--ink);opacity:.85;margin-bottom:6px}
+html body .savebar{background:var(--bar);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding:12px 0}
+
+/* cards and numbers */
+html body .card,html body .stat,html body .quick a,html body .room-card,html body .login-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+html body .card{padding:20px 22px;margin-bottom:18px}
+html body .card>h3:first-child{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px}
+html body .stats{gap:14px}
+html body .stat{padding:16px 18px;position:relative;overflow:hidden}
+html body .stat:after{content:"";display:block;position:absolute;right:-24px;top:-24px;width:80px;height:80px;border-radius:50%;background:var(--gold-soft);opacity:.7}
+html body .stat b{font-family:var(--serif);font-size:28px;font-weight:600}
+html body a.stat:hover,html body a.card:hover,html body .room-card:hover,html body .quick a:hover{border-color:var(--gold);box-shadow:var(--shadow-lg);transform:translateY(-2px)}
+html body .quick a{padding:12px 14px}html body .quick .ic{color:var(--gold)}
+html body table.list th{background:var(--soft);font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:10px 14px}
+html body table.list td{padding:11px 14px}
+html body tr.click:hover td,html body table.list tbody tr:hover td{background:var(--hover)}
+html body .pill{font-size:11.5px;font-weight:600;padding:3px 10px}
+html body .chip,html body .chips-static span{background:var(--gold-soft);color:#7a5a24;font-weight:600}
+html[data-theme=dark] body .chip,html[data-theme=dark] body .chips-static span{color:var(--gold)}
+html body .subnav a{border-radius:999px;border-color:var(--line);background:var(--card);box-shadow:var(--shadow);font-size:13px}
+html body .subnav a:hover{background:var(--gold-soft)}html body .subnav b{background:var(--brand);color:var(--on-brand)}
+html body .room-rate{font-family:var(--serif);font-size:24px}
+html body .toast{background:var(--brand-d);border-radius:12px}
+
+/* property cards with cover photo */
+.prop-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px}
+.prop-card{display:block;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow);color:inherit;transition:.2s}
+.prop-card:hover{text-decoration:none;transform:translateY(-3px);box-shadow:var(--shadow-lg);border-color:var(--gold)}
+.prop-card.off{opacity:.75}
+.prop-cover{position:relative;aspect-ratio:16/10;background:linear-gradient(135deg,var(--brand),var(--side-b))}
+.prop-cover img{width:100%;height:100%;object-fit:cover;display:block}
+.prop-cover .pill{position:absolute;left:12px;top:12px;backdrop-filter:blur(6px)}
+.prop-ph{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:6px;color:rgba(255,255,255,.8)}
+.prop-ph .ic{width:34px;height:34px}.prop-ph small{color:rgba(255,255,255,.8)}
+.prop-body{padding:16px 18px 18px}.prop-body h3{font-family:var(--serif);font-size:19px;font-weight:600;margin:0}.prop-body p{margin:2px 0 8px}
+
+/* photo gallery + uploader */
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;margin-bottom:16px}
+.ph{margin:0;position:relative;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--soft)}
+.ph img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;transition:transform .3s}
+.ph:hover img{transform:scale(1.04)}
+.ph.cover{outline:2px solid var(--gold);outline-offset:-2px}
+.ph-badge{position:absolute;left:8px;top:8px;display:inline-flex;align-items:center;gap:4px;background:rgba(10,40,48,.82);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px}
+.ph-badge .ic{width:12px;height:12px;color:var(--gold)}
+.ph figcaption{display:flex;gap:6px;justify-content:flex-end;padding:8px;flex-wrap:wrap}.ph figcaption form{margin:0}
+.uploader{display:flex;gap:12px;align-items:stretch;flex-wrap:wrap}
+.drop{flex:1;min-width:240px;display:grid;justify-items:center;text-align:center;gap:4px;padding:22px;border:2px dashed var(--line-2);border-radius:14px;background:var(--soft);cursor:pointer;transition:.15s}
+.drop:hover,.drop.over{border-color:var(--gold);background:var(--gold-soft)}
+.drop .ic{width:28px;height:28px;color:var(--gold)}.drop b{color:var(--brand)}
+.drop input[type=file]{height:auto;border:0;background:none;padding:6px 0 0;font-size:12.5px;max-width:280px}
+.uploader .btn{align-self:center}
+
+/* WhatsApp readiness */
+.ready-card .checklist{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px 18px}
+.checklist li{display:flex;gap:9px;align-items:flex-start;font-size:13px;padding:6px 0}
+.checklist li .ic{flex:none;width:18px;height:18px;margin-top:1px}
+.checklist li.done .ic{color:var(--green)}.checklist li.miss .ic{color:var(--amber)}.checklist li.miss span{font-weight:600}
+.ready-card.ok{border-left:4px solid var(--green)}.ready-card.todo{border-left:4px solid var(--gold)}
+
+/* sign-in: split screen */
+.login-split{min-height:100vh;display:grid;grid-template-columns:1.1fr 1fr;background:var(--bg)}
+.login-hero{position:relative;overflow:hidden;background:radial-gradient(circle at 30% 30%,#1a6b7d 0,var(--side-a) 40%,var(--side-b) 100%);color:#fff;padding:56px;display:flex;flex-direction:column;justify-content:space-between}
+.login-hero .brand-line{display:flex;align-items:center;gap:12px;font-family:var(--serif);font-size:22px;font-weight:600}
+.login-hero h2{font-family:var(--serif);font-weight:500;font-size:40px;line-height:1.15;margin:0;max-width:440px}
+.login-hero h2 em{font-style:italic;color:var(--gold)}
+.login-hero p{color:#bcd3d6;max-width:420px;margin:14px 0 0}
+.login-hero .waves{position:absolute;left:0;right:0;bottom:0;opacity:.35}
+.login-side{display:grid;place-items:center;padding:24px}
+html body .login-card{max-width:400px;width:100%;padding:34px;border-radius:20px;box-shadow:var(--shadow-lg);display:grid;gap:16px}
+html body .login-card h1{font-size:28px}
+.login-card .logo-mark{justify-self:start}
+@media(max-width:900px){.login-split{grid-template-columns:1fr}.login-hero{padding:28px;min-height:220px}.login-hero h2{font-size:28px}}
+
+@media(max-width:860px){html body .content{padding:18px 14px}html body .topbar{padding:0 14px}html body h1{font-size:22px}
+  .uploader{flex-direction:column}.uploader .btn{align-self:stretch;justify-content:center}}

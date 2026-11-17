@@ -58,6 +58,13 @@ class FakeWA:
     def mark_read(self, *a, **k):
         return True
 
+    def upload_media(self, data, mime_type="image/jpeg", filename="x"):
+        return f"media-{len(data)}-{filename}"
+
+    def send_image(self, to, media_id, caption=""):
+        self.sent.append((to, "image", media_id))
+        return "wamid.x"
+
     def to(self, phone):
         return [s for s in self.sent if s[0] == phone]
 
@@ -203,6 +210,55 @@ def test_manglish_guest_gets_one_rewrite_when_the_ai_answers_in_english(world):
     say(w, "room undo nale", GUEST, reply("Yes, we have rooms available for tomorrow. How many people are coming?"),
         reply("Und sir, nale rooms und. Ethra per und?"))
     assert w.wa.texts()[-1] == "Und sir, nale rooms und. Ethra per und?"
+
+
+def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_twice(world, tmp_path, monkeypatch):
+    from app.resort import photos as ph
+    monkeypatch.setenv("RESORT_DB_PATH", str(tmp_path / "r.sqlite3"))
+    monkeypatch.setattr(ph, "_shrink", lambda data: None)
+    w = world
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 50
+    room_refs = [ph.save_photo(png) for _ in range(2)]
+    prop_refs = [ph.save_photo(png) for _ in range(4)]
+    w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "photo_urls": room_refs}))
+    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": prop_refs}))
+    say(w, "deluxe room photos undo?", GUEST, tool("send_photos", place="Pozhiyoram", room_type="Deluxe"), reply("[no reply]"))
+    images = [p for _, k, p in w.wa.to(GUEST) if k == "image"]
+    assert len(images) == 4 and w.wa.texts() == []  # the room's own photos first, at most 4, no extra text
+    say(w, "more photos", GUEST, tool("send_photos", place="Pozhiyoram"), reply("[no reply]"))
+    assert len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 6  # only the 2 not sent yet
+    say(w, "more?", GUEST, tool("send_photos", place="Pozhiyoram"), reply("That's all the photos we have sir."))
+    assert "already sent" in last_tool(w)["error"] and len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 6
+
+
+def test_the_bot_uses_whatever_the_dashboard_says_now(world):
+    """Owner edits reach the bot on the next message: no training, no restart."""
+    w = world
+    w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "base_rate": 5500}))
+    w.repo.save_rate_rule(RateRule(w.deluxe.id, date(2026, 11, 10), date(2026, 11, 11), 7000, "Festival"))
+    new = w.repo.save_property(Property("Misty Hills", city="Vagamon, Kerala", contact_numbers=["+919000000001"]))
+    w.repo.save_room_type(RoomType(new.id, "Tent", units=4, base_rate=2000))
+    say(w, "rooms 10 Nov 2 nights for 2", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2), reply("[no reply]"))
+    deluxe = next(o for o in last_tool(w)["options"] if o["room_type"] == "Deluxe")
+    assert deluxe["total_for_stay"] == 7000 + 7000  # the festival price on both nights
+    system = w.llm.calls[-1].system
+    assert "Misty Hills" in system and "Tent" in system and "Vagamon" in system  # a new property is known at once
+    say(w, "resort", "+919847000777", tool("ask_location"), reply("[no reply]"))
+    assert "Vagamon" in w.wa.texts("+919847000777")[-1]  # and named in the location question
+
+
+def test_a_town_answer_to_the_location_question_gets_the_form_without_the_ai(world):
+    w = world
+    say(w, "I need a resort", GUEST, tool("ask_location"), reply("[no reply]"))
+    calls = len(w.llm.calls)
+    assert say(w, "Alleppey") == "form" and len(w.llm.calls) == calls  # no AI guesswork for this step
+    assert w.wa.texts()[-1].startswith("Please share these details:")
+    say(w, "20 Nov to 21 Nov, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-20", check_out="2026-11-21", adults=2), reply("[no reply]"))
+    assert "CHOSEN RESORT: the guest picked Pozhiyoram, Alleppey" in w.llm.calls[-1].system
+    say(w, "Kochi", "+919847000123")  # not after our location question: the AI handles it as usual
+    assert w.llm.calls[-1].messages[-1].content.startswith("Kochi")
 
 
 def test_a_mid_chat_hi_is_never_left_unanswered(world):
@@ -1311,3 +1367,14 @@ def test_my_bookings_answers_about_an_old_paid_booking(world):
     say(w, "my last booking details?", GUEST, tool("my_bookings"), reply("Your stay was 10 to 12 Oct."))
     rows = last_tool(w)["bookings"]
     assert rows and rows[0]["check_in"] == "2026-10-10" and "payment_link" not in rows[0]
+
+
+def test_a_short_festival_price_beats_a_long_season_it_falls_in():
+    from app.resort.availability import night_rate
+    rt = RoomType("P", "Room", base_rate=2500)
+    season = RateRule("RT", date(2026, 12, 15), date(2027, 1, 5), 3500, "Christmas")
+    festival = RateRule("RT", date(2026, 12, 20), date(2026, 12, 21), 4999, "Festival")
+    for rules in ([season, festival], [festival, season]):
+        assert night_rate(rt, rules, date(2026, 12, 20)) == 4999
+        assert night_rate(rt, rules, date(2026, 12, 24)) == 3500
+        assert night_rate(rt, rules, date(2026, 12, 10)) == 2500

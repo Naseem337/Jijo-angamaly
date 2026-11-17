@@ -229,6 +229,8 @@ class BookingBot(IdProofMixin, ChatMixin):
         if GREETING.match(text) and not st.get("bk") and self._places() and not self._chatting_now(phone):
             self._save(phone, st)
             return self._greet(phone, st, text)
+        if outcome := self._location_answer(phone, st, text):
+            return outcome
         return self._converse(phone, st, text, in_id)
 
     # ------------------------------------------------------------------ staff handoff

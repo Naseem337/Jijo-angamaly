@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import page_head, field, area, csrf_field, empty %}
+{% from "macros.html" import page_head, field, area, csrf_field, empty, photo_gallery %}
 {% block title %}{{ rt.name or 'New room type' }} · Resort Desk{% endblock %}
 {% block content %}
 {% call page_head(rt.name or "New room type", prop.name) %}{% endcall %}
@@ -15,12 +15,12 @@
 </div></section>
 <section class="card"><h3>Details</h3>
   {{ area("Description", "description", rt.description, 3) }}{{ area("Amenities", "amenities", rt.amenities, 2, "e.g. AC, balcony, private pool") }}
-  {{ area("Photo links (one per line)", "photo_urls", rt.photo_urls|join('\n'), 3) }}
   <label class="check"><input type="checkbox" name="active" {{ 'checked' if rt.active }}> Active (the bot offers this room)</label></section>
 <div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties/{{ prop.id }}">Back</a><button class="btn primary">Save</button></div>
 </form>
 {% if not is_new %}
-<section class="card"><h3>Season prices</h3><p class="muted">Peak seasons or festivals. A season price replaces the base and weekend rate on those nights.</p>
+{{ photo_gallery(rt.photo_urls, BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/photos", csrf, "Photos of this room type (bed, bathroom, view). The first one is the cover. The bot sends them when a guest asks to see the room.") }}
+<section class="card" id="seasons"><h3>Season prices</h3><p class="muted">Peak seasons or festivals (Onam, Christmas, New Year). A season price replaces the base and weekend rate on those nights. The bot quotes it automatically for guests whose dates fall in it.</p>
   <table class="list"><thead><tr><th>From</th><th>To</th><th>Label</th><th class="r">Rate</th><th></th></tr></thead><tbody>
   {% for r in rules %}<tr><td>{{ r.start.strftime('%d %b %Y') }}</td><td>{{ r.end.strftime('%d %b %Y') }}</td><td>{{ r.label }}</td><td class="r">{{ r.rate|rupees }}</td>
   <td><form method="post" action="{{ BASE }}/properties/{{ prop.id }}/rooms/{{ rt.id }}/rates">{{ csrf_field(csrf) }}<input type="hidden" name="delete" value="{{ r.id }}"><button class="btn ghost sm">Remove</button></form></td></tr>

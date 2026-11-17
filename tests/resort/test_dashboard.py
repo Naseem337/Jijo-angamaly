@@ -84,10 +84,10 @@ def test_create_property_and_room_type(env):
     client, token = login(app)
     resp = client.post(f"{BASE}/properties/new", data={
         "csrf": token, "name": "Sea View Staycation", "city": "Varkala", "advance_pct": "50", "active": "on",
-        "staff_numbers": "9847012345", "photo_urls": "https://x/a.jpg\nhttps://x/b.jpg"})
+        "staff_numbers": "9847012345"})
     assert resp.status_code == 200
     prop = next(p for p in repo.list_properties() if p.name == "Sea View Staycation")
-    assert prop.staff_numbers == [PHONE] and len(prop.photo_urls) == 2
+    assert prop.staff_numbers == [PHONE] and prop.photo_urls == []  # photos come from the upload gallery
     client.post(f"{BASE}/properties/{prop.id}/rooms/new", data={
         "csrf": token, "name": "Villa", "units": "3", "max_adults": "4", "max_children": "2", "max_occupancy": "6",
         "base_rate": "9000", "weekend_rate": "11000", "active": "on"})
@@ -265,3 +265,46 @@ def test_csv_and_filter_have_payment_fields(env):
     assert other.id in unpaid and b.id not in unpaid
     home = client.get(f"{BASE}/").text
     assert "Collected today" in home and "Arrivals today" in home and "Chats needing" not in home
+
+
+def _png() -> bytes:
+    from pathlib import Path
+    return (Path(__file__).resolve().parents[2] / "app" / "resort" / "dashboard" / "static" / "icon-192.png").read_bytes()
+
+
+def test_photo_upload_cover_remove_and_public_link(env):
+    repo, app, (p1, p2, rt1, rt2) = env
+    client, token = login(app)
+    url = f"{BASE}/properties/{p1.id}/photos"
+    files = [("photos", ("a.png", _png(), "image/png")), ("photos", ("b.png", _png(), "image/png"))]
+    resp = client.post(url, data={"csrf": token, "action": "upload"}, files=files)
+    assert resp.status_code == 200 and "2%20photos%20added" in str(resp.url)
+    refs = repo.get_property(p1.id).photo_urls
+    assert len(refs) == 2 and all(r.startswith("/resort/media/") for r in refs)
+    shown = client.get(refs[0])  # public: the bot and guests can open it without logging in
+    assert shown.status_code == 200 and shown.headers["content-type"].startswith("image/")
+    assert TestClient(app).get(refs[0]).status_code == 200
+    client.post(url, data={"csrf": token, "action": "cover", "ref": refs[1]})
+    assert repo.get_property(p1.id).photo_urls[0] == refs[1]
+    client.post(url, data={"csrf": token, "action": "remove", "ref": refs[1]})
+    assert repo.get_property(p1.id).photo_urls == [refs[0]] and client.get(refs[1]).status_code == 404
+    bad = client.post(url, data={"csrf": token, "action": "upload"}, files=[("photos", ("x.txt", b"hello", "text/plain"))])
+    assert "%21" in str(bad.url) or "!" in str(bad.url) and len(repo.get_property(p1.id).photo_urls) == 1
+    assert client.post(url, data={"csrf": "wrong", "action": "upload"}, files=files).status_code == 403
+    room_url = f"{BASE}/properties/{p1.id}/rooms/{rt1.id}/photos"
+    client.post(room_url, data={"csrf": token, "action": "upload"}, files=files[:1])
+    assert len(repo.get_room_type(rt1.id).photo_urls) == 1
+    page = client.get(f"{BASE}/properties").text
+    assert refs[0] in page  # the cover shows on the property card
+    assert client.get(f"{BASE}/resort/media/../../etc/passwd").status_code == 404
+
+
+def test_property_page_says_what_the_whatsapp_bot_still_needs(env):
+    repo, app, (p1, p2, rt1, rt2) = env
+    client, _ = login(app)
+    page = client.get(f"{BASE}/properties/{p1.id}").text
+    assert "Needs attention" in page and "Owner contact numbers" in page and "Photos, sent when" in page
+    p = repo.get_property(p1.id)
+    p.city, p.contact_numbers, p.intro, p.photo_urls = "Alleppey", ["+919497861924"], "Welcome", ["/resort/media/x"]
+    repo.save_property(p)
+    assert "Live on WhatsApp" in client.get(f"{BASE}/properties/{p1.id}").text

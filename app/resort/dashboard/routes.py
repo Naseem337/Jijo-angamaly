@@ -836,7 +836,11 @@ def calendar_day(request: Request, auth: Auth = Depends(require_user)):
 @router.get("/properties")
 def properties_list(request: Request, auth: Auth = Depends(require_user)):
     repo = get_repo()
-    rows = [(p, repo.list_room_types(p.id, False)) for p in auth.properties(repo)]
+    rows = []
+    for p in auth.properties(repo):
+        types = repo.list_room_types(p.id, False)
+        cover = next(iter(p.photo_urls), "") or next((rt.photo_urls[0] for rt in types if rt.photo_urls), "")
+        rows.append((p, types, cover))
     return page(request, "properties.html", auth, nav="properties", rows=rows)
 
 
@@ -845,11 +849,90 @@ def property_new(request: Request, auth: Auth = Depends(require_owner)):
     return page(request, "property_form.html", auth, nav="properties", p=Property(""), rooms=[], is_new=True)
 
 
+def bot_readiness(repo, p: Property) -> list[tuple[bool, str]]:
+    """What the WhatsApp bot needs from the owner's data to sell this property (shown on the property page)."""
+    rooms = [rt for rt in repo.list_room_types(p.id) if rt.active]
+    priced = [rt for rt in rooms if rt.base_rate > 0]
+    return [
+        (p.active, "Switched on (Active) so the bot offers it on WhatsApp"),
+        (bool(p.city or p.place), "Town filled in, for the bot's \"Kindly confirm the Location\" question"),
+        (bool(rooms), "At least one active room type"),
+        (bool(priced), "A price per night on the room type(s)"),
+        (bool(p.contact_numbers), "Owner contact numbers, given to guests for questions the bot can't answer"),
+        (bool(p.intro), "Welcome message (glimpse), sent when rooms are found"),
+        (bool(p.photo_urls or any(rt.photo_urls for rt in rooms)), "Photos, sent when a guest asks for pictures"),
+    ]
+
+
 @router.get("/properties/{property_id}")
 def property_edit(property_id: str, request: Request, auth: Auth = Depends(require_user)):
     repo = get_repo()
-    return page(request, "property_form.html", auth, nav="properties", p=_prop(repo, auth, property_id),
-                rooms=repo.list_room_types(property_id, False), is_new=False)
+    p = _prop(repo, auth, property_id)
+    return page(request, "property_form.html", auth, nav="properties", p=p,
+                rooms=repo.list_room_types(property_id, False), is_new=False, ready=bot_readiness(repo, p))
+
+
+async def _photo_form(request: Request, auth: Auth):
+    form = await request.form()
+    import secrets as _secrets
+    if not _secrets.compare_digest(str(form.get("csrf", "")), auth.csrf):
+        raise HTTPException(403, "Bad CSRF token")
+    return form
+
+
+async def _apply_photos(request: Request, auth: Auth, photos: list[str]) -> tuple[list[str], str]:
+    """Upload / remove / make-cover on a photo list. Returns the new list and a toast message."""
+    from app.resort import photos as ph
+    form = await _photo_form(request, auth)
+    action, ref = str(form.get("action", "upload")), str(form.get("ref", ""))
+    if action == "remove" and ref in photos:
+        ph.delete_photo(ref)
+        return [x for x in photos if x != ref], "Photo removed"
+    if action == "cover" and ref in photos:
+        return [ref] + [x for x in photos if x != ref], "Cover photo set"
+    files = [f for f in form.getlist("photos") if hasattr(f, "read")]
+    added, problem = 0, ""
+    for upload in files[:12]:
+        try:
+            photos = photos + [ph.save_photo(await upload.read())]
+            added += 1
+        except ph.PhotoError as exc:
+            problem = str(exc)
+    if problem and not added:
+        return photos, "!" + problem
+    if not added:
+        return photos, "!Choose one or more photos first"
+    return photos[:20], f"{added} photo{'s' if added != 1 else ''} added" + (f" ({problem})" if problem else "")
+
+
+@router.post("/properties/{property_id}/photos")
+async def property_photos(property_id: str, request: Request, auth: Auth = Depends(require_user)):
+    repo = get_repo()
+    p = _prop(repo, auth, property_id)
+    p.photo_urls, message = await _apply_photos(request, auth, list(p.photo_urls))
+    repo.save_property(p)
+    raise redirect(toast_url(f"{BASE}/properties/{p.id}#photos", message))
+
+
+@router.post("/properties/{property_id}/rooms/{room_id}/photos")
+async def room_photos(property_id: str, room_id: str, request: Request, auth: Auth = Depends(require_user)):
+    repo = get_repo()
+    prop, rt = _room(repo, auth, property_id, room_id)
+    if rt is None:
+        raise HTTPException(404, "Save the room type first")
+    rt.photo_urls, message = await _apply_photos(request, auth, list(rt.photo_urls))
+    repo.save_room_type(rt)
+    raise redirect(toast_url(f"{BASE}/properties/{prop.id}/rooms/{rt.id}#photos", message))
+
+
+@public_router.get("/media/{name}")
+def media(name: str):
+    """Uploaded property/room photos (public: they are the resort's marketing pictures)."""
+    from app.resort import photos as ph
+    path = ph.local_path(ph.PREFIX + name)
+    if path is None:
+        raise HTTPException(404, "Not found")
+    return FileResponse(path, media_type=ph.mime_of(path), headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @router.post("/properties/{property_id}")
@@ -874,7 +957,7 @@ async def property_save(property_id: str, request: Request, auth: Auth = Depends
         f.get("policies", "").strip()
     p.checkin_time, p.checkout_time = f.get("checkin_time", "14:00") or "14:00", f.get("checkout_time", "11:00") or "11:00"
     p.advance_pct, p.gst_pct = _int(f, "advance_pct", 50, 1, 100), _int(f, "gst_pct", 0, 0, 40)
-    p.staff_numbers, p.photo_urls = staff, [u for u in _lines(f.get("photo_urls", "").replace(",", "\n")) if u]
+    p.staff_numbers = staff  # photos are managed by the photo gallery (property_photos), not this form
     p.highlights = _lines(f.get("highlights", ""))[:12]
     p.intro = f.get("intro", "").strip()[:3000]
     p.meal_plan = f.get("meal_plan", "").strip()[:40]
@@ -936,8 +1019,7 @@ async def room_save(property_id: str, room_id: str, request: Request, auth: Auth
     rt.base_rate = _int(f, "base_rate", 0)
     rt.weekend_rate = _int(f, "weekend_rate") if f.get("weekend_rate", "").strip() else None
     rt.description, rt.amenities = f.get("description", "").strip(), f.get("amenities", "").strip()
-    rt.photo_urls = _lines(f.get("photo_urls", "").replace(",", "\n"))
-    rt.active = f.get("active") == "on"
+    rt.active = f.get("active") == "on"  # photos are managed by the photo gallery (room_photos)
     repo.save_room_type(rt)
     raise redirect(toast_url(f"{BASE}/properties/{prop.id}/rooms/{rt.id}", "Room type saved"))
 

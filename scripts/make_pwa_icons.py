@@ -8,7 +8,7 @@ import zlib
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "app" / "resort" / "dashboard" / "static"
-A, B, C = (124, 92, 255), (179, 107, 255), (255, 106, 162)
+A, B, C = (20, 96, 111), (15, 76, 92), (8, 42, 51)  # ocean teal, as the dashboard logo
 
 
 def mix(p, q, k):
@@ -21,7 +21,7 @@ def pixel(x, y, n):
     bg = mix(A, B, k * 2) if k < 0.5 else mix(B, C, (k - 0.5) * 2)
     cx, cy, r = 0.5, 0.40, 0.17  # the sun
     if math.hypot(u - cx, v - cy) <= r:
-        return (255, 255, 255)
+        return (226, 182, 106)  # sand-gold sun
     wave = 0.64 + 0.035 * math.sin(u * 2 * math.pi * 2.2)  # two soft waves, all inside the maskable safe zone
     for i, alpha in enumerate((1.0, 0.55)):
         if wave + i * 0.09 <= v <= wave + i * 0.09 + 0.045 and 0.2 <= u <= 0.8:

@@ -2,14 +2,17 @@
 {% from "macros.html" import page_head, empty, icon %}
 {% block title %}Properties · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head("Properties", "Resorts and staycations") %}{% if auth.is_owner %}<a class="btn primary" href="{{ BASE }}/properties/new">{{ icon('plus') }} New property</a>{% endif %}{% endcall %}
-<div class="cards">
-{% for p, types in rows %}
-<a class="card prop" href="{{ BASE }}/properties/{{ p.id }}">
-  <h3>{{ p.name }} {% if not p.active %}<span class="pill cancelled">Inactive</span>{% endif %}</h3>
-  <p class="muted">{{ p.city or '—' }}</p>
-  <div class="chips">{% for t in types %}<span class="chip">{{ t.name }} · {{ t.units }}</span>{% else %}<span class="muted">No room types yet</span>{% endfor %}</div>
-  <small class="muted">Advance {{ p.advance_pct }}% · GST {{ p.gst_pct }}%</small>
+{% call page_head("Properties", "Your resorts. Everything here is what the WhatsApp bot offers to guests.") %}{% if auth.is_owner %}<a class="btn primary" href="{{ BASE }}/properties/new">{{ icon('plus') }} New property</a>{% endif %}{% endcall %}
+<div class="prop-grid">
+{% for p, types, cover in rows %}
+<a class="prop-card{{ ' off' if not p.active }}" href="{{ BASE }}/properties/{{ p.id }}">
+  <div class="prop-cover">{% if cover %}<img src="{{ cover }}" alt="" loading="lazy">{% else %}<span class="prop-ph">{{ icon('image') }}<small>Add photos</small></span>{% endif %}
+    <span class="pill {{ 'paid' if p.active else 'cancelled' }}">{{ 'Live on WhatsApp' if p.active else 'Off' }}</span></div>
+  <div class="prop-body">
+    <h3>{{ p.name }}</h3>
+    <p class="muted">{{ p.city or 'Add the town' }}</p>
+    <div class="chips">{% for t in types if t.active %}<span class="chip">{{ t.name }} · {{ t.base_rate|rupees }}</span>{% else %}<span class="muted">No room types yet</span>{% endfor %}</div>
+  </div>
 </a>
 {% else %}{{ empty("No properties yet") }}{% endfor %}
 </div>

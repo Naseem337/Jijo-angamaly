@@ -1,16 +1,28 @@
 {% extends "base.html" %}
-{% from "macros.html" import icon %}
+{% from "macros.html" import icon, logo_mark %}
 {% block title %}Log in · Resort Desk{% endblock %}
 {% block bare %}
-<div class="login-wrap">
-  <form class="login-card" method="post" action="{{ BASE }}/login">
-    <div class="login-logo"><span class="logo">{{ icon('leaf') }}</span></div>
-    <h1>Welcome back</h1>
-    <p class="muted">Sign in to manage your stays and guests.</p>
-    {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
-    <label class="field"><span>Email</span><input type="email" name="email" required autofocus></label>
-    <label class="field"><span>Password</span><input type="password" name="password" required></label>
-    <button class="btn primary block">Log in</button>
-  </form>
+<div class="login-split">
+  <section class="login-hero">
+    <div class="brand-line">{{ logo_mark(44) }}<span>Resort Desk</span></div>
+    <div>
+      <h2>Every stay, every guest, <em>beautifully</em> in one place.</h2>
+      <p>Rooms, season prices, photos and bookings. Whatever you change here, your WhatsApp assistant uses at once.</p>
+    </div>
+    <svg class="waves" viewBox="0 0 600 120" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 60c50-30 100-30 150 0s100 30 150 0 100-30 150 0 100 30 150 0v60H0z" fill="#ffffff" fill-opacity=".25"/>
+      <path d="M0 85c50-25 100-25 150 0s100 25 150 0 100-25 150 0 100 25 150 0v35H0z" fill="#ffffff" fill-opacity=".35"/>
+    </svg>
+  </section>
+  <section class="login-side">
+    <form class="login-card" method="post" action="{{ BASE }}/login">
+      {{ logo_mark(48) }}
+      <div><h1>Welcome back</h1><p class="muted">Sign in to manage your resorts.</p></div>
+      {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+      <label class="field"><span>Email</span><input type="email" name="email" required autofocus autocomplete="username"></label>
+      <label class="field"><span>Password</span><input type="password" name="password" required autocomplete="current-password"></label>
+      <button class="btn primary block">Log in</button>
+    </form>
+  </section>
 </div>
 {% endblock %}

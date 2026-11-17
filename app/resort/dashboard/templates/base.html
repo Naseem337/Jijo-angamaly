@@ -5,24 +5,25 @@
 <script>try{var th=localStorage.getItem("rd-theme");if(th==="dark")document.documentElement.dataset.theme="dark";if(localStorage.getItem("rd-collapsed")==="1")document.documentElement.classList.add("collapsed")}catch(e){}</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
-<meta name="theme-color" content="#171717">
+<meta name="theme-color" content="#0f4c5c">
 <link rel="manifest" href="{{ BASE }}/manifest.webmanifest">
-<link rel="icon" type="image/png" href="{{ BASE }}/static/icon-192.png">
+<link rel="icon" type="image/svg+xml" href="{{ BASE }}/static/logo.svg"><link rel="alternate icon" type="image/png" href="{{ BASE }}/static/icon-192.png">
 <link rel="apple-touch-icon" href="{{ BASE }}/static/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Resort Desk">
 <title>{% block title %}Resort Desk{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&display=swap">
 <link rel="stylesheet" href="{{ BASE }}/static/app.css?v={{ ASSET_V }}">
 <link rel="stylesheet" href="{{ BASE }}/static/frappe.css?v={{ ASSET_V }}">
+<link rel="stylesheet" href="{{ BASE }}/static/premium.css?v={{ ASSET_V }}">
 </head>
 <body>
-{% from "macros.html" import icon %}
+{% from "macros.html" import icon, logo_mark %}
 {% if user %}
 <div class="shell">
   <aside class="sidebar" id="sidebar">
-    <a class="brand" href="{{ BASE }}/"><span class="logo">{{ icon('leaf') }}</span><span>Resort Desk</span></a>
+    <a class="brand" href="{{ BASE }}/">{{ logo_mark(34) }}<span>Resort Desk<small>Stays &amp; guests</small></span></a>
     <div class="scope">
       <label for="scope">Property</label>
       <select id="scope" data-scope="{{ cur_prop }}">

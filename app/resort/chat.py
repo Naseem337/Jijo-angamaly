@@ -162,6 +162,7 @@ class _Turn:
     after: list[str] = field(default_factory=list)  # fixed messages sent after the AI's line (form, glimpse, ask name)
     resend: bool = False  # the guest asked for their payment link again
     silent: bool = False  # a fixed step message replaces the AI's own line this turn
+    photos: list[str] = field(default_factory=list)  # uploaded photo references to send after the reply
 
 
 LANGUAGE_FIELD = {"type": "string", "enum": list(STYLES),
@@ -176,10 +177,19 @@ TOOLS = [
         "owner's question 'Sure, Kindly confirm the Location' with the towns. Your reply must then be exactly [no reply].",
         {"type": "object", "properties": {}}),
     ToolSpec(
+        "send_photos",
+        "Send the guest photos of a resort (or of one room type) that the owner uploaded. ONLY when the guest's "
+        "message itself asks for photos, pictures, pics or images. Never for a town or resort name alone. The "
+        "photos are sent automatically after your reply; reply exactly [no reply].",
+        {"type": "object", "properties": {
+            "place": {"type": "string", "description": "the resort or town"},
+            "room_type": {"type": "string", "description": "only if they asked to see one room type"}},
+         "required": ["place"]}),
+    ToolSpec(
         "ask_stay_details",
         "Send the guest the booking form (Check in / Check out / Number of persons) for the resort they chose. Use it "
-        "once the resort is known and the guest has not yet given their dates and number of persons. The form is "
-        "sent automatically; your reply must then be exactly [no reply].",
+        "once the resort is known and the guest has NOT yet given their dates and number of persons. If they already "
+        "gave them, call check_availability instead. The form is sent automatically; reply exactly [no reply].",
         {"type": "object", "properties": {"place": {"type": "string", "description": "the resort the guest chose"}},
          "required": ["place"]}),
     ToolSpec(
@@ -276,6 +286,65 @@ class ChatMixin:
             if town and town.lower() not in (x.lower() for x in towns):
                 towns.append(town)
         return towns
+
+    def _tool_photos(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        """Up to 4 of the owner's photos (room type first if asked, else the property's), never one already sent."""
+        prop = self._find_property(a.get("place", ""))
+        if prop is None:
+            return {"error": "unknown place", "places": [self._place_label(p) for p in self._places()]}
+        rooms = self.repo.list_room_types(prop.id)
+        wanted = str(a.get("room_type") or "").lower().strip()
+        room = next((rt for rt in rooms if wanted and (wanted in rt.name.lower() or rt.name.lower() in wanted)), None)
+        refs = list(room.photo_urls) if room else []
+        refs += list(prop.photo_urls) + [rt.photo_urls[0] for rt in rooms if rt.photo_urls and rt is not room]
+        rows = self.repo.list_chat(ctx.phone, limit=80)
+        sent = {m.text[len("[photo] "):] for m in rows[self._session_start(rows):]
+                if m.direction == "out" and m.text.startswith("[photo] ")}
+        fresh = [r for r in dict.fromkeys(refs) if r not in sent][:4]
+        if not fresh:
+            numbers = ", ".join(display_phone(n) for n in prop.contact_numbers) or "the owner"
+            return {"error": ("all photos were already sent" if refs else "no photos uploaded yet") +
+                    f"; say so in one short line and that the owner can share more on {numbers}"}
+        ctx.photos = fresh
+        return {"ok": True, "sending": len(fresh), "note": "the photos are sent automatically; reply exactly [no reply]"}
+
+    def _send_photos(self, phone: str, refs: list[str], caption: str = "") -> int:
+        from app.resort import photos as ph
+        sent = 0
+        for ref in refs:
+            path = ph.local_path(ref)
+            if path is None:
+                continue
+            try:
+                media_id = self.wa.upload_media(path.read_bytes(), ph.mime_of(path), path.name)
+                self.wa.send_image(phone, media_id, caption if not sent else "")
+            except Exception as exc:  # one bad photo must not stop the chat
+                log.warning("Photo send failed: %s", exc)
+                continue
+            self._log(phone, f"[photo] {ref}")
+            sent += 1
+        return sent
+
+    def _named_place(self, text: str) -> Property | None:
+        """An open resort the guest named by town or name ('Alleppey', 'pozhiyoram', 'Vagamon please'), else None."""
+        words = {w for w in re.findall(r"[a-z]{4,}", text.lower())}
+        hits = []
+        for p in self._places():
+            names = set(re.findall(r"[a-z]{4,}", f"{p.name} {p.city} {p.place}".lower())) - {"resort", "kerala", "vibes"}
+            if words & names:
+                hits.append(p)
+        return hits[0] if len(hits) == 1 else None
+
+    def _location_answer(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """The guest answered our location question with just a place: send the form at once (no AI guesswork)."""
+        if "Kindly confirm the Location" not in (self.repo.last_outbound_text(phone) or ""):
+            return None
+        if len(text.split()) > 4 or (prop := self._named_place(text)) is None:
+            return None
+        st["form_place"] = prop.id
+        self._save(phone, st)
+        self._text(phone, t("form", st.get("lang", "en")))
+        return "form"
 
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         ctx.after.append(t("ask_location", ctx.st.get("lang", "en"), towns=" or ".join(self._towns())))
@@ -458,6 +527,7 @@ class ChatMixin:
             "confirm?'). The enquiry summary and the payment link are sent automatically: reply [no reply]. Never "
             "write the summary, the link, the advance amount or a percent yourself. If they say 'this number', "
             "pass mobile 'same'.\n"
+            "- Photos: when the guest asks for photos or to see the place or a room, call send_photos.\n"
             "- Early check-in: only if the guest asks. Tell them the time and charge from the FACTS and pass "
             "early_checkin true to create_booking if they want it.\n"
             "- Never ask the same thing twice.\n"
@@ -516,7 +586,15 @@ class ChatMixin:
             "- Warm and easy: one or two short lines, no forms, no jargon.\n"
             "- Never address them by name.\n\n"
             "FACTS\n" + self._facts() + "\n\n" + self._guest_memory(phone, fresh) + "\n\n"
-            + self._language_note(st, text))
+            + self._chosen_note(st) + self._language_note(st, text))
+
+    def _chosen_note(self, st: dict[str, Any]) -> str:
+        """The resort the guest already picked (the form was sent for it): the AI must not ask again."""
+        prop = self.repo.get_property(st["form_place"]) if st.get("form_place") else None
+        if prop is None:
+            return ""
+        return (f"CHOSEN RESORT: the guest picked {self._place_label(prop)} and got the booking form. When they "
+                "give dates and persons, call check_availability for it right away; never send the form again.\n\n")
 
     # ------------------------------------------------------------------ the conversation
 
@@ -656,7 +734,7 @@ class ChatMixin:
         self._save(phone, st)
         if ctx.handed_off:
             return "handoff"
-        queued = bool(ctx.after or ctx.summary_message or ctx.pay_message)
+        queued = bool(ctx.after or ctx.summary_message or ctx.pay_message or ctx.photos)
         quiet = NO_REPLY in reply.lower()
         if quiet and not queued and GREETING.match(text):  # a mid-chat "hi" always gets an answer
             reply, quiet = t("greet_again", st.get("lang", "en")), False
@@ -674,6 +752,8 @@ class ChatMixin:
             guest = self.repo.get_guest(phone)
             clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
             self._text(phone, self._ease_sir(phone, clean))
+        if ctx.photos:
+            self._send_photos(phone, ctx.photos)
         asked = {t("ask_contact", lang) for lang in ("en", "mn")}
         for message in ctx.after:
             if ctx.summary_message and message in asked:  # they already gave name and mobile in this turn
@@ -692,6 +772,7 @@ class ChatMixin:
 
     def _run_tool(self, ctx: _Turn, call: ToolCall) -> tuple[str, bool]:
         handlers = {"ask_location": self._tool_location, "ask_stay_details": self._tool_form,
+                    "send_photos": self._tool_photos,
                     "check_availability": self._tool_check, "prepare_booking": self._tool_prepare,
                     "create_booking": self._tool_create, "my_bookings": self._tool_bookings,
                     "send_payment_link": self._tool_resend, "recall_old_chat": self._tool_recall}

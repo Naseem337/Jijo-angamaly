@@ -46,10 +46,11 @@ def room_options(rt: RoomType, adults: int, children: int, available_units: int)
 
 
 def night_rate(rt: RoomType, rules: list[RateRule], night: date) -> int:
-    """Rate for one night of one room: season rule > weekend rate > base rate."""
-    for rule in rules:
-        if rule.start <= night <= rule.end:
-            return rule.rate
+    """Rate for one night of one room: season rule > weekend rate > base rate. When season prices overlap, the
+    shortest date range wins (a 2-day festival inside a 3-week season), and the one added last breaks a tie."""
+    matching = [(rule.end - rule.start, -i, rule) for i, rule in enumerate(rules) if rule.start <= night <= rule.end]
+    if matching:
+        return min(matching, key=lambda m: (m[0], m[1]))[2].rate
     if rt.weekend_rate is not None and night.weekday() in (4, 5):  # Fri, Sat
         return rt.weekend_rate
     return rt.base_rate
