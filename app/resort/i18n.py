@@ -37,7 +37,7 @@ S: dict[str, dict[str, str]] = {
     "greet": _t("Hi, How can I assist you?", "Hi, How can I assist you?", "Hi, How can I assist you?",
                 "Hi, How can I assist you?"),
     "or": _t("or", "അല്ലെങ്കിൽ", "அல்லது", "या"),
-    "pay": _t('Please complete the payment of ₹{advance} within {minutes} minutes to confirm your booking. UPI (GPay, PhonePe, Paytm), cards and net banking all work:\n{url}\n\nBooking ID: {id}',
+    "pay": _t('Please complete the payment of ₹{advance} in {minutes} minutes to confirm your booking (UPI, card or net banking):\n{url}\n\nBooking ID: {id}',
                 'ബുക്കിംഗ് ഉറപ്പിക്കാൻ {minutes} മിനിറ്റിനുള്ളിൽ ₹{advance} പേയ്മെന്റ് പൂർത്തിയാക്കൂ. UPI (GPay, PhonePe, Paytm), കാർഡ്, നെറ്റ് ബാങ്കിംഗ് എല്ലാം ഉപയോഗിക്കാം:\n{url}\n\nബുക്കിംഗ് ID: {id}',
                 'முன்பதிவை உறுதிசெய்ய {minutes} நிமிடங்களுக்குள் ₹{advance} கட்டணத்தை முடிக்கவும். UPI (GPay, PhonePe, Paytm), கார்டு, நெட் பேங்கிங் அனைத்தும் பயன்படுத்தலாம்:\n{url}\n\nமுன்பதிவு ID: {id}',
                 'बुकिंग कन्फर्म करने के लिए {minutes} मिनट में ₹{advance} का पेमेंट पूरा करें। UPI (GPay, PhonePe, Paytm), कार्ड और नेट बैंकिंग सब चलेगा:\n{url}\n\nबुकिंग ID: {id}'),
@@ -102,15 +102,15 @@ S: dict[str, dict[str, str]] = {
 
 # ---- ID proof after payment, reminder, and feedback after checkout
 S.update({
-    "id_body_first": _t('Thank you! For check-in we need an ID proof (Aadhaar, passport, driving licence or voter ID) of every adult guest, as required by law. It is stored securely and deleted {days} days after your stay.\n\nPlease send a clear photo of the ID of guest {n} of {m} here. If you prefer to show it at check-in, just say so.',
+    "id_body_first": _t('Thank you! Please send a photo of an ID proof (Aadhaar, passport, licence or voter ID) of guest {n} of {m}. It is needed by law and deleted {days} days after your stay.\n\nOr just show it at check-in.',
                 'നന്ദി! ചെക്ക്-ഇന്നിന് എല്ലാ മുതിർന്ന അതിഥികളുടെയും ഐഡി തെളിവ് (ആധാർ, പാസ്പോർട്ട്, ഡ്രൈവിംഗ് ലൈസൻസ് അല്ലെങ്കിൽ വോട്ടർ ഐഡി) വേണം, നിയമപ്രകാരം ആവശ്യമാണ്. ഇത് സുരക്ഷിതമായി സൂക്ഷിക്കുകയും താമസം കഴിഞ്ഞ് {days} ദിവസത്തിനുശേഷം നീക്കം ചെയ്യുകയും ചെയ്യും.\n\nഅതിഥി {n}/{m}-ന്റെ ഐഡിയുടെ വ്യക്തമായ ഫോട്ടോ ഇവിടെ അയക്കൂ. ചെക്ക്-ഇന്നിൽ കാണിക്കാനാണെങ്കിൽ അങ്ങനെ പറഞ്ഞാൽ മതി.',
                 'நன்றி! செக்-இன் செய்ய ஒவ்வொரு பெரியவருக்கும் அடையாள அட்டை (ஆதார், பாஸ்போர்ட், ஓட்டுநர் உரிமம் அல்லது வாக்காளர் அட்டை) தேவை, சட்டப்படி கட்டாயம். இது பாதுகாப்பாக வைக்கப்பட்டு, தங்கிய {days} நாட்களுக்குப் பிறகு நீக்கப்படும்.\n\nவிருந்தினர் {n}/{m} அவர்களின் அட்டையின் தெளிவான புகைப்படத்தை இங்கே அனுப்புங்கள். செக்-இனில் காட்ட விரும்பினால் அப்படிச் சொல்லுங்கள்.',
                 'धन्यवाद! चेक-इन के लिए हर वयस्क मेहमान का आईडी प्रूफ़ (आधार, पासपोर्ट, ड्राइविंग लाइसेंस या वोटर आईडी) चाहिए, यह कानूनन ज़रूरी है। इसे सुरक्षित रखा जाता है और ठहरने के {days} दिन बाद हटा दिया जाता है।\n\nमेहमान {n}/{m} की आईडी की साफ़ फ़ोटो यहाँ भेजें। चेक-इन पर दिखाना चाहें तो बस बता दें।'),
-    "id_body_next": _t('Received, thank you! Please send the ID photo of guest {n} of {m} too, or tell me if the rest will show theirs at check-in.',
+    "id_body_next": _t('Got it, thanks! Now the ID photo of guest {n} of {m}, or say if the rest will show it at check-in.',
                 'ലഭിച്ചു, നന്ദി! അതിഥി {n}/{m}-ന്റെ ഐഡി ഫോട്ടോയും അയക്കൂ, അല്ലെങ്കിൽ ബാക്കിയുള്ളവർ ചെക്ക്-ഇന്നിൽ കാണിക്കുമെന്ന് പറയൂ.',
                 'கிடைத்தது, நன்றி! விருந்தினர் {n}/{m} அவர்களின் அட்டை புகைப்படத்தையும் அனுப்புங்கள், அல்லது மீதிப்பேர் செக்-இனில் காட்டுவார்கள் எனச் சொல்லுங்கள்.',
                 'मिल गया, धन्यवाद! मेहमान {n}/{m} की आईडी फ़ोटो भी भेजें, या बता दें कि बाकी लोग चेक-इन पर दिखाएँगे।'),
-    "id_photo_bad": _t('Sorry, I can only accept a photo (JPG or PNG) of the ID. Please send it as a photo, or tell me you will show it at check-in.',
+    "id_photo_bad": _t('Sorry, please send the ID as a photo (JPG or PNG), or show it at check-in.',
                 'ക്ഷമിക്കണം, ഐഡിയുടെ ഫോട്ടോ (JPG അല്ലെങ്കിൽ PNG) മാത്രമേ സ്വീകരിക്കൂ. ഫോട്ടോ ആയി അയക്കൂ, അല്ലെങ്കിൽ ചെക്ക്-ഇന്നിൽ കാണിക്കുമെന്ന് പറയൂ.',
                 'மன்னிக்கவும், அட்டையின் புகைப்படம் (JPG அல்லது PNG) மட்டுமே ஏற்கப்படும். புகைப்படமாக அனுப்புங்கள், அல்லது செக்-இனில் காட்டுவேன் எனச் சொல்லுங்கள்.',
                 'क्षमा करें, मैं आईडी की फ़ोटो (JPG या PNG) ही ले सकता हूँ। कृपया फ़ोटो के रूप में भेजें, या बताएँ कि चेक-इन पर दिखाएँगे।'),
@@ -151,8 +151,8 @@ S.update({
 MN = {
     "discount": "Nalla vaartha: owner ningalkku special price tharunnu. Puthiya total ₹{total}, ippol pay cheyyenda advance ₹{advance}.",
     "or": "allenkil",
-    "pay": "Booking confirm cheyyaan {minutes} minute-nullil ₹{advance} payment complete cheyyuka. "
-           "UPI (GPay, PhonePe, Paytm), card, net banking ellaam use cheyyam:\n{url}\n\nBooking ID: {id}",
+    "pay": "Booking confirm aakaan {minutes} minute-nullil ₹{advance} payment complete cheyyuka (UPI, card, net banking):\n{url}\n\n"
+           "Booking ID: {id}",
     "paid": "Payment kitti. Ningalude booking {id} confirmed aayi!\n{property}\n{check_in} to {check_out}, {rooms} room.\n"
             "Check-in {checkin_time} muthal. Ningale kaanaan kaathirikkunnu.",
     "failed": "Payment nadannilla ennu thonnunnu. Onnu koodi try cheyyuka:",
@@ -163,9 +163,8 @@ MN = {
     "voice_problem": "Kshamikkanam, aa voice note manasilaayilla. Type cheyyamo?",
     "unsupported": "Enikku text-um voice note-um maathrame vaayikkaan pattooo. Message type cheyyuka.",
     "map_line": "Location: {url}",
-    "id_body_first": "Thanks! Check-in-nu ellaa adult guests-inteyum ID proof (Aadhaar, passport, driving licence allenkil voter ID) venam, "
-                     "niyamaprakaaram aavashyamaanu. Ath surakshithamaayi sookshikkum, stay kazhinju {days} divasam kazhiyumbol delete cheyyum.\n\n"
-                     "Guest {n}/{m}-nte ID-yude clear photo ivide ayakkuka. Check-in-nu kaanikkaanenkil athu paranjaal mathi.",
+    "id_body_first": "Thanks! Guest {n}/{m}-nte ID photo (Aadhaar, passport, licence allenkil voter ID) ayakkuka. Niyamam "
+                     "aanu, stay kazhinju {days} divasathil delete cheyyum.\n\nAllenkil check-in-nu kaanichaal mathi.",
     "id_body_next": "Kitti, thanks! Guest {n}/{m}-nte ID photo koodi ayakkuka, allenkil bakkiyullavar check-in-nu kaanikkum ennu paranjaal mathi.",
     "id_later_ok": "Sheri, check-in-nu ID kaanichaal mathi.",
     "id_done": "Ellaam ready, thanks! Ningale kaanaan kaathirikkunnu.",

@@ -17,7 +17,9 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
   (names come from all properties, open or not). Vibes Kanthalloor has no online booking until its data is entered: if the
   guest picks it, the bot gives the owner's numbers in one line.
 - **No essays (client, 2026-11-17):** answer only what was asked, usually one short line, at most 2-3. Asked about rooms:
-  room types in short lines, then ask the dates. Code guard: more than 40 words outside room/price lines, list items and
+  room types in short lines, then ask the dates. **Very simple (client, 2026-11-17):** easy everyday words, short
+  sentences, no formal or sales phrases ("kindly", "nestled", "serene"); room lines like "Deluxe - ₹price/night"; the
+  fixed payment and ID messages were shortened too. Code guard: more than 30 words outside room/price lines, list items and
   links (`chatty_words`, `MAX_CHAT_WORDS` in chat.py) gets one "much shorter" rewrite.
 - Ask in order: check-in date (or nights), number of persons, number of rooms. Never assume persons, rooms or nights.
 - Quote by the guest's dates. If several room types are free, list each on its own line with its price and let them choose.

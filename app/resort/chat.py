@@ -86,7 +86,7 @@ def latin_style(text: str, previous: str = "en") -> str:
 
 
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
-MAX_CHAT_WORDS = 40
+MAX_CHAT_WORDS = 30  # "very simple" (client, 2026-11-17)
 _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s", re.IGNORECASE)
 
 
@@ -374,6 +374,9 @@ class ChatMixin:
             "where you left off in one short line (for example the next thing you still need). Never ask again what "
             "they already told you.\n"
             "- Always polite, concise and to the point.\n"
+            "- VERY SIMPLE: easy everyday words a school child understands, short sentences, no fancy or formal "
+            "phrases ('kindly', 'we would be delighted', 'nestled', 'serene'), no sales talk. Example: guest 'rooms "
+            "available?' -> 'Yes sir. Which dates?'. Room lines look like 'Deluxe - <price from the tool>/night'.\n"
             "- Reply only when it is necessary: a question, a request, a booking detail, a payment problem, a complaint, "
             "or an answer to something you asked. For anything else send no reply at all, answer with exactly "
             "[no reply]: 'ok', 'thanks', a thumbs up, compliments, jokes, 'will tell my family', 'let me check and "
@@ -518,7 +521,8 @@ class ChatMixin:
             return ("Rewrite that reply without saying there is no offer or discount and without saying you cannot "
                     "reduce anything: the guest only asked. Just give the price for their dates, or ask for the dates.")
         if chatty_words(reply) > MAX_CHAT_WORDS:
-            return ("Too long. Rewrite it much shorter: answer only what the guest asked, in one or two short lines. "
+            return ("Too long. Rewrite it much shorter and simpler: answer only what the guest asked, in one or two "
+                    "short lines of easy words. "
                     "Keep any room lines with prices as they are.")
         return ""
 
