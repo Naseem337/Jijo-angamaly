@@ -92,6 +92,12 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Premium look: `static/premium.css` (ocean teal + sand gold, Fraunces headings), sun-and-waves logo (`logo.svg`,
   `logo_mark` macro, regenerated PWA icons via scripts/make_pwa_icons.py).
 
+## "sir" once, spelling mistakes (client, 2026-11-17)
+- "sir" (or "madam") at most ONCE per conversation. After that it is removed from every reply in code (`_ease_sir`):
+  'Yes sir.' -> 'Yes.', 'Hi sir, how' -> 'Hi, how'. A new conversation (6 h gap) may say it once again.
+- Misspelt places are understood (`close_word`, `PLACE_ALIASES`): allepy / aleppey / alappuzha = Alleppey,
+  kanthaloor = Kanthalloor, poziyoram = Pozhiyoram. The bot carries on and never corrects the spelling.
+
 ## After the form (client, 2026-11-17, replaces the photo timing below)
 - check_availability sends, in this order and once per set of dates: "Yes, rooms are available for your dates."
   (or "Sorry, rooms are not available for your dates.") -> the glimpse ({price}, {room} = the offered room) -> the

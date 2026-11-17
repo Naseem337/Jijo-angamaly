@@ -14,6 +14,7 @@ Per-guest state in repo.get_state(phone):
 
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import re
@@ -89,11 +90,26 @@ def latin_style(text: str, previous: str = "en") -> str:
 
 
 MAX_GENERAL_PHOTOS = 6  # general photos sent automatically after the glimpse
+SIR = re.compile(r"\b(sir|madam)\b", re.IGNORECASE)
 MAX_ROOM_PHOTOS = 6  # photos of the offered room type, sent right after the general photos
 
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
 MAX_CHAT_WORDS = 30  # "very simple" (client, 2026-11-17)
 _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s", re.IGNORECASE)
+
+
+# Other names guests use for a town (small spelling mistakes are caught by close_word).
+PLACE_ALIASES = {"alleppey": ("alappuzha", "alapuzha"), "alappuzha": ("alleppey",)}
+
+
+def close_word(said: str, name: str) -> bool:
+    """'allepy' ~ 'alleppey', 'kanthaloor' ~ 'kanthalloor', 'pozhiyorum' ~ 'pozhiyoram': the same word give or take a
+    letter or two (client, 2026-11-17). Short words must match exactly, so 'room' is never taken for a place."""
+    if said == name:
+        return True
+    if min(len(said), len(name)) < 5 or said[0] != name[0]:
+        return False
+    return difflib.SequenceMatcher(None, said, name).ratio() >= 0.75
 
 
 def chatty_words(reply: str) -> int:
@@ -338,14 +354,16 @@ class ChatMixin:
             sent += 1
         return sent
 
+    @staticmethod
+    def _place_words(p: Property) -> set[str]:
+        names = set(re.findall(r"[a-z]{4,}", f"{p.name} {p.city} {p.place}".lower())) - {"resort", "kerala", "vibes"}
+        return names | {alias for n in names for alias in PLACE_ALIASES.get(n, ())}
+
     def _named_place(self, text: str) -> Property | None:
-        """An open resort the guest named by town or name ('Alleppey', 'pozhiyoram', 'Vagamon please'), else None."""
-        words = {w for w in re.findall(r"[a-z]{4,}", text.lower())}
-        hits = []
-        for p in self._places():
-            names = set(re.findall(r"[a-z]{4,}", f"{p.name} {p.city} {p.place}".lower())) - {"resort", "kerala", "vibes"}
-            if words & names:
-                hits.append(p)
+        """An open resort the guest named by town or name, spelling mistakes and all ('Alleppey', 'allepy', 'aleppey',
+        'Alappuzha', 'pozhiyoram', 'kanthaloor'), else None (client, 2026-11-17)."""
+        words = set(re.findall(r"[a-z]{4,}", text.lower()))
+        hits = [p for p in self._places() if any(close_word(w, n) for w in words for n in self._place_words(p))]
         return hits[0] if len(hits) == 1 else None
 
     def _location_answer(self, phone: str, st: dict[str, Any], text: str) -> str | None:
@@ -471,7 +489,7 @@ class ChatMixin:
             "'room undo', 'evide', 'ethra aaya') is Manglish: answer in Manglish, in English letters only, NEVER in "
             "Malayalam script. Malayalam script gets Manglish too. English gets English. Never mix languages or "
             "languages in one reply; plain English words like room, booking, check-in, payment and price are fine "
-            "inside Manglish. Example: guest 'Alleppey il room undo' -> 'Und sir, Alleppey il rooms und. Ethra "
+            "inside Manglish. Example: guest 'Alleppey il room undo' -> 'Und, Alleppey il rooms und. Ethra "
             "aalkkaar und, ethra divasam?'\n"
             "- Hindi typed in English letters ('kitne log', 'room milega', 'theek hai') is Hinglish: answer in Hinglish "
             "(Hindi in English letters), NEVER in Malayalam or Manglish. Tamil in English letters ('irukka', 'venum') "
@@ -490,7 +508,7 @@ class ChatMixin:
             "from a real person.\n"
             "- Asked about rooms? Answer in one short line and ask their dates in a few words. Asked the "
             "location? Send the Maps link with a few words. Asked a yes/no question? Start with yes or no.\n"
-            "- Call the guest \"sir\", now and then and never in every message (\"madam\" only if they are clearly a woman). "
+            "- Say \"sir\" at most ONCE in the whole chat (\"madam\" only if they are clearly a woman), never again after that. "
             "Never bro, dear, da, chetta, chechi, machane or their name.\n"
             "- Each room type on its own line when you list prices. Never one long paragraph.\n"
             "- Ask only ONE thing at a time. No lists of options, no emoji piles (one is fine).\n"
@@ -499,7 +517,7 @@ class ChatMixin:
             "- Never repeat details the guest already gave, except in the final summary.\n"
             "- A 'hi' or 'hello' in the middle of a chat is NOT a new start and always gets a reply (never [no reply]): "
             "use the chat so far and carry on from where you left off in one short line (for example the next thing "
-            "you still need, or 'Hi sir, how can I help?'). Never ask again what they already told you.\n"
+            "you still need, or 'Hi, how can I help?'). Never ask again what they already told you.\n"
             "- Always polite, concise and to the point.\n"
             "- Talk ONLY about our resorts: rooms, prices, dates, bookings, payment, the stay, location and facilities. "
             "For anything else (general questions, other places, news, jokes, coding, personal chat) say politely in "
@@ -508,7 +526,7 @@ class ChatMixin:
             "THAT message.\n"
             "- VERY SIMPLE: easy everyday words a school child understands, short sentences, no fancy or formal "
             "phrases ('kindly', 'we would be delighted', 'nestled', 'serene'), no sales talk. Example: guest 'rooms "
-            "available?' -> 'Yes sir. Which dates?'. Room lines look like 'Deluxe - <price from the tool>/night'.\n"
+            "available?' -> 'Yes. Which dates?'. Room lines look like 'Deluxe - <price from the tool>/night'.\n"
             "- Reply only when it is necessary: a question, a request, a booking detail, a payment problem, a complaint, "
             "or an answer to something you asked. For anything else send no reply at all, answer with exactly "
             "[no reply]: 'ok', 'thanks', a thumbs up, compliments, jokes, 'will tell my family', 'let me check and "
@@ -523,7 +541,9 @@ class ChatMixin:
             "BOOKING, in this order, skipping what the guest already told you\n"
             "1. Which location. When the guest wants a resort, a booking or rooms and has not said where, call "
             f"ask_location (it asks: {' or '.join(self._towns())}) and reply [no reply]. A town or resort name "
-            f"means that resort ({'; '.join(self._resort_names())}).\n"
+            f"means that resort ({'; '.join(self._resort_names())}). Guests often misspell names (allepy, aleppey, "
+            "alappuzha, kanthaloor, poziyoram): a close spelling IS that place. Carry on; never correct their spelling "
+            "or ask which place they meant.\n"
             "2. As soon as the resort is known and the guest has not given their dates and persons, call "
             "ask_stay_details: it sends the form (Check in / Check out / Number of persons). Reply [no reply]. If they "
             "gave only part of it, ask just the missing part in a few words. If a date has no year, use the next time "
@@ -654,7 +674,7 @@ class ChatMixin:
         if present:
             want = {"ml": "Manglish", "ta": "Tanglish", "hi": "Hinglish"}.get(own, "Manglish, Tanglish, Hinglish or English, the guest's own language")
             return f"Rewrite that reply using only English letters ({want}). Do not use Malayalam, Tamil or Hindi script."
-        if st.get("style") == "en" and (MANGLISH_WORDS.search(reply) or re.search(r"(?:milega|chahiye|nahi|kitne|theek|aap|mujhe)", reply, re.I)):
+        if st.get("style") == "en" and (MANGLISH_WORDS.search(reply) or re.search(r"\b(?:milega|chahiye|nahi|kitne|theek|aap|mujhe)\b", reply, re.I)):
             return "Rewrite that reply in plain English only. The guest's latest message is in English."
         talk = "\n".join(line for line in reply.splitlines() if not _LIST_LINE.search(line))
         if st.get("style") == "en" and _classify_latin(_words(talk))[1]:  # Manglish words the short list misses
@@ -693,13 +713,15 @@ class ChatMixin:
         return fixed if fixed and not self._reply_problem(fixed, guest_text, st) else reply
 
     def _ease_sir(self, phone: str, reply: str) -> str:
-        """'sir' now and then: when our last message already had it, drop a leading or trailing one."""
-        previous = self.repo.last_outbound_text(phone) or ""
-        if not re.search(r"\b(sir|madam)\b", previous, re.IGNORECASE):
+        """'sir' only ONCE per conversation (client, 2026-11-17): once any of our messages in this conversation said
+        sir or madam, every later one is sent without it ('Yes sir.' -> 'Yes.', 'Hi sir, how' -> 'Hi, how')."""
+        rows = self.repo.list_chat(phone, limit=120)
+        said = any(m.direction == "out" and SIR.search(m.text) for m in rows[self._session_start(rows):])
+        if not said or not SIR.search(reply):
             return reply
-        eased = re.sub(r"^\s*(sir|madam)[,.]?\s+", "", reply, flags=re.IGNORECASE)
-        eased = re.sub(r",?\s*\b(sir|madam)\b(?=[.!?]?\s*$)", "", eased, flags=re.IGNORECASE)
-        return eased[:1].upper() + eased[1:] if eased != reply and eased else reply
+        eased = re.sub(r"^\s*(sir|madam)\b[,.!]?\s*", "", reply, flags=re.IGNORECASE)
+        eased = re.sub(r"\s*,?\s*\b(sir|madam)\b", "", eased, flags=re.IGNORECASE).strip()
+        return eased[:1].upper() + eased[1:] if eased else reply
 
     def _converse(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0,
                   images: list[tuple[str, str]] | None = None) -> str:
@@ -817,8 +839,8 @@ class ChatMixin:
         query = re.sub(r"[^a-z0-9 ]", " ", (place or "").lower())
         best, best_score = None, 0
         for p in props:
-            words = set(re.findall(r"[a-z0-9]{4,}", f"{p.name} {p.city} {p.place}".lower()))
-            score = sum(1 for w in words if w[:5] in query)
+            said = set(re.findall(r"[a-z]{4,}", query))
+            score = sum(1 for w in self._place_words(p) if w[:5] in query or any(close_word(x, w) for x in said))
             if score > best_score:
                 best, best_score = p, score
         return best

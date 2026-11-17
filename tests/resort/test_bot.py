@@ -258,6 +258,16 @@ def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then
     assert logged == general[:6] + room  # the first 6 general photos in the owner's order, then the room's own
 
 
+@pytest.mark.parametrize("answer, place", [("allepy", "p1"), ("Aleppey pls", "p1"), ("alappuzha", "p1"),
+                                           ("kanthaloor", "p2"), ("poziyoram", "p1")])
+def test_a_misspelt_place_is_understood_and_the_form_follows(world, answer, place):
+    w = world
+    say(w, "I need a resort", GUEST, tool("ask_location"), reply("[no reply]"))
+    assert say(w, answer) == "form"
+    assert w.repo.get_state(GUEST)["form_place"] == getattr(w, place).id
+    assert w.wa.texts()[-1].startswith("Please share these details")
+
+
 def test_no_rooms_for_the_dates_is_said_plainly(world):
     w = world
     for rt in w.repo.list_room_types(w.p1.id):
@@ -302,7 +312,7 @@ def test_a_mid_chat_hi_is_never_left_unanswered(world):
     w = world
     say(w, "room und?", GUEST, reply("Which dates, sir?"))
     assert say(w, "hi", GUEST, reply("[no reply]")) == "answered"
-    assert w.wa.texts()[-1] == "Hi sir, how can I help you further?"
+    assert w.wa.texts()[-1] == "Hi, how can I help you further?"  # 'sir' was already said once
 
 
 def test_no_message_is_ever_sent_twice_in_a_conversation(world):
@@ -1173,7 +1183,7 @@ def test_the_prompt_says_sir_and_treats_an_offers_question_as_a_plain_question(w
     w = world
     say(w, "offer undo?", GUEST, reply("Which dates, sir?"))
     system = w.llm.calls[0].system
-    assert 'Call the guest "sir"' in system and "Never bro" in system and "Und sir," in system and "Und bro" not in system
+    assert 'Say "sir" at most ONCE' in system and "Never bro" in system and "Und bro" not in system
     assert "Asking about offers, deals or the price is only a question, NOT a request to reduce" in system
     assert "Never say there is no offer, never say you cannot reduce" in system
     assert "Only when the guest asks for a lower price" in system
@@ -1339,12 +1349,14 @@ def test_a_plain_offers_question_never_gets_a_no_offer_answer(world):
     assert "convince the guest" in w.llm.calls[3].messages[-1].content
 
 
-def test_sir_is_used_now_and_then_not_in_every_message(world):
+def test_sir_is_said_only_once_in_a_conversation(world):
     w = world
     say(w, "alleppey und?", GUEST, reply("Sir, und. Ethra divasam?"))
     say(w, "2 divasam", GUEST, reply("Sir, ethra per?"))
-    say(w, "2 per", GUEST, reply("Sheri, 2 per. Ok sir."))
-    assert w.wa.texts() == ["Sir, und. Ethra divasam?", "Ethra per?", "Sheri, 2 per. Ok sir."]  # every other message
+    say(w, "2 per", GUEST, reply("Sheri sir, 2 per. Ok sir."))
+    say(w, "price?", GUEST, reply("It is Rs 4,000 a night. Thank you sir!"))
+    assert w.wa.texts() == ["Sir, und. Ethra divasam?", "Ethra per?", "Sheri, 2 per. Ok.",
+                            "It is Rs 4,000 a night. Thank you!"]  # client, 2026-11-17: sir once only
 
 
 def test_the_guest_is_never_called_by_name_in_any_script():
