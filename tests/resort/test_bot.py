@@ -184,8 +184,10 @@ def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
     w = world
     assert say(w, "hi") == "greeting"
     say(w, "need a room in Pozhiyoram", GUEST, reply("Sure. Which dates?"))
+    form = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
+    assert w.wa.texts()[-1] == form  # never the AI's own 'Which dates?' (client, 2026-11-18)
     assert say(w, "hi", GUEST, reply("Which dates would you like?")) == "answered"
-    assert w.wa.texts()[-1] == "Which dates would you like?"
+    assert w.wa.texts()[-2:] == [form, form]  # the form again: what is still needed, in the owner's format
     assert any("need a room in Pozhiyoram" in m.content for m in w.llm.calls[-1].messages)  # it saw the chat so far
 
 
@@ -201,23 +203,23 @@ def test_english_with_place_and_room_words_stays_english():
 def test_a_swipe_reply_tells_the_ai_which_message_the_guest_answers(world):
     w = world
     w.wa.send_text = lambda to, text: (w.wa.sent.append((to, "text", text)), f"wamid.out{len(w.wa.sent)}")[1]
-    say(w, "need a room in Pozhiyoram", GUEST, reply("Sure. Which dates?"))
+    say(w, "is Pozhiyoram near the beach", GUEST, reply("Yes, right on the beach."))
     quoted = f"wamid.out{len(w.wa.sent)}"
-    say(w, "need a room in Pozhiyoram for 2", GUEST, reply("For how many nights?"))
-    w.llm.script.append(reply("Got it, 20 Dec."))
-    m = InboundMessage("wamid.swipe1", GUEST, "text", datetime(2026, 11, 2, 4, 31), text="20 Dec", context_id=quoted)
+    say(w, "pool undo", GUEST, reply("No pool, but the sea is right there."))
+    w.llm.script.append(reply("Yes, a few steps."))
+    m = InboundMessage("wamid.swipe1", GUEST, "text", datetime(2026, 11, 2, 4, 31), text="how far", context_id=quoted)
     w.bot.handle(m)
     last = w.llm.calls[-1].messages[-1].content
-    assert 'swiped to reply to your (the assistant\'s) message: "Sure. Which dates?"' in last
+    assert 'swiped to reply to your (the assistant\'s) message: "Yes, right on the beach."' in last
     say(w, "ok thanks bye", GUEST, reply("[no reply]"))
     assert "swiped" not in w.llm.calls[-1].messages[-1].content  # only for that one turn
 
 
 def test_manglish_guest_gets_one_rewrite_when_the_ai_answers_in_english(world):
     w = world
-    say(w, "room undo nale", GUEST, reply("Yes, we have rooms available for tomorrow. How many people are coming?"),
-        reply("Und sir, nale rooms und. Ethra per und?"))
-    assert w.wa.texts()[-1] == "Und sir, nale rooms und. Ethra per und?"
+    say(w, "room undo nale", GUEST, reply("Yes, we have rooms available for tomorrow."),
+        reply("Und sir, nale rooms und."))
+    assert w.wa.texts()[-1] == "Und sir, nale rooms und."
 
 
 def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_twice(world, tmp_path, monkeypatch):
@@ -276,6 +278,52 @@ def test_a_misspelt_place_is_understood_and_the_form_follows(world, answer, plac
     assert w.wa.texts()[-1].startswith("Please share these details")
 
 
+FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
+
+
+def test_the_ai_never_asks_dates_in_its_own_words_the_form_goes(world):
+    w = world
+    say(w, "need a room in Alleppey", GUEST, reply("Rooms are available in Alleppey. What is your check-in date?"))
+    assert w.wa.texts() == [FORM]
+    say(w, "2 people", GUEST, reply("Yes, right on the beach. Please share your check-in and check-out dates."))
+    assert w.wa.texts()[-2:] == ["Yes, right on the beach.", FORM]  # the answer stays, the ask becomes the form
+
+
+def test_a_room_request_the_ai_leaves_silent_still_gets_the_location_question(world):
+    w = world
+    assert say(w, "need a room", GUEST, reply("[no reply]")) == "answered"
+    assert w.wa.texts()[-1].startswith("Sure, Kindly confirm the Location")
+    assert say(w, "ok will book later", GUEST, reply("[no reply]")) == "quiet"
+
+
+def test_naming_the_place_skips_the_location_question(world):
+    w = world
+    say(w, "rooms available in allepy?", GUEST, tool("ask_location"), reply("[no reply]"))
+    assert w.wa.texts() == [FORM] and w.repo.get_state(GUEST)["form_place"] == w.p1.id
+
+
+def test_details_spread_over_messages_are_checked_in_code_not_asked_again(world):
+    w = world
+    say(w, "need a room in Alleppey", GUEST, tool("ask_stay_details", place="Alleppey"), reply("[no reply]"))
+    say(w, "dec 12", GUEST, reply("Check out date? And how many persons?"))
+    assert w.wa.texts() == [FORM, FORM]
+    say(w, "3 persons, till 15", GUEST, reply("Could you confirm check-in is 12 December and check-out 15 December?"))
+    assert w.wa.texts()[-2:] == ["Yes, rooms are available for your dates.",
+                                 "Please share your name and mobile number to proceed."]
+    assert w.repo.get_state(GUEST)["bk"]["check_out"] == "2026-12-15"
+
+
+def test_a_number_after_rooms_are_found_books_even_if_the_ai_does_not(world):
+    w = world
+    say(w, "Alleppey 12 dec to 15 dec 2 people", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-15", adults=2),
+        reply("[no reply]"))
+    say(w, "Rahul, 9876543210", GUEST, reply("The total is 24,000 rupees. Advance 12,000. Please share your name."))
+    texts = w.wa.texts()
+    assert texts[-2].startswith("Following are the glimpse of your enquiry") and "Guest - Rahul" in texts[-2]
+    assert texts[-1].startswith("Please pay") and not any("24,000 rupees" in x for x in texts)
+
+
 def test_no_rooms_for_the_dates_is_said_plainly(world):
     w = world
     for rt in w.repo.list_room_types(w.p1.id):
@@ -318,19 +366,20 @@ def test_a_town_answer_to_the_location_question_gets_the_form_without_the_ai(wor
 
 def test_a_mid_chat_hi_is_never_left_unanswered(world):
     w = world
-    say(w, "room und?", GUEST, reply("Which dates, sir?"))
+    say(w, "Is there a beach view?", GUEST, reply("Yes sir, every room has a beach view."))
     assert say(w, "hi", GUEST, reply("[no reply]")) == "answered"
     assert w.wa.texts()[-1] == "Hi, how can I help you further?"  # 'sir' was already said once
 
 
 def test_no_message_is_ever_sent_twice_in_a_conversation(world):
     w = world
-    say(w, "room und?", GUEST, reply("Which dates, sir?"))
-    say(w, "hmm?", GUEST, reply("Which dates, sir?"))
-    assert w.wa.texts().count("Which dates, sir?") == 1
+    line = "Every room has a beach view, sir."
+    say(w, "Is there a beach view?", GUEST, reply(line))
+    say(w, "hmm?", GUEST, reply(line))
+    assert w.wa.texts().count(line) == 1
     w.clock.advance(minutes=60 * 7)  # a new conversation after a long gap may say it again
-    say(w, "room und?", GUEST, reply("Which dates, sir?"))
-    assert w.wa.texts().count("Which dates, sir?") == 2
+    say(w, "Is there a beach view?", GUEST, reply(line))
+    assert w.wa.texts().count(line) == 2
 
 
 def test_an_essay_reply_gets_one_shorter_rewrite(world):
@@ -1158,12 +1207,12 @@ def test_the_bot_waits_longer_for_a_cut_off_message_then_answers_both_together(w
         waits.append(seconds)
         if len(waits) == 1:  # while we wait, the guest finishes the thought in a second message
             w.bot.debounce_s = w.bot.patience_s = 0
-            say(w, "25 dec aanu", GUEST, reply("25 Dec ethra divasam, ethra per?"))
+            say(w, "25 dec aanu", GUEST, reply("25 Dec il Alleppey aano Kanthalloor aano nokkunnath."))
 
     monkeypatch.setattr(chat.time, "sleep", sleeper)
     assert say(w, "njan udheshikkunath oru") == "superseded"
     assert waits == [8.0]  # the long wait, because the first message stopped mid-sentence
-    assert w.wa.texts() == ["25 Dec ethra divasam, ethra per?"]  # answered once
+    assert w.wa.texts() == ["25 Dec il Alleppey aano Kanthalloor aano nokkunnath."]  # answered once
     assert w.llm.calls[0].messages[-1].content == "njan udheshikkunath oru\n25 dec aanu"
 
 
@@ -1348,8 +1397,8 @@ def test_a_foreign_script_inside_a_reply_gets_one_rewrite(world):
 
 def test_a_plain_offers_question_never_gets_a_no_offer_answer(world):
     w = world
-    say(w, "offer undo?", GUEST, reply("Sorry sir, no offers right now."), reply("Dates parayamo sir? Appol price parayam."))
-    assert w.wa.texts() == ["Dates parayamo sir? Appol price parayam."]
+    say(w, "offer undo?", GUEST, reply("Sorry sir, no offers right now."), reply("Sir, beach view room 3000 aanu."))
+    assert w.wa.texts() == ["Sir, beach view room 3000 aanu."]
     assert "without saying there is no offer" in w.llm.calls[1].messages[-1].content
     say(w, "can you reduce the price a little?", GUEST, reply("Sorry sir, I cannot reduce it."),
         reply("Sir, you get a beachfront room with breakfast at this price; guests love it."))
@@ -1359,11 +1408,11 @@ def test_a_plain_offers_question_never_gets_a_no_offer_answer(world):
 
 def test_sir_is_said_only_once_in_a_conversation(world):
     w = world
-    say(w, "alleppey und?", GUEST, reply("Sir, und. Ethra divasam?"))
-    say(w, "2 divasam", GUEST, reply("Sir, ethra per?"))
-    say(w, "2 per", GUEST, reply("Sheri sir, 2 per. Ok sir."))
+    say(w, "beach und?", GUEST, reply("Sir, und. Beach thottu aanu."))
+    say(w, "pool?", GUEST, reply("Sir, pool illa."))
+    say(w, "food?", GUEST, reply("Sheri sir, Swiggy, Zomato varum. Ok sir."))
     say(w, "price?", GUEST, reply("It is Rs 4,000 a night. Thank you sir!"))
-    assert w.wa.texts() == ["Sir, und. Ethra divasam?", "Ethra per?", "Sheri, 2 per. Ok.",
+    assert w.wa.texts() == ["Sir, und. Beach thottu aanu.", "Pool illa.", "Sheri, Swiggy, Zomato varum. Ok.",
                             "It is Rs 4,000 a night. Thank you!"]  # client, 2026-11-17: sir once only
 
 

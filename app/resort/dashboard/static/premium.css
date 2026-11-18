@@ -147,3 +147,9 @@ html body .login-card h1{font-size:28px}
 /* Priority lists (room numbers): rank number and a move-up button on each chip */
 .chip .chip-rank{font-weight:700;opacity:.55;margin-right:2px}
 .chip button[aria-label="Move up"]:hover{background:var(--accent,#0f4c5c);color:#fff}
+
+/* One-click photo upload: a single button, the file picker hidden inside it */
+.uploader-mini{margin:0}
+.uploader-mini label{position:relative;overflow:hidden;cursor:pointer}
+.uploader-mini input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.uploader-mini.busy label{opacity:.7;pointer-events:none}

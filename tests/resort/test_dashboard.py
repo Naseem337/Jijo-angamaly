@@ -299,15 +299,12 @@ def test_photo_upload_cover_remove_and_public_link(env):
     assert client.get(f"{BASE}/resort/media/../../etc/passwd").status_code == 404
 
 
-def test_property_page_says_what_the_whatsapp_bot_still_needs(env):
-    repo, app, (p1, p2, rt1, rt2) = env
+def test_property_page_has_no_bot_checklist_or_section_bar(env):
+    _, app, (p1, *_rest) = env
     client, _ = login(app)
-    page = client.get(f"{BASE}/properties/{p1.id}").text
-    assert "Needs attention" in page and "Owner contact numbers" in page and "General photos, sent to every guest" in page
-    p = repo.get_property(p1.id)
-    p.city, p.contact_numbers, p.intro, p.photo_urls = "Alleppey", ["+919497861924"], "Welcome", ["/resort/media/x"]
-    repo.save_property(p)
-    assert "Live on WhatsApp" in client.get(f"{BASE}/properties/{p1.id}").text
+    page = client.get(f"{BASE}/properties/{p1.id}").text  # removed on the owner's request (2026-11-18)
+    assert "Live on WhatsApp" not in page and "Needs attention" not in page and 'class="subnav"' not in page
+    assert "What guests can book at this property" not in page and "Rooms &amp; rates" in page
 
 
 def test_room_priority_list_allocates_the_highest_free_room_on_payment(env):

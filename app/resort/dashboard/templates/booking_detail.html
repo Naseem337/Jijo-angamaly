@@ -111,7 +111,7 @@
       {% if p.status != 'verified' %}<form method="post" action="{{ BASE }}/bookings/{{ b.id }}/id/{{ p.id }}/status">{{ csrf_field(csrf) }}<input type="hidden" name="status" value="verified"><button class="btn sm primary">Verify</button></form>{% endif %}
       {% if p.status != 'rejected' %}<form method="post" action="{{ BASE }}/bookings/{{ b.id }}/id/{{ p.id }}/status">{{ csrf_field(csrf) }}<input type="hidden" name="status" value="rejected"><button class="btn sm danger" data-confirm="Reject this ID?">Reject</button></form>{% endif %}
     </div></td></tr>{% endfor %}</tbody></table></div>
-  {% else %}<div class="empty"><span class="empty-ic">{{ icon('id') }}</span><p>No ID proof yet. The bot asks for it on WhatsApp after payment; you can also note an ID shown in person.</p></div>{% endif %}
+  {% else %}<div class="empty"><span class="empty-ic">{{ icon('id') }}</span><p>No ID proof yet.</p></div>{% endif %}
 </section>
 {% endif %}
 

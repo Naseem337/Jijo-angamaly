@@ -7,30 +7,29 @@
 <section class="card"><h3>Room type</h3><div class="cols">
   {{ field("Name", "name", rt.name, required=True, hint="e.g. Deluxe Cottage") }}{{ field("Number of rooms", "units", rt.units, "number", attrs='min="1"') }}
   {{ field("Max adults per room", "max_adults", rt.max_adults, "number", attrs='min="1"') }}{{ field("Max children per room", "max_children", rt.max_children, "number", attrs='min="0"') }}
-  {{ field("Max guests per room (total)", "max_occupancy", rt.max_occupancy, "number", "The bot never offers more people than this per room", attrs='min="1"') }}
-  {{ field("Priority", "priority", rt.priority, "number", "1 = offered first. The bot offers guests only the top-priority room type that is free and fits them, and never asks which one.", attrs='min="1" max="99"') }}
+  {{ field("Max guests per room (total)", "max_occupancy", rt.max_occupancy, "number", attrs='min="1"') }}
+  {{ field("Priority", "priority", rt.priority, "number", "1 = offered first", attrs='min="1" max="99"') }}
 </div></section>
 <section class="card"><h3>Room numbers, in priority order</h3>
-  <p class="muted">The first room here is given first. When a booking is paid, it gets the highest-priority room that is free for those dates. Use ‹ to move a room up. Staff can still change the room at check-in.</p>
+  <p class="muted">First room is given first. ‹ moves a room up.</p>
   <div class="chipbox" data-chips="room_list" data-kind="text" data-max="200" data-order>
     <textarea name="room_list" hidden>{{ rt.room_list|join('
 ') }}</textarea>
     <div class="chip-list"></div>
     <div class="chip-add"><input type="text" maxlength="12" placeholder="e.g. 101"><button type="button" class="btn">Add room</button></div>
-  </div>
-  <small class="muted">When rooms are listed, "Number of rooms" follows this list. Leave it empty to skip room allocation.</small></section>
+  </div></section>
 <section class="card"><h3>Price per room per night</h3><div class="cols">
   {{ field("Base rate (₹)", "base_rate", rt.base_rate, "number", attrs='min="0"') }}
-  {{ field("Weekend rate (₹)", "weekend_rate", rt.weekend_rate if rt.weekend_rate is not none else '', "number", "Friday and Saturday nights. Leave empty to use the base rate.", attrs='min="0"') }}
+  {{ field("Weekend rate (₹)", "weekend_rate", rt.weekend_rate if rt.weekend_rate is not none else '', "number", "Fri and Sat nights", attrs='min="0"') }}
 </div></section>
 <section class="card"><h3>Details</h3>
   {{ area("Description", "description", rt.description, 3) }}{{ area("Amenities", "amenities", rt.amenities, 2, "e.g. AC, balcony, private pool") }}
-  <label class="check"><input type="checkbox" name="active" {{ 'checked' if rt.active }}> Active (the bot offers this room)</label></section>
+  <label class="check"><input type="checkbox" name="active" {{ 'checked' if rt.active }}> Active</label></section>
 <div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties/{{ prop.id }}">Back</a><button class="btn primary">Save</button></div>
 </form>
 {% if not is_new %}
 {{ photo_gallery(rt.photo_urls, BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/photos", csrf, "Bed, bathroom, view of this room type. When this room is offered, the bot sends these after the general photos (the first 6), and again when a guest asks.", "Room photos", "Sent with the glimpse") }}
-<section class="card" id="seasons"><h3>Season prices</h3><p class="muted">Peak seasons or festivals (Onam, Christmas, New Year). A season price replaces the base and weekend rate on those nights. The bot quotes it automatically for guests whose dates fall in it.</p>
+<section class="card" id="seasons"><h3>Season prices</h3>
   <table class="list"><thead><tr><th>From</th><th>To</th><th>Label</th><th class="r">Rate</th><th></th></tr></thead><tbody>
   {% for r in rules %}<tr><td>{{ r.start.strftime('%d %b %Y') }}</td><td>{{ r.end.strftime('%d %b %Y') }}</td><td>{{ r.label }}</td><td class="r">{{ r.rate|rupees }}</td>
   <td><form method="post" action="{{ BASE }}/properties/{{ prop.id }}/rooms/{{ rt.id }}/rates">{{ csrf_field(csrf) }}<input type="hidden" name="delete" value="{{ r.id }}"><button class="btn ghost sm">Remove</button></form></td></tr>

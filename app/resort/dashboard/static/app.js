@@ -114,6 +114,17 @@ var closeDrawer = function () {};
   });
 })();
 
+// Photos upload as soon as they are picked: one click, no separate Upload button.
+document.querySelectorAll('input[data-autosubmit]').forEach(function (input) {
+  input.addEventListener('change', function () {
+    if (!input.files || !input.files.length) return;
+    var form = input.form, label = form.querySelector('[data-label]');
+    if (label) label.textContent = 'Uploading ' + input.files.length + '…';
+    form.classList.add('busy');
+    form.submit();
+  });
+});
+
 // Copy buttons, dialogs and quick amounts.
 (function () {
   function say(msg) {

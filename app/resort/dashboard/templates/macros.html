@@ -48,7 +48,14 @@
 
 {% macro photo_gallery(photos, action, csrf, hint='', title='Photos', badge='') -%}
 <section class="card" id="photos">
-  <div class="card-head"><div><h3>{{ icon('image') }} {{ title }}{% if badge %} <span class="pill paid">{{ badge }}</span>{% endif %}</h3><p class="muted">{{ hint or 'The first photo is the cover. The bot sends these on WhatsApp when a guest asks for pictures.' }}</p></div></div>
+  <div class="card-head"><h3>{{ icon('image') }} {{ title }}{% if badge %} <span class="pill paid">{{ badge }}</span>{% endif %}</h3>
+    {# one click: pick photos and they upload at once (owner, 2026-11-18) #}
+    <form method="post" action="{{ action }}" enctype="multipart/form-data" class="uploader-mini">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="upload">
+      <label class="btn primary">{{ icon('plus') }} <span data-label>Add photos</span>
+        <input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/heic" multiple required data-autosubmit></label>
+    </form></div>
+  {% if not photos %}<p class="muted">No photos yet.</p>{% endif %}
   {% if photos %}<div class="gallery">
   {% for ref in photos %}<figure class="ph{{ ' cover' if loop.first }}">
     <a href="{{ ref }}" target="_blank" rel="noopener"><img src="{{ ref }}" alt="Photo {{ loop.index }}" loading="lazy"></a>
@@ -59,12 +66,6 @@
     </figcaption>
   </figure>{% endfor %}
   </div>{% endif %}
-  <form method="post" action="{{ action }}" enctype="multipart/form-data" class="uploader">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="upload">
-    <label class="drop">{{ icon('image') }}<span><b>Choose photos</b> or drop them here</span><small>JPG or PNG, up to 12 at a time. Large phone photos are resized automatically.</small>
-      <input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/heic" multiple required></label>
-    <button class="btn primary">{{ icon('plus') }} Upload</button>
-  </form>
 </section>
 {%- endmacro %}
 

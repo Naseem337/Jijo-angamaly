@@ -3,26 +3,9 @@
 {% block title %}{{ p.name or 'New property' }} · Resort Desk{% endblock %}
 {% block content %}
 {% call page_head(p.name or "New property", "Property details") %}{% endcall %}
-<nav class="subnav">
-  <a href="#details">Details</a>
-  <a href="#rooms">Rooms{% if not is_new %} <b>{{ rooms|length }}</b>{% endif %}</a>
-  {% if not is_new %}<a href="#photos">General photos <b>{{ p.photo_urls|length }}</b></a>{% endif %}
-  <a href="#payment">Payment</a>
-  <a href="#staff">Staff &amp; policies</a>
-</nav>
-
-{% if not is_new and ready %}
-{% set missing = ready|rejectattr(0)|list %}
-<section class="card ready-card {{ 'ok' if not missing else 'todo' }}">
-  <div class="card-head"><div><h3>{{ icon('whatsapp') }} WhatsApp bot</h3>
-    <p class="muted">{% if not missing %}Ready: guests can ask about and book this property on WhatsApp. Changes you save here reach the bot instantly.{% else %}{{ missing|length }} thing{{ 's' if missing|length != 1 }} left before the bot can sell this property well. Changes reach the bot instantly, no training needed.{% endif %}</p></div>
-    <span class="pill {{ 'paid' if not missing else 'hold' }}">{{ 'Live on WhatsApp' if not missing else 'Needs attention' }}</span></div>
-  <ul class="checklist">{% for ok, label in ready %}<li class="{{ 'done' if ok else 'miss' }}">{{ icon('check' if ok else 'alert') }}<span>{{ label }}</span></li>{% endfor %}</ul>
-</section>
-{% endif %}
 {% if not is_new %}
 <section class="card" id="rooms">
-  <div class="card-head"><div><h3>Rooms &amp; rates</h3><p class="muted">What guests can book at this property. Open a room to change its rate, capacity and seasonal prices.</p></div>
+  <div class="card-head"><div><h3>Rooms &amp; rates</h3></div>
   <a class="btn primary" href="{{ BASE }}/properties/{{ p.id }}/rooms/new">{{ icon('plus') }} Add room type</a></div>
   {% if rooms %}<div class="room-grid">
   {% for t in rooms %}<a class="room-card{{ ' off' if not t.active }}" href="{{ BASE }}/properties/{{ p.id }}/rooms/{{ t.id }}">
@@ -32,7 +15,7 @@
     <div class="chips-static"><span>{{ t.units }} room{{ 's' if t.units != 1 }}</span><span>{{ t.max_adults }} adults</span><span>{{ t.max_children }} children</span><span>max {{ t.max_occupancy }}</span></div>
     <span class="room-open">Manage rates &amp; details ›</span>
   </a>{% endfor %}</div>
-  {% else %}{{ empty("No room types yet. Add the first one so the bot can offer rooms.") }}{% endif %}
+  {% else %}{{ empty("No room types yet.") }}{% endif %}
 </section>
 {{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "Outside, beach, garden and common areas. The bot sends these AUTOMATICALLY to every guest right after the welcome message (glimpse), in this order (the first 6), then the offered room's photos. Room pictures go under each room type below.", "General photos", "Sent after the glimpse") }}
 {% else %}
@@ -42,13 +25,13 @@
 <form method="post" action="{{ BASE }}/properties/{{ 'new' if is_new else p.id }}" class="form">{{ csrf_field(csrf) }}
 <section class="card" id="details"><h3>Basics</h3><div class="cols">
   {{ field("Name", "name", p.name, required=True) }}{{ field("City / area", "city", p.city) }}
-  {{ field("Place name guests use", "place", p.place, "text", "How the bot asks it, e.g. Kanthalloor, Munnar", attrs='maxlength="60"') }}
+  {{ field("Place name guests use", "place", p.place, "text", "e.g. Kanthalloor, Munnar", attrs='maxlength="60"') }}
   {{ field("Address", "address", p.address) }}{{ field("Map link", "map_url", p.map_url, "url") }}
   {{ field("Check-in time", "checkin_time", p.checkin_time, "time") }}{{ field("Check-out time", "checkout_time", p.checkout_time, "time") }}
 </div>
 <label class="field"><span>Description</span>
   <textarea name="description" rows="5" maxlength="900" data-count="desc-count" placeholder="Describe the stay in a few warm sentences: the setting, the views, who it suits (families, couples, groups) and what makes it special.">{{ p.description }}</textarea>
-  <small>The bot uses this to answer guests, so write it as you would tell a guest. <span id="desc-count" class="count">0 / 900</span></small></label>
+  <small><span id="desc-count" class="count">0 / 900</span></small></label>
 <div class="field"><span>Highlights</span>
   <div class="chipbox" data-chips="highlights" data-kind="text" data-placeholder="e.g. Infinity pool" data-max="12">
     <textarea name="highlights" hidden>{{ p.highlights|join('\n') }}</textarea>
@@ -63,13 +46,13 @@
   {{ field("Early check-in from", "early_checkin_time", p.early_checkin_time, "time", "Leave empty if not offered") }}
   {{ field("Early check-in charge (per room, ₹)", "early_checkin_rate", p.early_checkin_rate, "number", attrs='min="0"') }}
 </div>
-<label class="check"><input type="checkbox" name="active" {{ 'checked' if p.active }}> Active (the bot offers this property)</label></section>
+<label class="check"><input type="checkbox" name="active" {{ 'checked' if p.active }}> Active</label></section>
 
 <section class="card" id="payment"><h3>Payment, invoices and cancellation</h3><div class="cols">
   {{ field("Advance to pay online (%)", "advance_pct", p.advance_pct, "number", attrs='min="1" max="100"') }}
   {{ field("GST (%)", "gst_pct", p.gst_pct, "number", "Prices already include it. It is split into CGST and SGST on the invoice.", attrs='min="0" max="40"') }}
   {{ field("GSTIN", "gstin", p.gstin, "text", "Shown on invoices", attrs='maxlength="20"') }}
-  {{ field("Extra bed (per bed per night, ₹)", "extra_bed_rate", p.extra_bed_rate, "number", "0 = the bot does not offer extra beds", attrs='min="0"') }}
+  {{ field("Extra bed (per bed per night, ₹)", "extra_bed_rate", p.extra_bed_rate, "number", "0 = no extra beds", attrs='min="0"') }}
   {{ field("Invoice prefix", "invoice_prefix", p.invoice_prefix, "text", "e.g. PZR gives PZR-2026-AB12CD", attrs='maxlength="8"') }}
 </div>
 <div class="field"><span>Cancellation refund</span>

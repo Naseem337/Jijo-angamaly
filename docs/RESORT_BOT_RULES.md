@@ -92,6 +92,25 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Premium look: `static/premium.css` (ocean teal + sand gold, Fraunces headings), sun-and-waves logo (`logo.svg`,
   `logo_mark` macro, regenerated PWA icons via scripts/make_pwa_icons.py).
 
+## Strict form, enforced in code (client, 2026-11-18)
+- The AI never asks for dates, nights or persons in its own words. Any such ask (a question, or "please share your
+  dates") is replaced by the fixed form; the rest of its answer is kept ("Yes, right on the beach." + form), and an
+  "available" claim before dates is dropped. The form may go again for a missing part (never twice in one turn).
+- The code reads the stay itself (`parse_stay`: "Check in :dec 12 ...", "12 dec to 14 dec, 2 people", "dec 12" then
+  "3 persons, till 15", "dec 20 nu 2 per" then "22 vare", "25/12 2 nights 4 pax"). Once all three are there, rooms
+  are checked in code instead of asking again.
+- A check-out the guest never gave is not accepted from the AI (it once made up a 1-night stay): the form goes.
+- Naming the place ("rooms available in allepy?") skips the location question. A room / resort request the AI
+  leaves silent still gets the next fixed step.
+- After rooms are found, a mobile number or "same number" books in code even if the AI did not; no name and no
+  WhatsApp name -> "Please share your name."
+- No prices unless the guest asked (`no_unasked_prices`): sentences with ₹ / Rs / rupees / advance / 4,000 are dropped.
+- Questions are one short line (max 12 words, no "Got it" / "I see"): "You have a booking on 12-15 Dec. Is this a new one?"
+
+## Dashboard (owner, 2026-11-18)
+- Removed: the property page's "WhatsApp bot" checklist, its top section bar, and "(the bot ...)" helper texts.
+- Photos: one "Add photos" button; picking photos uploads them at once.
+
 ## "sir" once, spelling mistakes (client, 2026-11-17)
 - "sir" (or "madam") at most ONCE per conversation. After that it is removed from every reply in code (`_ease_sir`):
   'Yes sir.' -> 'Yes.', 'Hi sir, how' -> 'Hi, how'. A new conversation (6 h gap) may say it once again.

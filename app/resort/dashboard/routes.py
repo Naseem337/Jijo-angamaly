@@ -849,27 +849,12 @@ def property_new(request: Request, auth: Auth = Depends(require_owner)):
     return page(request, "property_form.html", auth, nav="properties", p=Property(""), rooms=[], is_new=True)
 
 
-def bot_readiness(repo, p: Property) -> list[tuple[bool, str]]:
-    """What the WhatsApp bot needs from the owner's data to sell this property (shown on the property page)."""
-    rooms = [rt for rt in repo.list_room_types(p.id) if rt.active]
-    priced = [rt for rt in rooms if rt.base_rate > 0]
-    return [
-        (p.active, "Switched on (Active) so the bot offers it on WhatsApp"),
-        (bool(p.city or p.place), "Town filled in, for the bot's \"Kindly confirm the Location\" question"),
-        (bool(rooms), "At least one active room type"),
-        (bool(priced), "A price per night on the room type(s)"),
-        (bool(p.contact_numbers), "Owner contact numbers, given to guests for questions the bot can't answer"),
-        (bool(p.intro), "Welcome message (glimpse), sent when rooms are found"),
-        (bool(p.photo_urls), "General photos, sent to every guest who picks this property"),
-    ]
-
-
 @router.get("/properties/{property_id}")
 def property_edit(property_id: str, request: Request, auth: Auth = Depends(require_user)):
     repo = get_repo()
     p = _prop(repo, auth, property_id)
     return page(request, "property_form.html", auth, nav="properties", p=p,
-                rooms=repo.list_room_types(property_id, False), is_new=False, ready=bot_readiness(repo, p))
+                rooms=repo.list_room_types(property_id, False), is_new=False)
 
 
 async def _photo_form(request: Request, auth: Auth):
