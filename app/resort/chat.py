@@ -210,7 +210,7 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
     return out
 
 
-_MOBILE = re.compile(r"(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}\b")
+_MOBILE = re.compile(r"(?<![\d+])(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}(?!\d)")  # a whole number, never 10 digits of 15
 _SAME_NO = re.compile(r"\b(?:same|this|my whatsapp|whatsapp|ithe|ee|yahi|yehi|isi|wahi|idhe|idhey|indha|intha|ithu|idhu)"
                       r"\s*(?:number|no\b\.?|num|nbr|nmbr)|^\s*same\s*[.!]*\s*$|"
                       r"(?:ഇതേ|ഈ|ഇത്|இதே|இந்த|இது|यही|इसी|यह|ये)\s*(?:നമ്പർ|നമ്പര്|நம்பர்|எண்|नंबर|नम्बर)",
@@ -627,6 +627,17 @@ class ChatMixin:
         self._save(phone, st)
         self._text(phone, t("form", st.get("lang", "en")))
         return "form"
+
+    def _name_in_chat(self, phone: str) -> str:
+        """The newest name the guest typed with a number in this conversation ('Shibil 859002727' gives Shibil even
+        when that number was wrong), else ''."""
+        for m in reversed(self._session_rows(phone)):
+            if m.direction != "in":
+                continue
+            words = [w for w in re.findall(r"[A-Za-z][A-Za-z.']*", m.text) if w.lower().strip(".") not in _NOT_NAME]
+            if re.search(r"\d{6,}", m.text) and 1 <= len(words) <= 3:
+                return " ".join(words)
+        return ""
 
     def _place_by_start(self, text: str) -> Property | None:
         """An answer to the location question that starts like one of our towns ('alloy', 'allep', 'kanth'): that one,
@@ -1646,7 +1657,7 @@ class ChatMixin:
         lines.append(f"Total Cost - {total:,}")
         if total > advance:
             lines += ["", "As a procedure you may need to pay an advance to block the room.", "",
-                      f"Ie - {advance:,}", "", "Balance can be paid during the time of check in."]
+                      f"Pay - {advance:,}", "", "Balance can be paid during the time of check in."]
         return "\n".join(lines)
 
     def _confirmed_text(self, b: Booking, prop: Property | None, rt: RoomType | None) -> str:
@@ -1705,7 +1716,9 @@ class ChatMixin:
         now = self.clock.now()
         guest = self.repo.touch_guest(phone, now, language=st.get("lang"))
         # "same number" = the WhatsApp number; with no name given, the guest's WhatsApp profile name is used
-        name = (a.get("guest_name") or "").strip()[:60] or guest.name
+        # the name the guest gave in THIS conversation wins over one saved from an earlier chat (a guest who restarted
+        # and gave a new name once got the old one on the summary, 2026-11-18)
+        name = (a.get("guest_name") or "").strip()[:60] or self._name_in_chat(phone) or guest.name
         raw_mobile = str(a.get("mobile") or "").strip()
         same = raw_mobile.lower() in ("same", "this", "this number", "same number", "whatsapp", "same no", "this no")
         mobile = phone if same else (try_normalize_phone(raw_mobile) or bk.get("mobile", ""))

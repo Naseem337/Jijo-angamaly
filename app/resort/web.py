@@ -155,7 +155,7 @@ def sweep(now=None, services: ResortServices | None = None) -> dict[str, int]:
     return (services or get_services()).bot.sweep(now)
 
 
-def start_sweeper(services: ResortServices, every_seconds: int = 60) -> Callable[[], None]:
+def start_sweeper(services: ResortServices, every_seconds: int = 15) -> Callable[[], None]:
     """Daemon thread that runs sweep() every `every_seconds`; returns a stop function."""
     stop = threading.Event()
 

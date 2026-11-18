@@ -459,7 +459,7 @@ def test_booking_chat_end_to_end_with_payment_link(world):
     assert (booking.status, booking.advance, booking.total, booking.rooms) == ("hold", 4000, 8000, 1)
     assert booking.guest_name == "Asha Menon" and w.pay.created[0]["amount"] == 4000
     texts = w.wa.texts()
-    assert texts[-2].startswith("Following are the glimpse") and "Ie - 4,000" in texts[-2]
+    assert texts[-2].startswith("Following are the glimpse") and "Pay - 4,000" in texts[-2]
     assert texts[-1].startswith("Please pay") and "https://rzp.io/mock/" in texts[-1]
     assert {k for _, k, _ in w.wa.to(GUEST)} == {"text"}  # never a list or button
     assert "bk" not in w.repo.get_state(GUEST)
@@ -767,6 +767,21 @@ def test_a_paid_guest_saying_hi_is_never_told_to_complete_the_payment(world):
     say(w, "is there parking?", GUEST,
         reply("Yes, parking is free. Please complete the payment."))
     assert w.wa.texts()[-1] == "Yes, parking is free."  # the stale payment talk is dropped
+
+
+def test_a_new_name_after_restart_wins_and_a_15_digit_number_is_refused(world):
+    w = world
+    w.repo.touch_guest(GUEST, w.clock.now(), name="John")  # saved from an earlier chat
+    say(w, "Alleppey, 12 dec to 14 dec, 2 people", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-14", adults=2),
+        reply("[no reply]"))
+    say(w, "Shibil 859002727", GUEST, reply("That mobile number does not look right. Please send it again."))
+    assert w.repo.list_bookings(phone=GUEST) == []  # 9 digits: no booking
+    say(w, "637737289202029", GUEST, reply("Please send a 10 digit mobile number."))
+    assert w.repo.list_bookings(phone=GUEST) == []  # 15 digits: never the last 10 of it
+    say(w, "9846012345", GUEST, reply("[no reply]"))
+    summary = next(x for x in w.wa.texts() if x.startswith("Following are the glimpse of your enquiry"))
+    assert "Guest - Shibil" in summary and "98460 12345" in summary and "Pay - " in summary and "Ie - " not in summary
 
 
 def test_a_badly_spelt_or_unclear_location_answer_is_never_left_silent(world):
@@ -1438,7 +1453,7 @@ def test_the_summary_is_built_in_english_laid_out_line_by_line_and_sent_before_t
         "Early Check-in Charges - 1,000",
         "Total Cost - 9,000", "",
         "As a procedure you may need to pay an advance to block the room.", "",
-        "Ie - 4,500", "",
+        "Pay - 4,500", "",
         "Balance can be paid during the time of check in."])
     assert texts[-1].startswith("Please pay") or texts[-1].startswith("Ee link")
     b = w.repo.list_bookings(phone=GUEST)[0]
