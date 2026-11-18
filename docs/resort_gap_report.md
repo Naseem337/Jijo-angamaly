@@ -191,3 +191,15 @@
 | N04 | flow | MISSING | Needs change/upgrade tools. |
 | N05 | flow | MISSING | Needs nearby_places. |
 | N06 | flow | PARTIAL | Manglish + child counting fine; no alternative-date suggestion when full. |
+
+## Owner decisions (2026-11-18)
+
+| Id | Decision |
+|---|---|
+| A01 | Keep the rule: one room by priority, price only in the glimpse. Scenario expectation changes to match. |
+| E02 | Keep the rule: images are not read or answered. |
+| G13 | **Change:** Hindi is no longer supported. Hindi script (and Hinglish) gets a polite English reply listing English, Malayalam and Tamil. Build in Step 3. |
+| J07 | Keep the rule: photos only after availability is checked. |
+| M04 | Keep the rule: the day-before message is only "Please bring your ID proof while coming." |
+
+The eval (Step 2) must judge A01, E02, J07 and M04 by the owner's rules, not by the scenario text.
