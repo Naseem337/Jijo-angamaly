@@ -503,8 +503,17 @@ TOOLS = [
     ToolSpec(
         "my_bookings",
         "The guest's own recent bookings with status, amounts and the owner's contact. Use when they ask about "
-        "an existing booking or payment.",
+        "an existing booking or payment, or want to cancel (if_cancelled_today has the policy charge and refund).",
         {"type": "object", "properties": {}}),
+    ToolSpec(
+        "talk_to_owner",
+        "Hand the chat to the owner: the bot pauses and the owner gets a short summary. Use when the guest asks for "
+        "the owner / a person / a call, complains, wants a refund or exception outside the policy, makes a price "
+        "counter-offer, or a group / many-room booking. The guest is told automatically; reply exactly [no reply].",
+        {"type": "object", "properties": {
+            "reason": {"type": "string", "description": "one short line for the owner, e.g. 'wants to cancel RB-1D9E49, "
+                                                        "asks full refund'"}},
+         "required": ["reason"]}),
 ]
 
 
@@ -1070,7 +1079,7 @@ class ChatMixin:
             "- You remember every guest. After the FACTS you get their records (name, earlier bookings with dates, place and status). The chat shown is today's conversation; older chat is kept and you can read it with the recall_old_chat tool.\n"
             "- Look things up only when needed, to save effort: a guest who asks about an earlier booking, a payment, a link, a stay date or something said before gets the real answer (use the records, my_bookings and/or recall_old_chat). A guest who only says hi, makes small talk or jokes gets a short, polite, friendly reply with no lookup.\n"
             "- Earlier bookings: if they ask about one, answer from the records or my_bookings in plain words: dates, place, rooms, whether it is confirmed, how much was paid and what is left to pay at the property. Paid and upcoming: say you can see it and be warm about their coming stay. Past: a warm thanks or welcome back. ON HOLD and still valid: tell them it is waiting for payment and offer the link (send_payment_link). Expired, cancelled or failed: say so kindly and offer to book again. Payment queries are answered politely and respectfully, never defensively.\n"
-            "- When the guest asks for another room or a new stay while a paid booking is upcoming or in progress, ask in ONE short line, no lead-in like 'Got it' or 'I see': 'You have a booking on <their real dates from the records>. Is this a new one?' (max 12 words), then follow their answer. A request to CHANGE the dates or rooms of an existing booking, or to CANCEL it, is NOT a new booking: say in one short line that the owner will help and give the owner's numbers (the owner is alerted automatically). Never ask 'is this a new one?' for it. With only past stays, treat it as a new booking and add at most one warm welcome-back line.\n"
+            "- When the guest asks for another room or a new stay while a paid booking is upcoming or in progress, ask in ONE short line, no lead-in like 'Got it' or 'I see': 'You have a booking on <their real dates from the records>. Is this a new one?' (max 12 words), then follow their answer. A request to CHANGE the dates or rooms of an existing booking is NOT a new booking: say in one short line that the owner will help (the owner is alerted automatically). To CANCEL: call my_bookings and tell them in one short line the charge from if_cancelled_today (e.g. '25% charge, Rs X refunded') and that the owner will confirm; for anything outside the policy call talk_to_owner. Never ask 'is this a new one?' for these. With only past stays, treat it as a new booking and add at most one warm welcome-back line.\n"
             "- A new booking always takes its dates, rooms and price from what the guest says now and from the tools, never from an earlier booking. Never paste an old payment link: only the send_payment_link tool sends one, and only for a booking still on hold.\n"
             "- Warm and easy: one or two short lines, no forms, no jargon.\n"
             "- Never address them by name.\n\n"
@@ -1348,7 +1357,8 @@ class ChatMixin:
                     "send_photos": self._tool_photos,
                     "check_availability": self._tool_check, "prepare_booking": self._tool_prepare,
                     "create_booking": self._tool_create, "my_bookings": self._tool_bookings,
-                    "send_payment_link": self._tool_resend, "recall_old_chat": self._tool_recall}
+                    "send_payment_link": self._tool_resend, "recall_old_chat": self._tool_recall,
+                    "talk_to_owner": self._tool_owner}
         handler = handlers.get(call.name)
         if handler is None or call.arguments_error:
             return json.dumps({"error": call.arguments_error or f"unknown tool {call.name}"}), True
@@ -1808,11 +1818,22 @@ class ChatMixin:
                    "total": b.total, "paid": b.paid_amount, "balance_at_property": b.balance}
             if b.status == "hold" and b.payment_link_url:
                 row["payment_link"] = b.payment_link_url
+            if b.status == "paid" and b.check_in >= self._today():  # the owner's policy, worked out in code
+                from app.resort.refunds import cancellation_terms
+                if terms := cancellation_terms(prop, b, self._today()):
+                    row["if_cancelled_today"] = terms
             rows.append(row)
         out: dict[str, Any] = {"bookings": rows} if rows else {"bookings": [], "note": "this guest has no booking yet"}
         if paid_now:
             out["note"] = "a payment was just found and the confirmation message was sent automatically; do not repeat its details"
         return out
+
+    def _tool_owner(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        """The guest wants the owner (owner, 2026-11-18): pause the bot, send the owner a short summary."""
+        reason = (str(a.get("reason") or "").strip() or "the guest asked for the owner")[:200]
+        self.handoff(ctx.phone, ctx.st, reason)
+        ctx.handed_off = True
+        return {"ok": True, "note": "the owner has the summary and the guest was told; reply exactly [no reply]"}
 
     def _tool_resend(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         self._set_style(ctx.st, a)

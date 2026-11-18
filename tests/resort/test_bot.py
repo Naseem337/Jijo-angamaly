@@ -754,6 +754,29 @@ def test_stop_and_start(world):
     assert say(w, "START") == "opt_in"
 
 
+def test_talk_to_owner_pauses_the_bot_and_sends_the_owner_a_summary(world):
+    w = world
+    say(w, "I want to talk to the owner", GUEST, tool("talk_to_owner", reason="guest asked for the owner"),
+        reply("[no reply]"))
+    assert w.wa.texts()[-1] == "Thank you. Our team will message you here shortly."
+    staff = w.wa.texts(STAFF)[-1]
+    assert staff.startswith("Guest needs the team: guest asked for the owner") and GUEST in staff
+    calls = len(w.llm.calls)
+    say(w, "hello?")  # paused: the owner talks now, the bot stays out
+    assert len(w.llm.calls) == calls and w.wa.texts()[-1] == "Thank you. Our team will message you here shortly."
+
+
+def test_a_cancel_request_gets_the_policy_charge_from_code(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    w.bot.mark_paid(booking_id=b.id)
+    say(w, "I want to cancel my booking", GUEST, tool("my_bookings"), reply("[no reply]"))
+    row = last_tool(w)["bookings"][0]
+    assert row["if_cancelled_today"]["retention_pct"] == 10  # 8 days before check-in: 10% of the total kept
+    assert "cancel" in w.wa.texts(STAFF)[-1]  # the owner is alerted at once
+
+
 def test_a_paid_guest_saying_hi_is_never_told_to_complete_the_payment(world):
     w = world
     hold(w, rooms=1)

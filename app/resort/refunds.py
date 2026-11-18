@@ -27,16 +27,38 @@ def refundable(b: Booking, refunds: list[Refund]) -> int:
 
 
 def suggested_refund(prop: Property | None, b: Booking, today: date, refunds: list[Refund] | None = None) -> tuple[int, int]:
-    """(percent, rupees) the cancellation policy gives back, from the days left before check-in."""
+    """(percent of the paid amount, rupees) the cancellation policy gives back, from the days left before check-in.
+    A row is either a retention charge on the TOTAL booking amount (the owner's policy, 2026-11-18:
+    {"days_before": 7, "retention_pct": 10}) or, in older data, a refund % of what was paid."""
+    left = refundable(b, refunds or [])
+    row = policy_row(prop, b, today)
+    if row is None:
+        return 0, 0
+    if "retention_pct" in row:
+        kept = round(b.total * max(0, min(100, int(row["retention_pct"]))) / 100)
+        amount = max(0, min(b.paid_amount - kept, left))
+        return (round(100 * amount / b.paid_amount) if b.paid_amount else 0), amount
+    pct = max(0, min(100, int(row.get("refund_pct", 0))))
+    return pct, min(round(b.paid_amount * pct / 100), left)
+
+
+def policy_row(prop: Property | None, b: Booking, today: date) -> dict | None:
+    """The cancellation-policy row that applies today: the first whose days_before <= days left before check-in."""
     days_left = (b.check_in - today).days
     rows = sorted((r for r in (prop.cancel_policy if prop else []) if isinstance(r, dict)),
                   key=lambda r: -int(r.get("days_before", 0)))
-    pct = 0
-    for row in rows:
-        if days_left >= int(row.get("days_before", 0)):
-            pct = max(0, min(100, int(row.get("refund_pct", 0))))
-            break
-    return pct, min(round(b.paid_amount * pct / 100), refundable(b, refunds or []))
+    return next((r for r in rows if days_left >= int(r.get("days_before", 0))), None)
+
+
+def cancellation_terms(prop: Property | None, b: Booking, today: date) -> dict:
+    """What cancelling this booking today would cost, for the bot to tell the guest (never decided by the AI)."""
+    row = policy_row(prop, b, today)
+    if row is None or "retention_pct" not in row:
+        return {}
+    pct = int(row["retention_pct"])
+    kept = round(b.total * pct / 100)
+    return {"retention_pct": pct, "retention_amount": kept, "refund_of_paid": max(0, b.paid_amount - kept),
+            "days_before_check_in": (b.check_in - today).days}
 
 
 def record_refund(repo: ResortRepo, b: Booking, *, amount: int, method: str, ref: str = "", note: str = "",

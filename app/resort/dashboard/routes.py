@@ -984,8 +984,8 @@ async def property_save(property_id: str, request: Request, auth: Auth = Depends
     p.early_checkin_rate = _int(f, "early_checkin_rate", 0, 0, 100000)
     p.gstin = f.get("gstin", "").strip().upper()[:20]
     p.invoice_prefix = "".join(ch for ch in f.get("invoice_prefix", "INV").upper() if ch.isalnum())[:8] or "INV"
-    rows = [{"days_before": _int(f, f"cp_days_{i}", 0, 0, 365), "refund_pct": _int(f, f"cp_pct_{i}", 0, 0, 100)}
-            for i in (1, 2, 3) if f.get(f"cp_days_{i}", "").strip() and f.get(f"cp_pct_{i}", "").strip()]
+    rows = [{"days_before": _int(f, f"cp_days_{i}", 0, 0, 365), "retention_pct": _int(f, f"cp_pct_{i}", 0, 0, 100)}
+            for i in (1, 2, 3, 4, 5) if f.get(f"cp_days_{i}", "").strip() and f.get(f"cp_pct_{i}", "").strip()]
     if rows:
         p.cancel_policy = sorted(rows, key=lambda r: -r["days_before"])
     p.active = f.get("active") == "on"

@@ -181,12 +181,16 @@ def test_send_invoice_on_whatsapp(env):
 
 
 def test_policy_gives_refund_by_days_left(env):
+    """The owner's policy (2026-11-18): a retention charge on the TOTAL; the rest of what was paid comes back."""
     repo, _, (p1, _, rt1, _) = env
-    far, mid, near = (make(repo, p1, rt1, day=d, rooms=1) for d in (20, 5, 1))
+    far, mid, close, near = (make(repo, p1, rt1, day=d, rooms=1) for d in (20, 5, 2, 1))  # total 8000, paid 4000
     today = today_ist()
-    assert refunds.suggested_refund(p1, far, today) == (100, 4000)
-    assert refunds.suggested_refund(p1, mid, today) == (50, 2000)
-    assert refunds.suggested_refund(p1, near, today) == (0, 0)
+    assert refunds.suggested_refund(p1, far, today) == (80, 3200)  # 7+ days: 10% of 8000 kept
+    assert refunds.suggested_refund(p1, mid, today) == (50, 2000)  # 3-7 days: 25% kept
+    assert refunds.suggested_refund(p1, close, today) == (0, 0)  # 2-3 days: 50% = all of the advance
+    assert refunds.suggested_refund(p1, near, today) == (0, 0)  # under 48 h: 100%
+    assert refunds.cancellation_terms(p1, far, today) == {"retention_pct": 10, "retention_amount": 800,
+                                                          "refund_of_paid": 3200, "days_before_check_in": 20}
 
 
 def test_cancel_records_refund_and_frees_rooms(env):
@@ -195,7 +199,7 @@ def test_cancel_records_refund_and_frees_rooms(env):
     d1, d2 = b.check_in, b.check_out
     assert repo.free_rooms(rt1, d1, d2, now_utc()) == 0
     client, token = login(app)
-    assert "Policy: 100%" in client.get(f"{BASE}/bookings/{b.id}").text
+    assert "Policy: 80%" in client.get(f"{BASE}/bookings/{b.id}").text
     resp = post(client, token, f"/bookings/{b.id}/cancel", reason="Guest ill", refund_amount="4000", method="upi", ref="")
     assert "toast=%21" in resp.headers["location"] and repo.get_booking(b.id).status == "paid"  # UPI needs a reference
     post(client, token, f"/bookings/{b.id}/cancel", reason="Guest ill", refund_amount="4000", method="upi", ref="UTRX1")
@@ -372,4 +376,4 @@ def test_property_form_saves_gst_prefix_and_policy(env):
          invoice_prefix="pz-r!", cp_days_1="14", cp_pct_1="100", cp_days_2="2", cp_pct_2="25", cp_days_3="", cp_pct_3="", active="on")
     saved = repo.get_property(p1.id)
     assert saved.gstin == "32AAAAA0000A1Z5" and saved.invoice_prefix == "PZR"
-    assert saved.cancel_policy == [{"days_before": 14, "refund_pct": 100}, {"days_before": 2, "refund_pct": 25}]
+    assert saved.cancel_policy == [{"days_before": 14, "retention_pct": 100}, {"days_before": 2, "retention_pct": 25}]
