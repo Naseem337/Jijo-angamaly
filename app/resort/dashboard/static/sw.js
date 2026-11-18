@@ -1,6 +1,6 @@
 /* Resort Desk service worker: lets the app install and open fast. Pages always come from the server
    (bookings change all the time); only the look (css, js, icons) is kept for offline and speed. */
-const CACHE = "resort-desk-v6";
+const CACHE = "resort-desk-v7";
 const SHELL = ["static/app.css", "static/frappe.css", "static/premium.css", "static/app.js", "static/icon-192.png", "static/icon-512.png"];
 
 self.addEventListener("install", (e) => {

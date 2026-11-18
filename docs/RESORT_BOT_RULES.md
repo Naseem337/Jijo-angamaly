@@ -110,6 +110,11 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 ## Dashboard (owner, 2026-11-18)
 - Removed: the property page's "WhatsApp bot" checklist, its top section bar, and "(the bot ...)" helper texts.
 - Photos: one "Add photos" button; picking photos uploads them at once.
+- Room cards on the property page show only name, rate and weekend rate (no rooms / adults / children chips).
+- Home page in a modern SaaS style (owner's reference, 2026-11-18): Inter font everywhere; "Welcome, <resort>";
+  four colour tiles (Arrivals, Departures, In the house, Collected today); a big banner that fades through the
+  resorts' own general photos (cover first) with tonight's occupancy; card columns Arriving today / Waiting for
+  payment (or Leaving today when nothing waits) / Coming up; then the 14-day occupancy bars.
 
 ## "sir" once, spelling mistakes (client, 2026-11-17)
 - "sir" (or "madam") at most ONCE per conversation. After that it is removed from every reply in code (`_ease_sir`):

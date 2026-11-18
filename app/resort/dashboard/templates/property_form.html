@@ -12,7 +12,6 @@
     <div class="room-top"><b>{{ t.name }}</b><span class="pill">Priority {{ t.priority }}</span>{% if not t.active %}<span class="pill cancelled">Inactive</span>{% endif %}</div>
     <div class="room-rate">{{ t.base_rate|rupees }}<small> / night</small></div>
     {% if t.weekend_rate %}<small class="muted">Weekend {{ t.weekend_rate|rupees }}</small>{% endif %}
-    <div class="chips-static"><span>{{ t.units }} room{{ 's' if t.units != 1 }}</span><span>{{ t.max_adults }} adults</span><span>{{ t.max_children }} children</span><span>max {{ t.max_occupancy }}</span></div>
     <span class="room-open">Manage rates &amp; details ›</span>
   </a>{% endfor %}</div>
   {% else %}{{ empty("No room types yet.") }}{% endif %}

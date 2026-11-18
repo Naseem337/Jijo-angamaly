@@ -114,6 +114,14 @@ var closeDrawer = function () {};
   });
 })();
 
+// Home banner: the resort's own photos fade from one to the next.
+(function () {
+  var imgs = document.querySelectorAll('.hm-hero img');
+  if (imgs.length < 2 || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+  var i = 0;
+  setInterval(function () { imgs[i].classList.remove('on'); i = (i + 1) % imgs.length; imgs[i].classList.add('on'); }, 5000);
+})();
+
 // Photos upload as soon as they are picked: one click, no separate Upload button.
 document.querySelectorAll('input[data-autosubmit]').forEach(function (input) {
   input.addEventListener('change', function () {

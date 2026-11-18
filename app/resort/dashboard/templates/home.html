@@ -1,34 +1,67 @@
 {% extends "base.html" %}
-{% from "macros.html" import page_head, empty, icon %}
+{% from "macros.html" import empty, icon, logo_mark %}
 {% block title %}Today · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head("Today", today.strftime('%A, %d %B')) %}
-<a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a>
-{% endcall %}
-<div class="stats">
-  <a class="stat" href="{{ BASE }}/stay"><small>Arrivals today</small><b>{{ arrivals|length }}</b></a>
-  <a class="stat" href="{{ BASE }}/stay"><small>Departures today</small><b>{{ departures|length }}</b></a>
-  <a class="stat" href="{{ BASE }}/stay"><small>In the house</small><b>{{ in_house|length }}</b></a>
-  <a class="stat" href="{{ BASE }}/reports/collections"><small>Collected today</small><b>{{ collected|rupees }}</b></a>
+{% macro card(b, kind='') -%}
+<a class="hm-card" href="{{ BASE }}/bookings/{{ b.id }}">
+  <div class="hm-date">{{ icon('cal') }} {{ b.check_in.strftime('%b %d').upper() }} → {{ b.check_out.strftime('%b %d').upper() }}</div>
+  <b class="hm-name">{{ b.guest_name or b.guest_phone }}</b>
+  <p>{{ rooms[b.room_type_id].name if b.room_type_id in rooms else '' }} × {{ b.rooms }} · {{ b.adults + b.children }} guest{{ 's' if b.adults + b.children != 1 }}</p>
+  <div class="hm-tags"><span class="tag {{ 'warn' if kind == 'hold' else 'ok' }}">{{ 'Advance ' ~ (b.advance|rupees) if kind == 'hold' else ('In house' if b.status == 'checked_in' else 'Confirmed') }}</span>
+    <span class="tag">{{ b.nights }} night{{ 's' if b.nights != 1 }}</span>{% if b.room_numbers %}<span class="tag">#{{ b.room_numbers }}</span>{% endif %}</div>
+  <div class="hm-foot"><span class="btn sm dark">{{ 'Give discount' if kind == 'hold' else 'Open' }} {{ icon('right') }}</span>{% if props.get(b.property_id) %}<small>{{ props[b.property_id].name }}</small>{% endif %}</div>
+</a>
+{%- endmacro %}
+{# Premium home (owner, 2026-11-18): welcome, four colour tiles, the resort's own photos, then card columns #}
+<div class="hm-head">
+  <div class="hm-who">{{ logo_mark(40) }}<div><small>Welcome,</small><b>{{ welcome }}</b></div></div>
+  <a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a>
 </div>
-<div class="grid2">
-  <section class="card"><h3>Arriving today</h3>
-    {% for b in arrivals %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
-    {% else %}{{ empty("No arrivals today", "cal") }}{% endfor %}</section>
-  <section class="card"><h3>Leaving today</h3>
-    {% for b in departures %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ rooms[b.room_type_id].name }} × {{ b.rooms }}</span></a>
-    {% else %}{{ empty("No departures today", "cal") }}{% endfor %}</section>
+
+<div class="hm-tiles">
+  <a class="hm-tile t-blue" href="{{ BASE }}/stay"><span class="hm-ic">{{ icon('door') }}</span>
+    <span class="hm-txt"><small>Arrivals today</small><b>{{ arrivals|length }} arriving</b></span><span class="hm-go">{{ icon('plus') }}</span></a>
+  <a class="hm-tile t-amber" href="{{ BASE }}/stay"><span class="hm-ic">{{ icon('door') }}</span>
+    <span class="hm-txt"><small>Departures today</small><b>{{ departures|length }} leaving</b></span><span class="hm-go">{{ icon('right') }}</span></a>
+  <a class="hm-tile t-green" href="{{ BASE }}/stay"><span class="hm-ic">{{ icon('users') }}</span>
+    <span class="hm-txt"><small>In the house</small><b>{{ in_house|length }} staying</b></span><span class="hm-go">{{ icon('right') }}</span></a>
+  <a class="hm-tile t-violet" href="{{ BASE }}/reports/collections"><span class="hm-ic">{{ icon('bolt') }}</span>
+    <span class="hm-txt"><small>Collected today</small><b>{{ collected|rupees }}</b></span><span class="hm-go">{{ icon('right') }}</span></a>
 </div>
-<div class="grid2">
-  {% if holds %}<section class="card"><h3>Waiting for payment</h3>
-    {% for b in holds[:6] %}<a class="row" href="{{ BASE }}/bookings/{{ b.id }}"><b>{{ b.guest_name or b.guest_phone }}</b><span>{{ b.check_in.strftime('%d %b') }} · {{ b.advance|rupees }} advance · Give discount</span></a>{% endfor %}
-    {% if holds|length > 6 %}<a class="mini" href="{{ BASE }}/bookings?status=hold">See all {{ holds|length }}</a>{% endif %}</section>{% endif %}
-  <section class="card"><h3>Next 14 days</h3>
-  {% for p, days in occ %}
-  <div class="occ">{% if occ|length > 1 %}<div class="occ-name">{{ p.name }}</div>{% endif %}
-    <div class="occ-bars">{% for d in days %}<a href="{{ BASE }}/bookings?property_id={{ p.id }}&date={{ d.day }}" title="{{ d.day.strftime('%d %b') }}: {{ d.used }}/{{ d.total }} rooms">
-      <i style="height:{{ [d.pct, 4]|max }}%" class="{{ 'full' if d.pct >= 90 else 'mid' if d.pct >= 50 }}"></i><small>{{ d.day.day }}</small></a>{% endfor %}</div></div>
-  {% else %}{{ empty("Add a property to see occupancy", "building", BASE ~ "/properties", "Go to properties") }}{% endfor %}
+
+<section class="hm-hero{{ ' no-photo' if not banner }}">
+  {% for ref in banner %}<img src="{{ ref }}" alt="" class="{{ 'on' if loop.first }}" {{ 'loading="lazy"' if not loop.first }}>{% endfor %}
+  <div class="hm-hero-txt">
+    <small>{{ today.strftime('%A, %d %B') }}{% if place %} · {{ place }}{% endif %}</small>
+    <b>{{ tonight_used }} of {{ tonight_total }} rooms booked tonight</b>
+    <div class="hm-meter"><i style="width:{{ tonight_pct }}%"></i></div>
+  </div>
+  {% if not banner %}<a class="hm-hero-add" href="{{ BASE }}/properties">{{ icon('image') }} Add resort photos</a>{% endif %}
+</section>
+
+<div class="hm-cols">
+  <section class="hm-col">
+    <div class="hm-col-head"><h3>Arriving today</h3><a class="hm-all" href="{{ BASE }}/stay">All ({{ arrivals|length }})</a></div>
+    {% for b in arrivals[:3] %}{{ card(b) }}{% else %}<div class="hm-empty">{{ icon('cal') }}<span>No arrivals today</span></div>{% endfor %}
+  </section>
+  {% if holds %}<section class="hm-col">
+    <div class="hm-col-head"><h3>Waiting for payment</h3><a class="hm-all" href="{{ BASE }}/bookings?status=hold">All ({{ holds|length }})</a></div>
+    {% for b in holds[:3] %}{{ card(b, 'hold') }}{% endfor %}
+  </section>{% else %}<section class="hm-col">
+    <div class="hm-col-head"><h3>Leaving today</h3><a class="hm-all" href="{{ BASE }}/stay">All ({{ departures|length }})</a></div>
+    {% for b in departures[:3] %}{{ card(b) }}{% else %}<div class="hm-empty">{{ icon('door') }}<span>No departures today</span></div>{% endfor %}
+  </section>{% endif %}
+  <section class="hm-col">
+    <div class="hm-col-head"><h3>Coming up</h3><a class="hm-all" href="{{ BASE }}/bookings?status=paid">All ({{ upcoming|length }})</a></div>
+    {% for b in upcoming[:3] %}{{ card(b) }}{% else %}<div class="hm-empty">{{ icon('book') }}<span>No upcoming stays</span></div>{% endfor %}
   </section>
 </div>
+
+<section class="card hm-occ"><h3>Next 14 days</h3>
+{% for p, days in occ %}
+<div class="occ">{% if occ|length > 1 %}<div class="occ-name">{{ p.name }}</div>{% endif %}
+  <div class="occ-bars">{% for d in days %}<a href="{{ BASE }}/bookings?property_id={{ p.id }}&date={{ d.day }}" title="{{ d.day.strftime('%d %b') }}: {{ d.used }}/{{ d.total }} rooms">
+    <i style="height:{{ [d.pct, 4]|max }}%" class="{{ 'full' if d.pct >= 90 else 'mid' if d.pct >= 50 }}"></i><small>{{ d.day.day }}</small></a>{% endfor %}</div></div>
+{% else %}{{ empty("Add a property to see occupancy", "building", BASE ~ "/properties", "Go to properties") }}{% endfor %}
+</section>
 {% endblock %}
