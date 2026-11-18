@@ -204,9 +204,9 @@ def test_owner_gives_a_discount_before_payment_and_the_guest_gets_a_new_link(env
     assert seen == {"discount": 1500, "by": "owner@x.com"}
 
 
-def test_header_is_plain_with_the_day_night_switch(env):
+def test_header_is_plain_and_always_light(env):
     _repo, app, _ = env
     client, _ = login(app)
-    page = client.get(f"{BASE}/").text
-    assert 'id="theme-toggle"' in page and "Search anything..." in page and 'class="crumbs"' in page
+    page = client.get(f"{BASE}/").text  # dark theme removed (owner, 2026-11-18)
+    assert 'id="theme-toggle"' not in page and "rd-theme" not in page and "Search anything..." in page and 'class="crumbs"' in page
     assert "Arriving today <b>" not in page and "Ctrl K" not in page

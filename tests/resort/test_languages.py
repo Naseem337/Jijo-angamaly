@@ -253,14 +253,16 @@ def test_a_name_only_question_after_the_number_is_saved_is_sent(world):
     assert w.wa.texts()[-1] in ("We have your mobile saved. What is your name?", "Please share your name.")
 
 
-def test_a_hindi_voice_note_with_a_native_name_books_and_the_texts_stay_in_english_letters(world):
+def test_a_hindi_voice_note_with_a_native_name_asks_the_name_in_english_letters(world):
     w = world
     say(w, "Alleppey, 10 nov to 12 nov, 2 persons", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", check_out="2026-11-12", adults=2),
         reply("[no reply]"))
-    voice(w, "अनु, यही नंबर", reply("Aapka naam bata dijiye?"))  # the AI did not book: the code does
-    assert w.repo.list_bookings(phone=GUEST)[0].guest_name == "अनु"
-    assert w.wa.texts()[-1].startswith("Please pay")
+    voice(w, "अनु, यही नंबर", reply("Aapka naam bata dijiye?"))
+    # names only in English letters (owner, 2026-11-18): the Hindi-script name is not used, the name is asked
+    assert w.repo.list_bookings(phone=GUEST) == [] and w.wa.texts()[-1] == "Please share your name."
+    say(w, "Anu", GUEST, tool("create_booking", guest_name="Anu", mobile="same"), reply("[no reply]"))
+    assert w.repo.list_bookings(phone=GUEST)[0].guest_name == "Anu" and w.wa.texts()[-1].startswith("Please pay")
     no_native_script(w)
 
 

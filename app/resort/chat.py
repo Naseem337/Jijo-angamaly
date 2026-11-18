@@ -240,11 +240,9 @@ def contact_in(text: str) -> tuple[str, str] | None:
     if not mobile:
         return None
     rest = (text[:phone.start()] + " " + text[phone.end():]) if phone else _SAME_NO.sub(" ", text)
-    # a name typed (or spoken) in Malayalam / Tamil / Hindi script counts too: the booking keeps it, while texts to
-    # the guest stay in English letters (the summary simply has no "Guest -" line then)
-    words = [w for w in re.findall(r"[A-Za-zऀ-ॿ஀-௿ഀ-ൿ][\w.'ऀ-ॿ஀-௿"
-                                   r"ഀ-ൿ]*", rest)
-             if w.lower().strip(".,") not in _NOT_NAME and w.strip(".,") not in _NATIVE_NOT_NAME]
+    # names in English letters only (owner rule, 2026-11-18): a Malayalam word like "എന്ത്" ("what") was once saved
+    # as a guest's name. Without a Latin name the WhatsApp profile name is used, or the bot asks for it.
+    words = [w for w in re.findall(r"[A-Za-z][A-Za-z.']*", rest) if w.lower().strip(".,") not in _NOT_NAME]
     name = " ".join(words) if 1 <= len(words) <= 4 else ""
     return name, mobile
 

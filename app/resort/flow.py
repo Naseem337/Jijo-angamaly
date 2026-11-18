@@ -34,6 +34,8 @@ from app.whatsapp.parse import EchoMessage, InboundMessage
 
 log = logging.getLogger(__name__)
 
+# Guests never see a booking id (owner, 2026-11-18): 'booking RB-1D9E49', '(RB-1D9E49)', 'ID: RB-1D9E49' are removed.
+BOOKING_ID = re.compile(r"\s*\(?\b(?:id\s*:?\s*)?RB-[A-Z0-9]{6}\b\)?", re.IGNORECASE)
 AUTO_RESUME = timedelta(hours=24)
 INDIC = re.compile(r"[ऀ-ॿ஀-௿ഀ-ൿ]")
 
@@ -86,6 +88,7 @@ class BookingBot(IdProofMixin, ChatMixin):
 
     def _text(self, phone: str, text: str, *, repeat_ok: bool = False) -> bool:
         text = english_letters_only(text)  # never Malayalam / Tamil / Hindi letters in a text (owner, 2026-11-18)
+        text = BOOKING_ID.sub("", text).replace(" .", ".").strip()  # guests never see a booking id (owner, 2026-11-18)
         if not repeat_ok and self._already_sent(phone, text):
             log.info("Not sending a message twice to %s", mask_phone(phone))
             return False
@@ -334,6 +337,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         """Text inside the 24 h window, else the approved template. True only when the plain text went out."""
         phone = booking.guest_phone
         text = english_letters_only(text)  # never Malayalam / Tamil / Hindi letters in a text (owner, 2026-11-18)
+        text = BOOKING_ID.sub("", text).replace(" .", ".").strip()  # guests never see a booking id (owner, 2026-11-18)
         try:
             self.wa.send_text(phone, text)
             self._log(phone, text, "system")
