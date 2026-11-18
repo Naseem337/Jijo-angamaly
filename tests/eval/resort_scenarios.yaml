@@ -17,16 +17,16 @@
   cat: booking
   turns: ["Hi, I want to book a room for 2 adults on Dec 20 for 2 nights"]
   expect:
-    - "checks availability via tool"
-    - "gives room options with price from tool"
-    - "asks name"
-    - "no invented prices"
+    - "owner rule: location question first (Alleppey or Kanthalloor ?), then the form for what is missing"
+    - "owner rule: ONE room by priority, never a list of options"
+    - "price only in the glimpse, from data"
+    - "then asks name and mobile"
     - "lang:en"
 - id: A02
   cat: booking
   turns: ["room undo?"]
   expect:
-    - "asks dates + number of guests in ONE message"
+    - "owner rule: location question first, then the form (Check in / Check out / Number of persons) in ONE message"
     - "lang:manglish"
 - id: A03
   cat: booking
@@ -41,8 +41,8 @@
   expect:
     - "resolves 'naale' to tomorrow's date and repeats the date back"
     - "collects missing details step by step"
-    - "confirms booking only after customer says confirm"
-    - "booking id in reply"
+    - "owner rule: name + mobile -> enquiry summary + payment link; confirmed only after payment"
+    - "owner rule: the client's summary format (no booking id line)"
 - id: A05
   cat: booking
   turns: ["Need room this weekend"]
@@ -367,8 +367,8 @@
   turns: ["I paid, here is screenshot"]
   attach: image
   expect:
-    - "does not claim payment verified unless system verifies"
-    - "marks pending + notifies staff"
+    - "owner rule: images are not read or answered"
+    - "payment is confirmed only by Razorpay (checked automatically)"
 - id: E03
   cat: payment
   turns: ["Can I pay at checkin?"]
@@ -378,8 +378,7 @@
   cat: payment
   turns: ["GPay number tharo?"]
   expect:
-    - "only the owner's configured UPI/payment details"
-    - "never invented"
+    - "owner rule: payment only through the Razorpay link; never invents a UPI / GPay number"
     - "lang:manglish"
 - id: E05
   cat: payment
@@ -686,8 +685,8 @@
   cat: faq
   turns: ["Photos of the room?"]
   expect:
-    - "sends configured photos"
-    - "max per turn limit"
+    - "owner rule: before availability is checked, the next step (location / form) instead of photos"
+    - "after availability: configured photos, max per turn"
 - id: J08
   cat: faq
   turns: ["Campfire / DJ possible?"]
@@ -826,8 +825,7 @@
   cat: reminder
   setup: {booking: {checkin: "+1 day"}}
   expect:
-    - "day-before reminder template sent in customer's language"
-    - "includes check-in time + location"
+    - "owner rule: day before check-in only 'Please bring your ID proof while coming.'"
 - id: M05
   cat: reminder
   setup: {booking: {checkout: today}}
