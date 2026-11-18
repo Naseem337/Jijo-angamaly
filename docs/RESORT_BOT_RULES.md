@@ -100,6 +100,21 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Each sent photo is stored as its own "[photo] ..." row. They no longer count towards the 20: a run of photos is one
   "[photos sent: N]" note (12 glimpse photos used to push the guest's dates and name out of view).
 
+## Languages (Step 3, owner 2026-11-18)
+- Every text is in English letters. English in -> English. Malayalam script / Manglish / Malayalam voice -> Manglish.
+  Tamil script / Tanglish / Tamil voice -> Tanglish. Hindi script / Hinglish / Hindi voice -> Hinglish. Never a voice reply.
+- The fixed step messages follow the guest's language (i18n sets "mn" / "tn" / "hn"); the greeting, the location
+  question and the form keep the owner's exact English wording; summary, confirmation and invoice stay English.
+- The language is read on every message, before any code step answers; "ok", "2", emoji and "thanks" keep it; a 1-2
+  word message is read with what the guest wrote since our last reply.
+- "English please" / "Tamil la pesunga" / "Malayalathil" / "Hindi mein baat karo" lock that language until the guest
+  asks for another one or writes a long message (4+ words) clearly in another language (st["lang_lock"]).
+- Tamil vs Malayalam in English letters: TANGLISH_WORDS (venum, irukka, evlo, sollunga, pannunga, enakku, unga,
+  inniki, naalaikku, maathanum, ku...) vs MANGLISH_WORDS (venam, undo, ethra, parayamo, cheyyamo, enikk, ningal, innu,
+  naale, tharo, vilikkanam...).
+- After the location question only a short, place-like answer is read as a town ('alloy'); questions ('ethra aanu
+  rate?', 'pool undo?') and ordinary words ('confirm') go to the normal handling.
+
 ## Strict form, enforced in code (client, 2026-11-18)
 - The AI never asks for dates, nights or persons in its own words. Any such ask (a question, or "please share your
   dates") is replaced by the fixed form; the rest of its answer is kept ("Yes, right on the beach." + form), and an

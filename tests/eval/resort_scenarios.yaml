@@ -531,7 +531,8 @@
   cat: language
   turns: ["कमरा चाहिए"]
   expect:
-    - "unsupported language -> polite reply in English saying English/Malayalam/Tamil supported"
+    - "owner rule (2026-11-18): Hindi is supported -> Hinglish text, fixed messages in Hinglish too"
+    - "lang:hinglish"
 - id: G14
   cat: language
   turns: ["entha rate", "sorry English please"]

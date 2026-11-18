@@ -129,14 +129,14 @@
 | G05 | language | SUPPORTED | TANGLISH_WORDS (venum, enakku...) beat Manglish. |
 | G06 | language | SUPPORTED | Re-detected per message. |
 | G07 | language | SUPPORTED | Re-detected per message. |
-| G08 | language | PARTIAL | Tanglish -> Manglish switch on 'pool undo?' depends on word lists; a Tamil guest's short msg is kept Tanglish by design. |
+| G08 | language | SUPPORTED | Tanglish -> Manglish switch on 'pool undo?' depends on word lists; a Tamil guest's short msg is kept Tanglish by design. |
 | G09 | language | SUPPORTED | Neutral messages keep the last language. |
 | G10 | language | SUPPORTED | Greeting is the fixed English line. |
 | G11 | language | SUPPORTED | Mixed -> Manglish. |
 | G12 | language | SUPPORTED | Tanglish (saar/irukka/evlo). |
-| G13 | language | CONFLICT | Hindi is SUPPORTED today (Hinglish replies). Scenario wants Hindi unsupported. |
-| G14 | language | PARTIAL | No explicit language lock; 'English please' works for that message, later neutral msgs keep English, but a Manglish word later switches back. |
-| G15 | language | PARTIAL | No explicit language lock. |
+| G13 | language | SUPPORTED | Hindi is SUPPORTED today (Hinglish replies). Scenario wants Hindi unsupported. |
+| G14 | language | SUPPORTED | No explicit language lock; 'English please' works for that message, later neutral msgs keep English, but a Manglish word later switches back. |
+| G15 | language | SUPPORTED | No explicit language lock. |
 | H01 | voice | SUPPORTED | Sarvam STT; text reply in Manglish; resort bot has no voice-out. |
 | H02 | voice | SUPPORTED | STT; text reply in Tanglish. |
 | H03 | voice | SUPPORTED | STT; English text reply. |
@@ -198,8 +198,15 @@
 |---|---|
 | A01 | Keep the rule: one room by priority, price only in the glimpse. Scenario expectation changes to match. |
 | E02 | Keep the rule: images are not read or answered. |
-| G13 | **Change:** Hindi is no longer supported. Hindi script (and Hinglish) gets a polite English reply listing English, Malayalam and Tamil. Build in Step 3. |
+| G13 | **Reversed by the owner (2026-11-18):** Hindi IS supported. Hindi script / Hinglish / Hindi voice -> Hinglish text everywhere, including the fixed step messages. Done in Step 3. |
 | J07 | Keep the rule: photos only after availability is checked. |
 | M04 | Keep the rule: the day-before message is only "Please bring your ID proof while coming." |
 
 The eval (Step 2) must judge A01, E02, J07 and M04 by the owner's rules, not by the scenario text.
+
+## Step 3 status (2026-11-18)
+
+- Tamil guests: Tanglish everywhere, including the fixed step messages (new "tn" set). Hindi guests: Hinglish everywhere ("hn" set). Malayalam: Manglish ("mn"). Greeting, location question, form, summary, confirmation and invoice keep the owner's English wording.
+- Language lock: "English please", "Tamil la pesunga", "Malayalathil", "Hindi mein baat karo" stay until the guest asks for another language or writes a long message (4+ words) clearly in another one. G14, G15 SUPPORTED.
+- Language is read before any code step answers (location question, form, 'ok', photos, greeting). G06, G08, C11, E04, L02 fixed.
+- Mock eval: 129 / 130 pass. Live G category: 15 / 15 pass. N01 turns 7-9: a Tamil guest writing a full English sentence ("one is a kid 6 years") gets English, per "English in -> English out" (owner to confirm).

@@ -24,7 +24,7 @@
 <form class="mg-tools" method="get">
   <input type="hidden" name="status" value="{{ f.get('status', '') }}">
   <span class="mg-count">{{ items|length }} booking{{ 's' if items|length != 1 }}</span>
-  <label class="mg-search">{{ icon('search') }}<input name="q" placeholder="Search name, phone or ID…" value="{{ f.get('q','') }}"></label>
+  <label class="mg-search">{{ icon('search') }}<input name="q" placeholder="Search name or phone…" value="{{ f.get('q','') }}"></label>
   <select name="sort" onchange="this.form.submit()" aria-label="Sort"><option value="">Newest first</option>
     <option value="stay" {{ 'selected' if f.get('sort') == 'stay' }}>By stay date</option><option value="amount" {{ 'selected' if f.get('sort') == 'amount' }}>By amount</option></select>
   <details class="mg-more"><summary class="btn">Filters</summary><div class="mg-filters">
@@ -34,11 +34,10 @@
     <button class="btn primary">Apply</button><a class="btn ghost" href="{{ BASE }}/bookings?property_id=">Clear</a></div></details>
 </form>
 
-<div class="mg-table"><table><thead><tr><th>Guest</th><th>Booking</th><th>Stay</th><th>Room</th><th>Guests</th><th>Status</th><th class="r">Amount</th><th>Booked on</th><th></th></tr></thead><tbody>
+<div class="mg-table"><table><thead><tr><th>Guest</th><th>Stay</th><th>Room</th><th>Guests</th><th>Status</th><th class="r">Amount</th><th>Booked on</th><th></th></tr></thead><tbody>
 {% for b in items %}
 <tr class="click" data-href="{{ BASE }}/bookings/{{ b.id }}">
   <td><div class="mg-who"><span class="mg-av">{{ (b.guest_name or '?')[:1]|upper }}</span><div><b>{{ b.guest_name or 'Guest' }}</b><small>{{ b.guest_phone }}</small></div></div></td>
-  <td class="mono">{{ b.id }}</td>
   <td>{{ b.check_in.strftime('%d %b') }} → {{ b.check_out.strftime('%d %b %Y') }}<small class="block">{{ b.nights }} night{{ 's' if b.nights != 1 }}</small></td>
   <td>{{ rooms[b.room_type_id].name if b.room_type_id in rooms else '' }}{% if b.rooms > 1 %} × {{ b.rooms }}{% endif %}{% if b.room_numbers %}<small class="block">#{{ b.room_numbers }}</small>{% endif %}</td>
   <td>{{ b.adults + b.children }}</td>
@@ -46,7 +45,7 @@
   <td class="r"><b>{{ b.total|rupees }}</b>{% if b.paid_amount %}<small class="block">{{ b.paid_amount|rupees }} paid</small>{% else %}<small class="block">Unpaid</small>{% endif %}</td>
   <td>{{ b.created_at|ist('%d %b %Y · %I:%M %p') }}</td>
   <td class="r"><a class="mg-dots" href="{{ BASE }}/bookings/{{ b.id }}" aria-label="Open">•••</a></td></tr>
-{% else %}<tr><td colspan="9">{{ empty("No bookings match", "book", BASE ~ "/bookings/new", "Create a booking") }}</td></tr>{% endfor %}
+{% else %}<tr><td colspan="8">{{ empty("No bookings match", "book", BASE ~ "/bookings/new", "Create a booking") }}</td></tr>{% endfor %}
 </tbody></table>
 <div class="mg-foot"><span>{{ items|length }} shown</span><span>{{ collected|rupees }} collected</span></div></div>
 {% endblock %}
