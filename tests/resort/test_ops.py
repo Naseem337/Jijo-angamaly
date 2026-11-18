@@ -29,6 +29,7 @@ def no_whatsapp(monkeypatch):
     monkeypatch.setattr(integrations, "announce_cancelled", lambda b, amount: SENT.append(("cancelled", b.id)))
     monkeypatch.setattr(integrations, "announce_checked_out", lambda b: SENT.append(("checked_out", b.id)))
     monkeypatch.setattr(integrations, "send_staff_text", lambda phone, text: SENT.append((phone, text)))
+    monkeypatch.setattr(integrations, "send_staff_document", lambda phone, data, name: SENT.append((phone, name, data)))
 
 
 @pytest.fixture()
@@ -169,8 +170,11 @@ def test_send_invoice_on_whatsapp(env):
     client, token = login(app)
     resp = post(client, token, f"/bookings/{b.id}/send-invoice")
     assert resp.status_code == 303 and "toast=Invoice" in resp.headers["location"]
-    phone, text = SENT[-1]
-    assert phone == PHONE and "/resort/invoice/" in text and billing.invoice_number(b, p1) in text
+    phone, name, data = SENT[-1]  # the PDF itself, no text message (owner, 2026-11-18)
+    assert phone == PHONE and name == f"Invoice-{billing.invoice_number(b, p1)}.pdf" and data.startswith(b"%PDF")
+    assert not any(len(x) == 2 and x[0] == PHONE for x in SENT)
+    pdf = client.get(f"{BASE}/bookings/{b.id}/invoice.pdf")
+    assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf" and pdf.content.startswith(b"%PDF")
 
 
 # --------------------------------------------------------------------------- cancellation and refunds

@@ -16,6 +16,7 @@ dependencies = [
     "jinja2>=3.1",
     "itsdangerous>=2.2",
     "python-multipart>=0.0.9",
+    "fpdf2>=2.8",  # the guest invoice as a PDF on WhatsApp
 ]
 
 [project.optional-dependencies]

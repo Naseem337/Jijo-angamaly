@@ -123,6 +123,14 @@ class WhatsAppClient:
         data = self._post({"recipient_type": "individual", "to": to_wa_id(to), "type": "image", "image": image})
         return data["messages"][0]["id"]
 
+    def send_document(self, to: str, media_id: str, filename: str, caption: str = "") -> str:
+        """Send an uploaded file (a PDF invoice) as a document with its file name."""
+        document: dict[str, str] = {"id": media_id, "filename": filename}
+        if caption:
+            document["caption"] = caption[:1024]
+        data = self._post({"recipient_type": "individual", "to": to_wa_id(to), "type": "document", "document": document})
+        return data["messages"][0]["id"]
+
     def send_template(self, to: str, name: str, language: str, body_params: list[str], *,
                       header_image_id: str | None = None) -> str:
         """Send an approved template (alerts, staff notices). header_image_id fills an image

@@ -16,6 +16,7 @@ from app.core.clock import IST
 from app.core.phone import try_normalize_phone
 from app.resort import availability as av
 from app.resort import billing, refunds, stay
+from app.resort.invoice_pdf import build_invoice_pdf, invoice_filename
 from app.resort.dashboard import integrations
 from app.resort.dashboard.deps import (BASE, COOKIE, HERE, Auth, current_property, form_of, get_repo,
                                        make_session, now_utc, page, require_owner, require_user, templates, toast_url)
@@ -646,16 +647,24 @@ async def invoice_send(booking_id: str, request: Request, auth: Auth = Depends(r
     repo = get_repo()
     b = _booking(repo, auth, booking_id)
     ctx = _invoice_ctx(repo, b)
-    f, link = ctx["f"], f"{_public_base(request)}/resort/invoice/{invoice_token(b)}"
-    text = (f"Hello{' ' + b.guest_name if b.guest_name else ''}, your invoice {ctx['invoice_no']} for "
-            f"{ctx['prop'].name if ctx['prop'] else 'your stay'} ({b.check_in:%d %b} to {b.check_out:%d %b}): "
-            f"total ₹{f.bill_total:,}, paid ₹{f.net_paid:,}, balance ₹{f.balance:,}.\nView or print it here "
-            f"(link works for 7 days): {link}")
-    error = integrations.send_staff_text(b.guest_phone, text)
+    # the invoice itself as a PDF file, with no text message around it (owner, 2026-11-18)
+    name = invoice_filename(ctx["invoice_no"])
+    error = integrations.send_staff_document(b.guest_phone, build_invoice_pdf(ctx), name)
     if error:
         raise redirect(toast_url(_url(b), f"!{error}"))
-    repo.add_chat(ChatMessage(b.guest_phone, "out", text, now_utc(), source="staff"))
-    raise redirect(toast_url(_url(b), "Invoice link sent on WhatsApp"))
+    repo.add_chat(ChatMessage(b.guest_phone, "out", f"[invoice] {name}", now_utc(), source="staff"))
+    raise redirect(toast_url(_url(b), "Invoice PDF sent on WhatsApp"))
+
+
+@router.get("/bookings/{booking_id}/invoice.pdf")
+def invoice_pdf(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
+    """Download the same PDF the guest gets."""
+    repo = get_repo()
+    b = _booking(repo, auth, booking_id)
+    ctx = _invoice_ctx(repo, b)
+    name = invoice_filename(ctx["invoice_no"])
+    return Response(build_invoice_pdf(ctx), media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{name}"'})
 
 
 @public_router.get("/invoice/{token}")
