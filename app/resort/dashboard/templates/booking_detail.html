@@ -34,6 +34,7 @@
     <div><small>Paid</small><b class="ok">{{ f.net_paid|rupees }}</b></div>
     <div><small>Balance at property</small><b class="{{ 'warn' if f.balance else 'ok' }}">{{ f.balance|rupees }}</b></div>
   </div>
+  <details class="more"><summary>Payment details</summary>{# folded away (owner, 2026-11-18): opens on a click #}
   <dl class="kv">
     <dt>Payment status</dt><dd>{% if b.paid_amount %}{{ pill('paid') }}{% else %}{{ pill(b.status) }}{% endif %}</dd>
     <dt>Method</dt><dd>{{ method_chip(b.payment_method) }}</dd>
@@ -48,7 +49,7 @@
     <dt>Balance still to pay</dt><dd>{{ f.balance|rupees }}</dd>
     <dt>Paid at</dt><dd>{{ b.paid_at|ist or '—' }}</dd>
     <dt>Received by</dt><dd>{{ b.received_by or ('Razorpay (automatic)' if b.payment_method == 'online' else '—') }}</dd>
-  </dl>
+  </dl></details>
   {% if payments %}<h3>Payments received</h3>
   <ul class="history">{% for p in payments %}<li><span>{{ p.at|ist if p.at else '' }} · {{ p.method|method_label }} · <b>{{ p.amount|rupees }}</b> · ref <code>{{ p.ref }}</code>{% if p.by %} · {{ p.by }}{% endif %}{% if p.note %} · {{ p.note }}{% endif %}</span> <a class="mini" href="{{ BASE }}/bookings/{{ b.id }}/receipt/{{ p.n }}" target="_blank" rel="noopener">Receipt</a></li>{% endfor %}</ul>{% endif %}
   {% if refund_list %}<h3>Refunds</h3>
