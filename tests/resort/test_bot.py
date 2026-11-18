@@ -768,6 +768,18 @@ def test_after_payment_confirmation_then_policy_then_stay_details_and_no_invoice
     assert sent[2][2].startswith("Location") and "Wifi" in sent[2][2]
 
 
+def test_after_not_available_the_guest_writing_on_gets_the_form_for_other_dates(world):
+    w = world
+    for rt in w.repo.list_room_types(w.p1.id):
+        w.repo.save_room_type(RoomType(**{**rt.__dict__, "units": 0}))
+    say(w, "Alleppey 12 dec to 14 dec 2 people", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-14", adults=2),
+        reply("[no reply]"))
+    assert w.wa.texts()[-1] == "Sorry, rooms are not available for your dates."
+    say(w, "Rahul, 9876543210", GUEST, reply("[no reply]"))  # never silence (stress test, 2026-11-18)
+    assert w.wa.texts()[-1].startswith("Please share these details")
+
+
 def test_talk_to_owner_pauses_the_bot_and_sends_the_owner_a_summary(world):
     w = world
     say(w, "I want to talk to the owner", GUEST, tool("talk_to_owner", reason="guest asked for the owner"),

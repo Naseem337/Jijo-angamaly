@@ -1340,6 +1340,12 @@ class ChatMixin:
                 reply = t("ask_name", st.get("lang", "en"))
             self._save(phone, st)
         queued = bool(ctx.after or ctx.summary_message or ctx.pay_message or ctx.photos)
+        if not queued and not ctx.handed_off and NO_REPLY in reply.lower() and (self.repo.last_outbound_text(phone) or "") \
+                in {t("rooms_none", lg) for lg in ("en", "mn", "tn", "hn")}:
+            # 'not available' was the last thing said and the guest writes on (often their name and number): ask for
+            # other dates with the form, never silence and never the same 'not available' twice (stress test, 2026-11-18)
+            ctx.after.append(t("form", st.get("lang", "en")))
+            queued = True
         quiet = NO_REPLY in reply.lower()
         if quiet and not queued and GREETING.match(text):  # a mid-chat "hi" always gets an answer
             reply, quiet = t("greet_again", st.get("lang", "en")), False
@@ -1630,6 +1636,8 @@ class ChatMixin:
         """The last rooms went to another guest while this one was giving their name (stress test, 2026-11-18: with
         many guests at once the AI left the losers unanswered). The fixed 'not available' line goes, once per turn."""
         msg = t("rooms_none", ctx.st.get("lang", "en"))
+        if (self.repo.last_outbound_text(ctx.phone) or "") == msg:
+            msg = t("form", ctx.st.get("lang", "en"))  # already told: ask for other dates instead of repeating it
         if msg not in ctx.after:
             ctx.after.append(msg)
         ctx.silent = True
