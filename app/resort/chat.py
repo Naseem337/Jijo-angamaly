@@ -109,7 +109,9 @@ _MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun",
                                        "dec"), 1)}
 _MON = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
 _DAY_MON = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s*(?:of\s+)?{_MON}", re.IGNORECASE)
-_MON_DAY = re.compile(rf"\b{_MON}\s*(\d{{1,2}})(?:st|nd|rd|th)?\b", re.IGNORECASE)
+_MON_DAY = re.compile(rf"\b{_MON}\s*(\d{{1,2}})(?:st|nd|rd|th)?\b"  # 'dec 12', never 'december 2 people'
+                      r"(?!\s*(?:persons?|people|pax|per\b|peru|adults?|guests?|members|nights?|days?|aal|log|rooms?))",
+                      re.IGNORECASE)
 _NUMERIC = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b")
 _DAY_ONLY = re.compile(r"\b(?:till|to|until|upto|up to|-|thru|through)\s*(\d{1,2})(?:st|nd|rd|th)?\b"
                        r"(?!\s*(?:[/.-]\d|person|people|pax|per\b|adult|night|room|guest|member|aal|days?))", re.IGNORECASE)
@@ -267,6 +269,17 @@ LOG_LINE = re.compile(r"\[(?:invoice|photos? sent|photo|image|template|restart|n
 PAYMENT_ASK = re.compile(r"\b(?:pay\w*|paid|link|advance|refund|razorpay|upi|gpay|transaction|amount|balance)\b",
                          re.IGNORECASE)
 STALE_PAY = re.compile(r"\b(?:payment|pay|paid|link|advance)\b|confirm aak", re.IGNORECASE)
+FORM_LABELS = re.compile(r"check[\s-]?in\s*:|check[\s-]?out\s*:|(?:number of )?persons\s*:", re.IGNORECASE)
+PHOTO_ASK = re.compile(r"\b(?:photos?|pics?|pictures?|images?|fotos?|padam|padangal|video)\b|ഫോട്ടോ|படம்|फोटो",
+                       re.IGNORECASE)
+WISH_CORE = {"room", "rooms", "resort", "resorts", "booking", "book", "stay", "availability", "available", "cottage",
+             "kamra", "accommodation"}
+WISH_WORDS = WISH_CORE | {"a", "an", "any", "is", "are", "there", "i", "we", "need", "want", "wanted", "looking", "for",
+                          "please", "pls", "plz", "sir", "hi", "hello", "venam", "venum", "veno", "undo", "und", "unda",
+                          "kittumo", "chahiye", "hai", "kya", "milega", "vendum", "irukka", "iruka", "do", "you", "have",
+                          "to", "the", "some", "can", "get", "me", "my", "ok", "now", "today", "one", "ondo", "aano",
+                          "cheyyan", "cheyyanam", "enquiry", "details", "info", "information", "in", "at", "on",
+                          "near", "il", "le", "mein", "la", "le", "from"}
 RESTART = re.compile(r"^\s*(?:restart|reset|start again|start over|new chat)\s*[.!]*\s*$", re.IGNORECASE)
 RESTART_MARK = "[restart]"  # stored in the chat; the AI's view of the conversation begins after it
 SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE)
@@ -608,7 +621,7 @@ class ChatMixin:
         rest of the reply). The owner's form ALWAYS goes instead, strictly (client, 2026-11-18)."""
         if (st.get("bk") or {}).get("check_in"):
             return False, reply
-        if reply.strip() in {t("form", "en"), t("form", "mn")}:  # it typed the form itself
+        if reply.strip() in {t("form", "en"), t("form", "mn")} or len(FORM_LABELS.findall(reply)) >= 2:  # its own form
             return True, ""
         keep, asked = [], False
         for sentence in re.split(r"(?<=[.?!])\s+|\n+", reply):
@@ -677,24 +690,82 @@ class ChatMixin:
         self._save(phone, st)
         if any(m in ctx.after for m in (t("form", "en"), t("form", "mn"))):  # once per turn
             return
-        if self._form_was_last(phone):  # never the same form twice in a row (client: nothing sent twice)
-            if not rest and GREETING.match(ctx.text or ""):  # a mid-chat 'hi' still gets an answer
-                self._text(phone, t("greet_again", lang))
-            return
-        self._text(phone, t("form", lang), repeat_ok=True)
+        form = self._missing_form(lang, got)  # the owner's form, only the lines still missing (never silence)
+        last = self.repo.last_outbound_text(phone) or ""
+        if form == last:
+            form = t("fill_form", lang)  # the same form is just above: point to it
+            if form == last:
+                return
+        self._text(phone, form, repeat_ok=True)
+
+    @staticmethod
+    def _missing_form(lang: str, got: dict[str, Any]) -> str:
+        """'Please share these details:' with only the lines the guest has not given yet ('dec 20 nu' leaves Check out and
+        Number of persons). With nothing given it is the full form."""
+        lines = t("form", lang).split("\n")
+        have = {"check in": "check_in", "check out": "check_out", "number of persons": "persons"}
+        keep = [ln for ln in lines if not any(ln.lower().startswith(k) and got.get(v) for k, v in have.items())]
+        return "\n".join(keep)
 
     def _no_stale_payment(self, phone: str, guest_text: str, reply: str) -> str:
         """A guest whose booking is paid, with nothing waiting for payment, is never told to complete a payment or
         offered the link again, unless they asked about payment themselves (2026-11-18)."""
-        if not reply or PAYMENT_ASK.search(guest_text):
+        if not reply or PAYMENT_ASK.search(guest_text) or guest_text.startswith(("[image]", "[The guest sent an image")):
             return reply
         now = self.clock.now()
         rows = self.repo.list_bookings(phone=phone, limit=5)
-        if not any(b.status in ("paid", "checked_in") for b in rows) or any(
-                b.status == "hold" and b.hold_expires_at and b.hold_expires_at > now for b in rows):
-            return reply
+        if any(b.status == "hold" and b.hold_expires_at and b.hold_expires_at > now for b in rows):
+            return reply  # a booking really waits for payment: the AI may talk about it
+        if (self.st_of(phone).get("bk") or {}).get("chosen"):
+            return reply  # a booking is being made right now
         keep = [s for s in re.split(r"(?<=[.?!])\s+|\n+", reply) if s.strip() and not STALE_PAY.search(s)]
         return " ".join(keep).strip()
+
+    def next_step(self, phone: str, st: dict[str, Any]) -> str | None:
+        """The owner's flow step still open in this conversation, as its fixed message, or None:
+        location question -> form -> (rooms, glimpse, photos) -> name and mobile -> summary and payment link."""
+        lang = st.get("lang", "en")
+        now = self.clock.now()
+        if any(b.status == "hold" and b.hold_expires_at and b.hold_expires_at > now
+               for b in self.repo.list_bookings(phone=phone, limit=3)):
+            return None  # the payment link is out; nothing more to ask
+        bk = st.get("bk") or {}
+        if bk.get("chosen"):
+            return None  # a summary waits for the guest's answer: 'ok' / 'yes' is that answer (the AI books it)
+        if bk.get("check_in") and st.get("checked"):
+            return t("ask_contact", lang)
+        if st.get("form_place") and not bk.get("check_in"):
+            return t("form", lang)
+        asked_location = t("ask_location", lang, towns=" or ".join(self._towns()))
+        if any(m.direction == "out" and m.text == asked_location for m in self._session_rows(phone)):
+            return asked_location
+        return None
+
+    def st_of(self, phone: str) -> dict[str, Any]:
+        return self.repo.get_state(phone)
+
+    def booking_wish(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """'Rooms?', 'room venam', 'need a room', 'resort booking': the owner's next fixed step in code, never an AI guess
+        (the AI once answered 'Rooms?' with an old booking's payment talk, 2026-11-18). Location question, or the form
+        when the place is already known or named."""
+        words = re.findall(r"[^\W\d_]+", text.lower())
+        if not words or len(words) > 7 or not any(w in WISH_CORE for w in words):
+            return None
+        if any(w not in WISH_WORDS and not self._named_place(w) for w in words):
+            return None  # it says more than 'I want a room' (a question about the rooms): the AI answers
+        if (st.get("bk") or {}).get("check_in"):
+            return None  # a booking is in progress: the AI carries on from there
+        self._language_note(st, text)  # reads the guest's language (Manglish / Tanglish ...) as the AI path does
+        lang = st.get("lang", "en")
+        prop = self._named_place(text)  # the owner always asks the location first, unless the guest named it
+        if prop is None:
+            self._text(phone, t("ask_location", lang, towns=" or ".join(self._towns())), repeat_ok=True)
+            self._save(phone, st)
+            return "location"
+        st["form_place"] = prop.id
+        self._save(phone, st)
+        self._text(phone, t("form", lang), repeat_ok=True)
+        return "form"
 
     def _form_was_last(self, phone: str) -> bool:
         return (self.repo.last_outbound_text(phone) or "") in {t("form", "en"), t("form", "mn")}

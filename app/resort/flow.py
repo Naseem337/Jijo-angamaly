@@ -21,7 +21,7 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import GREETING, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
+from app.resort.chat import GREETING, PHOTO_ASK, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
@@ -247,8 +247,21 @@ class BookingBot(IdProofMixin, ChatMixin):
             return outcome
         if st.get("fb") and (outcome := self._fb_step(phone, st, text)):
             return outcome
-        if is_ack(text) and not self._bot_asked_something(phone, st):
-            return "quiet"  # "ok" / "thanks" after a statement: no reply, the guest will write if they want more
+        if is_ack(text):  # "ok" mid-chat (owner, 2026-11-18): carry on to the step still open, else stay quiet
+            if step := self.next_step(phone, st):
+                if step == (self.repo.last_outbound_text(phone) or ""):
+                    return "quiet"  # the open step is the last thing we said: wait for their answer
+                self._text(phone, step, repeat_ok=True)
+                return "next_step"
+            if not self._bot_asked_something(phone, st):
+                return "quiet"
+        if PHOTO_ASK.search(text) and not st.get("checked"):
+            # photos come with the glimpse once rooms are found (owner's flow); before that, the next step
+            step = self.next_step(phone, st) or t("ask_location", st.get("lang", "en"), towns=" or ".join(self._towns()))
+            if step == (self.repo.last_outbound_text(phone) or "") and step == t("form", st.get("lang", "en")):
+                step = t("fill_form", st.get("lang", "en"))  # the form is just above: point to it, never silence
+            self._text(phone, step, repeat_ok=True)
+            return "next_step"
         if GREETING.match(text) and not st.get("bk") and self._places() and not self._chatting_now(phone):
             self._save(phone, st)
             return self._greet(phone, st, text)
@@ -259,6 +272,8 @@ class BookingBot(IdProofMixin, ChatMixin):
             self._text(phone, t("greet", st.get("lang", "en")), repeat_ok=True)
             self._save(phone, st)
             return "greeting"
+        if outcome := self.booking_wish(phone, st, text):
+            return outcome
         if outcome := self._location_answer(phone, st, text):
             return outcome
         return self._converse(phone, st, text, in_id)

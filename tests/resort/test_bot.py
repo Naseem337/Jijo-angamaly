@@ -169,11 +169,12 @@ def test_fixed_messages_are_never_in_native_script():
 def test_a_booking_request_is_asked_which_resort_including_one_not_open_online(world):
     w = world
     w.repo.save_property(Property(**{**w.p2.__dict__, "active": False}))  # Kanthalloor: no online booking yet
-    say(w, "resort booking", GUEST, tool("ask_location"), reply("Which one sir, Alleppey or Munnar?"))
+    say(w, "resort booking", GUEST)
     sent = w.wa.texts()
     towns = [(p.city or p.name).split(",")[0].strip() for p in w.repo.list_properties(active_only=False)]
     assert sent == [f"Sure, Kindly confirm the Location 📍\n{' or '.join(towns)} ?"]  # the AI's own line is not sent
-    assert len(towns) == 2 and "online booking is not open yet" in w.llm.calls[0].system
+    say(w, "is it near the beach?", GUEST, reply("Yes."))
+    assert len(towns) == 2 and "online booking is not open yet" in w.llm.calls[-1].system
 
 
 def test_the_ai_asking_which_location_in_its_own_words_is_replaced_by_the_owners_question(world):
@@ -237,6 +238,12 @@ def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_t
     prop_refs = [ph.save_photo(png) for _ in range(4)]
     w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "photo_urls": room_refs}))
     w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": prop_refs}))
+    assert say(w, "deluxe room photos undo?") == "next_step"  # before the dates: the next step, not photos
+    assert w.wa.texts()[-1].startswith("Sure, Kindly confirm the Location") and not w.wa.to(GUEST)[:-1]
+    w.wa.sent.clear()
+    st = w.repo.get_state(GUEST)
+    st["checked"] = "rooms were found"  # after the availability check, photos go on request
+    w.repo.set_state(GUEST, st)
     say(w, "deluxe room photos undo?", GUEST, tool("send_photos", place="Pozhiyoram", room_type="Deluxe"), reply("[no reply]"))
     images = [p for _, k, p in w.wa.to(GUEST) if k == "image"]
     assert len(images) == 4 and w.wa.texts() == []  # the room's own photos first, at most 4, no extra text
@@ -257,7 +264,7 @@ def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then
     w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": general,
                                      "intro": "Your Beachfront Hideout Awaits!\n{room} - {price}/Night/Room"}))
     w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "photo_urls": room}))
-    say(w, "I need a resort", GUEST, tool("ask_location"), reply("[no reply]"))
+    say(w, "I need a resort", GUEST)
     assert say(w, "Alleppey") == "form"
     assert [k for _, k, _ in w.wa.to(GUEST)] == ["text", "text"]  # no photos before the form any more
     start = len(w.wa.to(GUEST))
@@ -277,7 +284,7 @@ def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then
                                            ("kanthaloor", "p2"), ("poziyoram", "p1")])
 def test_a_misspelt_place_is_understood_and_the_form_follows(world, answer, place):
     w = world
-    say(w, "I need a resort", GUEST, tool("ask_location"), reply("[no reply]"))
+    say(w, "I need a resort", GUEST)
     assert say(w, answer) == "form"
     assert w.repo.get_state(GUEST)["form_place"] == getattr(w, place).id
     assert w.wa.texts()[-1].startswith("Please share these details")
@@ -317,22 +324,23 @@ def test_the_conversation_is_remembered_through_a_long_pause_the_same_day(world)
 
 def test_the_ai_never_asks_dates_in_its_own_words_the_form_goes(world):
     w = world
-    say(w, "need a room in Alleppey", GUEST, reply("Rooms are available in Alleppey. What is your check-in date?"))
+    say(w, "is Alleppey nice in december", GUEST, reply("Rooms are available in Alleppey. What is your check-in date?"))
     assert w.wa.texts() == [FORM]
     say(w, "2 people", GUEST, reply("Yes, right on the beach. Please share your check-in and check-out dates."))
-    assert w.wa.texts()[-2:] == ["Yes, right on the beach.", FORM]  # the answer stays, the ask becomes the form
+    # the answer stays, the ask becomes the form with only the missing lines (they gave '2 people')
+    assert w.wa.texts()[-2:] == ["Yes, right on the beach.", "Please share these details:\n\nCheck in :\nCheck out :"]
 
 
 def test_a_room_request_the_ai_leaves_silent_still_gets_the_location_question(world):
     w = world
-    assert say(w, "need a room", GUEST, reply("[no reply]")) == "answered"
+    assert say(w, "can we book a stay for my family", GUEST, reply("[no reply]")) == "answered"
     assert w.wa.texts()[-1].startswith("Sure, Kindly confirm the Location")
     assert say(w, "ok will book later", GUEST, reply("[no reply]")) == "quiet"
 
 
 def test_naming_the_place_skips_the_location_question(world):
     w = world
-    say(w, "rooms available in allepy?", GUEST, tool("ask_location"), reply("[no reply]"))
+    say(w, "rooms available in allepy?", GUEST)
     assert w.wa.texts() == [FORM] and w.repo.get_state(GUEST)["form_place"] == w.p1.id
 
 
@@ -381,13 +389,13 @@ def test_the_bot_uses_whatever_the_dashboard_says_now(world):
     assert deluxe["total_for_stay"] == 7000 + 7000  # the festival price on both nights
     system = w.llm.calls[-1].system
     assert "Misty Hills" in system and "Tent" in system and "Vagamon" in system  # a new property is known at once
-    say(w, "resort", "+919847000777", tool("ask_location"), reply("[no reply]"))
+    say(w, "resort", "+919847000777")
     assert "Vagamon" in w.wa.texts("+919847000777")[-1]  # and named in the location question
 
 
 def test_a_town_answer_to_the_location_question_gets_the_form_without_the_ai(world):
     w = world
-    say(w, "I need a resort", GUEST, tool("ask_location"), reply("[no reply]"))
+    say(w, "I need a resort", GUEST)
     calls = len(w.llm.calls)
     assert say(w, "Alleppey") == "form" and len(w.llm.calls) == calls  # no AI guesswork for this step
     assert w.wa.texts()[-1].startswith("Please share these details:")
@@ -761,6 +769,22 @@ def test_a_paid_guest_saying_hi_is_never_told_to_complete_the_payment(world):
     assert w.wa.texts()[-1] == "Yes, parking is free."  # the stale payment talk is dropped
 
 
+@pytest.mark.parametrize("wish", ["Rooms?", "room venam", "need a room", "resort booking", "any rooms available?",
+                                  "Room chahiye", "rooms irukka"])
+def test_a_short_booking_wish_always_gets_the_location_question_in_code(world, wish):
+    w = world
+    hold(w, rooms=1)  # an old booking chat full of summary and payment talk (the real case, 2026-11-18)
+    calls = len(w.llm.calls)
+    assert say(w, wish) == "location"
+    assert w.wa.texts()[-1].startswith("Sure, Kindly confirm the Location") and len(w.llm.calls) == calls
+
+
+def test_a_room_question_still_goes_to_the_ai(world):
+    w = world
+    assert say(w, "rooms have AC?", GUEST, reply("Yes, all rooms have AC.")) == "answered"
+    assert say(w, "need a room in allepy", GUEST) == "form"  # a named place goes straight to the form
+
+
 def test_a_confirmed_booking_closes_the_chat_and_the_next_message_starts_fresh(world):
     w = world
     hold(w, rooms=1)
@@ -768,7 +792,7 @@ def test_a_confirmed_booking_closes_the_chat_and_the_next_message_starts_fresh(w
     w.bot.mark_paid(booking_id=b.id)
     w.bot._log(GUEST, "[invoice] Invoice-INV-2026-X.pdf")  # staff sent the PDF again from the dashboard
     first = len(w.llm.calls)
-    say(w, "Rooms ?", GUEST, reply("Your booking is on hold. [invoice] Invoice-INV-2026-X.pdf"))
+    say(w, "is there parking?", GUEST, reply("Your booking is on hold. [invoice] Invoice-INV-2026-X.pdf"))
     seen = "\n".join(m.content for m in w.llm.calls[first].messages)  # what the AI was shown this turn
     assert "Following are the glimpse" not in seen and "[invoice]" not in seen  # the old booking chat is closed
     assert "[invoice]" not in w.wa.texts()[-1] and ".pdf" not in w.wa.texts()[-1]
@@ -1285,11 +1309,13 @@ def test_razorpay_link_status_finds_a_failed_attempt_through_the_order():
 
 def test_casual_words_get_no_reply_but_real_talk_does(world):
     w = world
-    say(w, "Alleppey il room undo?", GUEST, reply("Und bro. Ethra aalkkaar?"))
+    say(w, "Alleppey il beach undo?", GUEST, reply("Und bro."))
     say(w, "2 per, 10 nu", GUEST, tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=1, adults=2,
                                        language="manglish"), reply("Room und."))
     say(w, "beach adutha?", GUEST, reply("Athe, beach view aanu."))
     assert w.wa.texts()[-1].endswith(".")  # a statement: nothing is being asked now
+    assert say(w, "ok") == "next_step"  # 'ok' mid-chat carries on to the open step (owner, 2026-11-18)
+    assert w.wa.texts()[-1] == "Munnottu pokaan ningalude name-um mobile number-um ayakkamo?"
     before, calls = len(w.wa.to(GUEST)), len(w.llm.calls)
     for casual in ("ok", "thanks a lot", "nice", "adipoli", "haha 😄", "okay then", "ok will see", "super bro", "kollam", "👍"):
         assert say(w, casual) == "quiet", casual
@@ -1548,7 +1574,7 @@ def test_the_guest_is_never_called_by_name_in_any_script():
 
 def test_the_prompt_never_lets_the_ai_assume_the_guest_count(world):
     w = world
-    say(w, "room und?", GUEST, reply("Und sir. Ethra per?"))
+    say(w, "is it near the beach?", GUEST, reply("Yes."))
     assert "Never assume the number of persons or nights" in w.llm.calls[0].system
     check = next(tl for tl in w.llm.calls[0].tools if tl.name == "check_availability")
     assert "never assume 1" in str(check.parameters)
@@ -1622,7 +1648,7 @@ def test_links_inside_the_current_conversation_are_masked_for_the_ai(world):
 
 def test_the_reply_language_is_decided_from_the_latest_message_only(world):
     w = world
-    say(w, "Alleppey il room undo", GUEST, reply("Und sir."))
+    say(w, "Alleppey il beach undo", GUEST, reply("Und sir."))
     assert "REPLY LANGUAGE" in w.llm.calls[-1].system and "Manglish" in w.llm.calls[-1].system.split("REPLY LANGUAGE (")[1]
     say(w, "Do you have a room for 3 people on 20 Nov for 2 nights?", GUEST, reply("Yes, we do."))
     tail = w.llm.calls[-1].system.split("REPLY LANGUAGE (")[1]
