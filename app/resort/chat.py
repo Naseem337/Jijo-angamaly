@@ -262,6 +262,8 @@ CONTACT_ASK = re.compile(r"\b(?:name|naam|peru|peyar|perum)(?:-?um)?\s*(?:,|and|
                          r"\b(?:mobile|phone)(?:\s*number)?(?:-?um)?\s*(?:,|and|aur|&|-?um)\s*(?:name|naam|peru|peyar)\b",
                          re.IGNORECASE)
 # "sir" in any form the AI writes it: sir, sir ji, saar (Tanglish), madam, ma'am (said at most once per conversation)
+LOG_LINE = re.compile(r"\[(?:invoice|photos? sent|photo|image|template|restart|no reply)[^\]]*\]"
+                      r"(?:\s*\S+\.(?:pdf|jpe?g|png|webp))?", re.IGNORECASE)
 PAYMENT_ASK = re.compile(r"\b(?:pay\w*|paid|link|advance|refund|razorpay|upi|gpay|transaction|amount|balance)\b",
                          re.IGNORECASE)
 STALE_PAY = re.compile(r"\b(?:payment|pay|paid|link|advance)\b|confirm aak", re.IGNORECASE)
@@ -1003,6 +1005,8 @@ class ChatMixin:
         for m in self._session_rows(phone):
             if m.direction == "in" and m.text.startswith("[image]") and not getattr(self, "READ_IMAGES", False):
                 continue  # ignored images are not shown to the AI (it once replied "checking your payment screenshot")
+            if m.direction == "out" and m.text.startswith(("[invoice]", "[template")):
+                continue  # file / template log lines: the AI once pasted "[invoice] Invoice-...pdf" into a reply
             if m.direction == "out" and m.text.startswith("[photo] "):
                 if rows and rows[-1].text.startswith("[photos sent"):
                     n = int(re.search(r"\d+", rows[-1].text).group(0)) + 1
@@ -1191,6 +1195,7 @@ class ChatMixin:
         if reply and not quiet:
             guest = self.repo.get_guest(phone)
             clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
+            clean = LOG_LINE.sub("", clean).strip()  # never "[invoice] ...", "[photos sent: 3]" or "[image]" to a guest
             if self._own_location_question(clean):  # the AI asked "which location" in its own words: the owner's
                 clean = t("ask_location", st.get("lang", "en"), towns=" or ".join(self._towns()))  # wording only
                 self._text(phone, clean)

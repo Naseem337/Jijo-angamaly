@@ -413,6 +413,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         delivered = self._notify_guest(b, self._confirmed_text(b, prop, rt), "paid", self._params(b))
         if delivered:
             self._send_invoice(b)  # the owner (2026-11-18): the invoice PDF follows the confirmation
+        self.end_conversation(b.guest_phone)  # a confirmed booking closes the chat: the next message starts fresh
         try:  # ask for the ID proof once (only inside the 24 h window; the day-before reminder covers the rest)
             if delivered and ASK_ID_AFTER_PAYMENT:
                 self.start_id_request(b)
@@ -423,6 +424,15 @@ class BookingBot(IdProofMixin, ChatMixin):
                          f"{b.guest_name} {b.guest_phone}. Paid Rs {b.paid_amount} of Rs {b.total} "
                          f"({method_label(b.payment_method)}).", b.property_id)
 
+    def end_conversation(self, phone: str) -> None:
+        """Close the current chat (booking confirmed or cancelled, owner 2026-11-18): the guest's next message starts a
+        fresh conversation. The booking stays in their records, which the AI always sees."""
+        st = self.repo.get_state(phone)
+        for key in ("bk", "checked", "form_place", "intro_sent", "last_summary"):  # the finished booking's steps only
+            st.pop(key, None)
+        self._save(phone, st)
+        self._log(phone, RESTART_MARK, "system")
+
     def _send_invoice(self, b: Booking) -> bool:
         """The invoice as a PDF document, once per conversation. A failure is logged and never blocks the booking."""
         from app.resort.invoice_pdf import build_invoice_pdf, invoice_context, invoice_filename
@@ -430,7 +440,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             ctx = invoice_context(self.repo, self.repo.get_booking(b.id) or b, self.clock.now())
             name = invoice_filename(ctx["invoice_no"])
             note = f"[invoice] {name}"
-            if self._already_sent(b.guest_phone, note):
+            if any(m.text == note for m in self.repo.list_chat(b.guest_phone, limit=300)):  # once ever, not per chat
                 return False
             media_id = self.wa.upload_media(build_invoice_pdf(ctx), "application/pdf", name)
             self.wa.send_document(b.guest_phone, media_id, name)

@@ -761,6 +761,20 @@ def test_a_paid_guest_saying_hi_is_never_told_to_complete_the_payment(world):
     assert w.wa.texts()[-1] == "Yes, parking is free."  # the stale payment talk is dropped
 
 
+def test_a_confirmed_booking_closes_the_chat_and_the_next_message_starts_fresh(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    w.bot.mark_paid(booking_id=b.id)
+    w.bot._log(GUEST, "[invoice] Invoice-INV-2026-X.pdf")  # staff sent the PDF again from the dashboard
+    first = len(w.llm.calls)
+    say(w, "Rooms ?", GUEST, reply("Your booking is on hold. [invoice] Invoice-INV-2026-X.pdf"))
+    seen = "\n".join(m.content for m in w.llm.calls[first].messages)  # what the AI was shown this turn
+    assert "Following are the glimpse" not in seen and "[invoice]" not in seen  # the old booking chat is closed
+    assert "[invoice]" not in w.wa.texts()[-1] and ".pdf" not in w.wa.texts()[-1]
+    assert "confirmed" in w.llm.calls[-1].system  # the booking itself is still in the guest's records
+
+
 def test_after_payment_the_guest_gets_only_the_clients_confirmation_with_the_room_number(world):
     w = world
     w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "room_list": ["104", "105"]}))

@@ -92,7 +92,13 @@ def announce_cancelled(booking: Booking, refund_amount: int) -> str | None:
             return None
     except Exception as exc:  # noqa: BLE001
         log.warning("bot.announce_cancelled failed: %s", exc)
-    return send_staff_text(booking.guest_phone, "Booking cancelled.")  # just that (owner, 2026-11-18)
+    error = send_staff_text(booking.guest_phone, "Booking cancelled.")  # just that (owner, 2026-11-18)
+    try:  # a cancelled booking closes the chat: the guest's next message starts fresh
+        from app.resort.services import get_services
+        get_services().bot.end_conversation(booking.guest_phone)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("end_conversation failed: %s", exc)
+    return error
 
 
 def announce_checked_out(booking: Booking) -> None:
