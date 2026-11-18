@@ -1,19 +1,28 @@
 {% extends "base.html" %}
-{% from "macros.html" import page_head, empty, icon %}
+{% from "macros.html" import empty, icon %}
 {% block title %}Properties · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head("Properties", "Your resorts. Everything here is what the WhatsApp bot offers to guests.") %}{% if auth.is_owner %}<a class="btn primary" href="{{ BASE }}/properties/new">{{ icon('plus') }} New property</a>{% endif %}{% endcall %}
-<div class="prop-grid">
-{% for p, types, cover in rows %}
-<a class="prop-card{{ ' off' if not p.active }}" href="{{ BASE }}/properties/{{ p.id }}">
-  <div class="prop-cover">{% if cover %}<img src="{{ cover }}" alt="" loading="lazy">{% else %}<span class="prop-ph">{{ icon('image') }}<small>Add photos</small></span>{% endif %}
-    <span class="pill {{ 'paid' if p.active else 'cancelled' }}">{{ 'Live on WhatsApp' if p.active else 'Off' }}</span></div>
-  <div class="prop-body">
-    <h3>{{ p.name }}</h3>
-    <p class="muted">{{ p.city or 'Add the town' }}</p>
-    <div class="chips">{% for t in types if t.active %}<span class="chip">{{ t.name }} · {{ t.base_rate|rupees }}</span>{% else %}<span class="muted">No room types yet</span>{% endfor %}</div>
-  </div>
-</a>
-{% else %}{{ empty("No properties yet") }}{% endfor %}
+{# Properties in the owner's reference style (2026-11-18): header, summary cards, one clean table #}
+<div class="mg-head"><h1>Properties</h1>
+  {% if auth.is_owner %}<div class="actions"><a class="btn primary" href="{{ BASE }}/properties/new">{{ icon('plus') }} Add property</a></div>{% endif %}</div>
+
+<div class="mg-stats">
+  <div class="mg-stat"><small>Properties</small><b>{{ rows|length }}</b><span>{{ rows|selectattr('0.active')|list|length }} active</span></div>
+  <div class="mg-stat"><small>Room types</small><b>{{ rows|map(attribute='1')|map('length')|sum }}</b><span>All properties</span></div>
+  <div class="mg-stat"><small>Rooms</small><b>{{ rows|map(attribute='1')|map('sum', attribute='units')|sum }}</b><span>To sell</span></div>
 </div>
+
+<div class="mg-table pp-table"><table><thead><tr><th>Property</th><th>Town</th><th>Room types</th><th class="r">From</th><th>Status</th><th></th></tr></thead><tbody>
+{% for p, types, cover in rows %}
+{% set rates = types|selectattr('active')|map(attribute='base_rate')|select|list %}
+<tr class="click" data-href="{{ BASE }}/properties/{{ p.id }}">
+  <td><div class="mg-who"><span class="pp-thumb">{% if cover %}<img src="{{ cover }}" alt="" loading="lazy">{% else %}{{ icon('image') }}{% endif %}</span>
+    <div><b>{{ p.name }}</b><small>{{ p.place or p.address or '' }}</small></div></div></td>
+  <td>{{ (p.city or '—').split(',')[0] }}</td>
+  <td>{% for t in types if t.active %}<span class="pp-chip">{{ t.name }}</span>{% else %}<span class="muted">None yet</span>{% endfor %}</td>
+  <td class="r">{% if rates %}<b>{{ rates|min|rupees }}</b><small class="block">per night</small>{% else %}—{% endif %}</td>
+  <td><span class="pill {{ 'paid' if p.active else 'cancelled' }}">{{ 'Active' if p.active else 'Inactive' }}</span></td>
+  <td class="r"><a class="mg-dots" href="{{ BASE }}/properties/{{ p.id }}" aria-label="Open">•••</a></td></tr>
+{% else %}<tr><td colspan="6">{{ empty("No properties yet") }}</td></tr>{% endfor %}
+</tbody></table></div>
 {% endblock %}

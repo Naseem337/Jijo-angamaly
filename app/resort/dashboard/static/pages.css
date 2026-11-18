@@ -99,4 +99,28 @@ html body .pill.cancelled,html body .pill.expired,html body .pill.failed{backgro
 @media (max-width:1100px){.bd-cells{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:14px}.bd-cells>div:nth-child(5){border-left:0}.bd-grid{grid-template-columns:1fr}}
 @media (max-width:700px){.mg-stats{grid-template-columns:1fr}.bd-cells{grid-template-columns:repeat(2,minmax(0,1fr))}.bd-cells>div{border-left:0}.mg-search{min-width:0;flex:1}}
 
+/* toolbar on one line; calendar cells plain white like the reference */
+.mg-tools select,.mg-tools .mg-search{width:auto;flex:0 1 auto}
+.mg-tools .mg-search{flex:0 1 300px}
+html body .cal-day,html body .cal-day.s-busy,html body .cal-day.s-full,html body .cal-day.s-free,html body .cal-day.wk{background:var(--card)}
+html body .cal-day.dim{background:var(--soft)}
+html body .cal-day.today .num{background:var(--ink);color:var(--card)}
+
 /* ---------------- property pages (owner's reference, 2026-11-18): add rules below this line */
+.pp-thumb{flex:none;width:44px;height:44px;border-radius:10px;overflow:hidden;background:var(--brand-soft);display:grid;place-items:center;color:var(--muted)}
+.pp-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.pp-thumb .ic{width:18px;height:18px}
+.pp-chip{display:inline-block;font-size:12px;font-weight:500;padding:2px 8px;margin:2px 4px 2px 0;border-radius:6px;background:var(--brand-soft);color:var(--ink);white-space:nowrap}
+.pp-cells{grid-template-columns:repeat(6,minmax(0,1fr))}
+.pp-rooms{border:0;border-radius:0;margin:4px -2px 0}
+.pp-rooms th{background:transparent}
+.room-card-link{color:var(--ink) !important;text-decoration:none}
+/* the form cards: white, quiet borders, small grey labels */
+.form .card,#rooms.card,#photos.card,#seasons.card{border:1px solid var(--line);border-radius:14px;box-shadow:none}
+.form .card h3,#rooms h3,#photos h3,#seasons h3{font-size:15px;font-weight:600;margin-bottom:12px}
+.form .field>span,.form label.field>span{font-size:12.5px;font-weight:500;color:var(--muted)}
+.form .field input,.form .field select,.form .field textarea,.form label.field textarea{border-radius:10px;border:1px solid var(--line)}
+.form .field small,.form label.field small{color:var(--muted)}
+.savebar{border-top:1px solid var(--line)}
+@media (max-width:1100px){.pp-cells{grid-template-columns:repeat(3,minmax(0,1fr))}.pp-cells>div:nth-child(4){border-left:0}}
+@media (max-width:700px){.pp-cells{grid-template-columns:repeat(2,minmax(0,1fr))}}

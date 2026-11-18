@@ -2,7 +2,21 @@
 {% from "macros.html" import page_head, field, area, csrf_field, empty, photo_gallery %}
 {% block title %}{{ rt.name or 'New room type' }} · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head(rt.name or "New room type", prop.name) %}{% endcall %}
+{# Room type in the owner's reference style (2026-11-18): name + status, summary strip, clean cards #}
+<div class="bd-head">
+  <div class="bd-title"><h1>{{ rt.name or 'New room type' }}</h1>{% if not is_new %}<span class="pill {{ 'paid' if rt.active else 'cancelled' }}">{{ 'Active' if rt.active else 'Inactive' }}</span>{% endif %}</div>
+  <div class="actions"><a class="btn" href="{{ BASE }}/properties/{{ prop.id }}">{{ prop.name }}</a></div>
+</div>
+{% if not is_new %}
+<section class="bd-strip"><div class="bd-cells pp-cells">
+  <div><small>Rooms</small><b>{{ rt.units }}</b></div>
+  <div><small>Priority</small><b>{{ rt.priority }}</b></div>
+  <div><small>Base rate</small><b>{{ rt.base_rate|rupees }}</b></div>
+  <div><small>Weekend</small><b>{{ rt.weekend_rate|rupees if rt.weekend_rate else '—' }}</b></div>
+  <div><small>Max guests</small><b>{{ rt.max_occupancy }}</b></div>
+  <div><small>Season prices</small><b>{{ rules|length }}</b></div>
+</div></section>
+{% endif %}
 <form method="post" action="{{ BASE }}/properties/{{ prop.id }}/rooms/{{ 'new' if is_new else rt.id }}" class="form">{{ csrf_field(csrf) }}
 <section class="card"><h3>Room type</h3><div class="cols">
   {{ field("Name", "name", rt.name, required=True, hint="e.g. Deluxe Cottage") }}{{ field("Number of rooms", "units", rt.units, "number", attrs='min="1"') }}

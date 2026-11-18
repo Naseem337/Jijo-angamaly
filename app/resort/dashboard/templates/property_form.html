@@ -2,18 +2,31 @@
 {% from "macros.html" import page_head, field, area, csrf_field, empty, icon, photo_gallery %}
 {% block title %}{{ p.name or 'New property' }} · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head(p.name or "New property", "Property details") %}{% endcall %}
+{# Property details in the owner's reference style (2026-11-18): name + status, summary strip, clean cards #}
+<div class="bd-head">
+  <div class="bd-title"><h1>{{ p.name or 'New property' }}</h1>{% if not is_new %}<span class="pill {{ 'paid' if p.active else 'cancelled' }}">{{ 'Active' if p.active else 'Inactive' }}</span>{% endif %}</div>
+  {% if not is_new %}<div class="actions"><a class="btn" href="{{ BASE }}/properties">Back</a>
+    <a class="btn primary" href="{{ BASE }}/properties/{{ p.id }}/rooms/new">{{ icon('plus') }} Add room type</a></div>{% endif %}
+</div>
 {% if not is_new %}
+<section class="bd-strip"><div class="bd-cells pp-cells">
+  <div><small>Town</small><b>{{ (p.city or '—').split(',')[0] }}</b></div>
+  <div><small>Room types</small><b>{{ rooms|selectattr('active')|list|length }}</b></div>
+  <div><small>Rooms</small><b>{{ rooms|selectattr('active')|sum(attribute='units') }}</b></div>
+  <div><small>Check-in / out</small><b>{{ p.checkin_time }} · {{ p.checkout_time }}</b></div>
+  <div><small>Advance</small><b>{{ p.advance_pct }}%</b></div>
+  <div><small>Photos</small><b>{{ p.photo_urls|length }}</b></div>
+</div></section>
 <section class="card" id="rooms">
-  <div class="card-head"><div><h3>Rooms &amp; rates</h3></div>
-  <a class="btn primary" href="{{ BASE }}/properties/{{ p.id }}/rooms/new">{{ icon('plus') }} Add room type</a></div>
-  {% if rooms %}<div class="room-grid">
-  {% for t in rooms %}<a class="room-card{{ ' off' if not t.active }}" href="{{ BASE }}/properties/{{ p.id }}/rooms/{{ t.id }}">
-    <div class="room-top"><b>{{ t.name }}</b><span class="pill">Priority {{ t.priority }}</span>{% if not t.active %}<span class="pill cancelled">Inactive</span>{% endif %}</div>
-    <div class="room-rate">{{ t.base_rate|rupees }}<small> / night</small></div>
-    {% if t.weekend_rate %}<small class="muted">Weekend {{ t.weekend_rate|rupees }}</small>{% endif %}
-    <span class="room-open">Manage rates &amp; details ›</span>
-  </a>{% endfor %}</div>
+  <div class="card-head"><h3>Rooms &amp; rates</h3></div>
+  {% if rooms %}<div class="mg-table pp-rooms"><table><thead><tr><th>Room type</th><th>Priority</th><th>Rooms</th><th class="r">Base rate</th><th class="r">Weekend</th><th>Status</th><th></th></tr></thead><tbody>
+  {% for t in rooms %}<tr class="click" data-href="{{ BASE }}/properties/{{ p.id }}/rooms/{{ t.id }}">
+    <td><a class="room-card-link" href="{{ BASE }}/properties/{{ p.id }}/rooms/{{ t.id }}"><b>{{ t.name }}</b></a></td>
+    <td><span class="pp-chip">{{ t.priority }}</span></td><td>{{ t.units }}</td>
+    <td class="r"><b>{{ t.base_rate|rupees }}</b></td><td class="r">{{ t.weekend_rate|rupees if t.weekend_rate else '—' }}</td>
+    <td><span class="pill {{ 'paid' if t.active else 'cancelled' }}">{{ 'Active' if t.active else 'Inactive' }}</span></td>
+    <td class="r"><a class="mg-dots" href="{{ BASE }}/properties/{{ p.id }}/rooms/{{ t.id }}" aria-label="Manage">•••</a></td></tr>{% endfor %}
+  </tbody></table></div>
   {% else %}{{ empty("No room types yet.") }}{% endif %}
 </section>
 {{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "Outside, beach, garden and common areas. The bot sends these AUTOMATICALLY to every guest right after the welcome message (glimpse), in this order (the first 6), then the offered room's photos. Room pictures go under each room type below.", "General photos", "Sent after the glimpse") }}
