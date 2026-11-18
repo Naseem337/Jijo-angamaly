@@ -92,7 +92,7 @@ def latin_style(text: str, previous: str = "en") -> str:
 MAX_GENERAL_PHOTOS = 6  # general photos sent automatically after the glimpse
 # The AI asking for the stay details itself (any language in English letters): replaced by the owner's form.
 DATES_QUESTION = re.compile(
-    r"check[\s-]?in|check[\s-]?out|\bdates?\b|which day|\bwhen\b|how many (?:people|persons|guests|nights|days|of you)"
+    r"check[\s-]?in|check[\s-]?out|\bdates?\b|which day|\bwhen\b|how many (?:people|persons|guests|nights|days|of you|friends|members|adults|kids|children|are coming)"
     r"|\bstaying\b|\bnights\b|\bpax\b|ethra (?:per|peru|aal|divasam|day|night)|\beppol|\bennu\b|kitne (?:log|din)"
     r"|\bkab\b|evlo (?:per|peru|naal|days?)|evvalavu (?:per|naal)|ethana(?:i)? (?:per|peru|naal)|\beppo\b|\beppodhu\b"
     r"|kitni raat|kab se|\bta?reekh|\btarikh|\bthethi|\bthedhi", re.IGNORECASE)
@@ -115,6 +115,14 @@ _MON_DAY = re.compile(rf"\b{_MON}\s*(\d{{1,2}})(?:st|nd|rd|th)?\b"  # 'dec 12', 
 _NUMERIC = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b")
 _DAY_ONLY = re.compile(r"\b(?:till|to|until|upto|up to|-|thru|through)\s*(\d{1,2})(?:st|nd|rd|th)?\b"
                        r"(?!\s*(?:[/.-]\d|person|people|pax|per\b|adult|night|room|guest|member|aal|days?))", re.IGNORECASE)
+_PERSONS_LOOSE = re.compile(r"\b(?:for|of|we are|we're|total)\s+(\d{1,2})\b(?!\s*(?:nights?|days?|rooms?|dec|jan|feb|"
+                            r"mar|apr|may|jun|jul|aug|sep|oct|nov|th|st|nd|rd))|\b(\d{1,2})\s*(?:of us|members)\b",
+                            re.IGNORECASE)
+CLOSING = re.compile(r"^(?:anything else|is there anything else|vere enthengilum|vere entha|let me know|feel free|"
+                     r"enthengilum|any (?:other )?(?:doubts?|questions?)|do you have any|kuch aur|"
+                     r"aur kuch|vera edhavadhu|hope this helps)[^.?!]*[.?!]*$", re.IGNORECASE)
+CHANGE_ASK = re.compile(r"\b(?:change|modify|postpone|prepone|reschedule|shift|cancel\w*|refund|maatt\w*|matt\w*|"
+                        r"cancel cheyy\w*|badal\w*)\b", re.IGNORECASE)
 _UNTIL = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:vare|vareyum|varey|tak|tk|varai|varaikkum|varaikum)\b",
                     re.IGNORECASE)  # '22 vare'
 _STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|divas\w*|ra+thri\w*|din|raat\w*|iravu|naal)\b|\bone night\b|\bovernight\b|"
@@ -599,14 +607,35 @@ class ChatMixin:
 
     def _location_answer(self, phone: str, st: dict[str, Any], text: str) -> str | None:
         """The guest answered our location question with just a place: send the form at once (no AI guesswork)."""
-        if "Kindly confirm the Location" not in (self.repo.last_outbound_text(phone) or ""):
+        last = self.repo.last_outbound_text(phone) or ""
+        if "Kindly confirm the Location" not in last and last != " or ".join(self._towns()) + " ?":
             return None
-        if len(text.split()) > 4 or (prop := self._named_place(text)) is None:
+        if len(text.split()) > 4:
             return None
+        prop = self._named_place(text) or self._place_by_start(text)  # 'alloy' -> Alleppey, 'kanth' -> Kanthalloor
+        if prop is None:
+            if PHOTO_ASK.search(text) or re.search(r"\d", text) or GREETING.match(text) or is_ack(text) \
+                    or NOT_NOW.search(text) or RESTART.match(text):
+                return None  # not a place answer: the normal handling goes on
+            # not understood: ask once more, short, never silence (owner, 2026-11-18)
+            again = " or ".join(self._towns()) + " ?"
+            if (self.repo.last_outbound_text(phone) or "") == again:
+                return None  # asked twice already: let the AI help
+            self._text(phone, again, repeat_ok=True)
+            return "location"
         st["form_place"] = prop.id
         self._save(phone, st)
         self._text(phone, t("form", st.get("lang", "en")))
         return "form"
+
+    def _place_by_start(self, text: str) -> Property | None:
+        """An answer to the location question that starts like one of our towns ('alloy', 'allep', 'kanth'): that one,
+        when only one town starts with those first 3 letters."""
+        word = next(iter(re.findall(r"[a-z]{3,}", text.lower())), "")
+        if not word:
+            return None
+        hits = [p for p in self._places() if any(n.startswith(word[:3]) for n in self._place_words(p))]
+        return hits[0] if len(hits) == 1 else None
 
     def _own_location_question(self, reply: str) -> bool:
         """'Sure, which location sir - Alleppey or Kanthalloor?': a question naming two or more of our towns, which
@@ -1030,7 +1059,7 @@ class ChatMixin:
             "- You remember every guest. After the FACTS you get their records (name, earlier bookings with dates, place and status). The chat shown is today's conversation; older chat is kept and you can read it with the recall_old_chat tool.\n"
             "- Look things up only when needed, to save effort: a guest who asks about an earlier booking, a payment, a link, a stay date or something said before gets the real answer (use the records, my_bookings and/or recall_old_chat). A guest who only says hi, makes small talk or jokes gets a short, polite, friendly reply with no lookup.\n"
             "- Earlier bookings: if they ask about one, answer from the records or my_bookings in plain words: dates, place, rooms, whether it is confirmed, how much was paid and what is left to pay at the property. Paid and upcoming: say you can see it and be warm about their coming stay. Past: a warm thanks or welcome back. ON HOLD and still valid: tell them it is waiting for payment and offer the link (send_payment_link). Expired, cancelled or failed: say so kindly and offer to book again. Payment queries are answered politely and respectfully, never defensively.\n"
-            "- When the guest asks for another room or a new stay while a paid booking is upcoming or in progress, ask in ONE short line, no lead-in like 'Got it' or 'I see': 'You have a booking on 12-15 Dec. Is this a new one?' (their dates, max 12 words), then follow their answer. With only past stays, treat it as a new booking and add at most one warm welcome-back line.\n"
+            "- When the guest asks for another room or a new stay while a paid booking is upcoming or in progress, ask in ONE short line, no lead-in like 'Got it' or 'I see': 'You have a booking on <their real dates from the records>. Is this a new one?' (max 12 words), then follow their answer. A request to CHANGE the dates or rooms of an existing booking, or to CANCEL it, is NOT a new booking: say in one short line that the owner will help and give the owner's numbers (the owner is alerted automatically). Never ask 'is this a new one?' for it. With only past stays, treat it as a new booking and add at most one warm welcome-back line.\n"
             "- A new booking always takes its dates, rooms and price from what the guest says now and from the tools, never from an earlier booking. Never paste an old payment link: only the send_payment_link tool sends one, and only for a booking still on hold.\n"
             "- Warm and easy: one or two short lines, no forms, no jargon.\n"
             "- Never address them by name.\n\n"
@@ -1267,6 +1296,9 @@ class ChatMixin:
             guest = self.repo.get_guest(phone)
             clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
             clean = LOG_LINE.sub("", clean).strip()  # never "[invoice] ...", "[photos sent: 3]" or "[image]" to a guest
+            parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", clean) if x.strip()]
+            if len(parts) > 1 and CLOSING.match(parts[-1].strip()):
+                clean = " ".join(parts[:-1])  # no 'Anything else?' tails (owner: very few words)
             if self._own_location_question(clean):  # the AI asked "which location" in its own words: the owner's
                 clean = t("ask_location", st.get("lang", "en"), towns=" or ".join(self._towns()))  # wording only
                 self._text(phone, clean)
@@ -1443,6 +1475,12 @@ class ChatMixin:
             return {"error": problem}
         said = self._recent_guest_text(ctx.phone)
         got = parse_stay(said, today)
+        if "persons" not in got and not re.search(r"\d", ctx.text or "") and not _PERSONS_LOOSE.search(said):
+            # the number of persons is never assumed (it once took 2 for 'one more room for my friends')
+            ctx.after.append(self._missing_form(st.get("lang", "en"), got))
+            ctx.silent = True
+            return {"error": "the guest has not said how many persons; the form was sent to ask it. Reply exactly "
+                             "[no reply]."}
         if got.get("check_in") == ci and "check_out" not in got and not _STAY_LENGTH.search(said):
             # 'dec 20 nu 2 per': the AI made up a one-night stay once. The check-out is never assumed: the form asks it
             if not any(m in ctx.after for m in (t("form", "en"), t("form", "mn"))):
@@ -1747,6 +1785,7 @@ class ChatMixin:
                         "send_payment_link (only works while the booking is on hold). Answer only what they asked."}
 
     def _tool_bookings(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        ctx.priced = True  # amounts in the guest's own booking records may be stated (balance, paid)
         paid_now = self.check_payments()  # a guest who says "I paid" gets their confirmation without waiting
         rows = []
         for b in self.repo.list_bookings(phone=ctx.phone, limit=5):

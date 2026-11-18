@@ -592,10 +592,10 @@ def test_extra_beds_refused_where_not_offered(world):
 
 def test_place_is_matched_from_words_the_guest_uses(world):
     w = world
-    say(w, "munnar", GUEST,
+    say(w, "munnar 2 people", GUEST,
         tool("check_availability", place="Munnar", check_in="2026-11-10", nights=1, adults=2), reply("ok"))
     assert last_tool(w)["place"] == "Kanthalloor, Munnar"
-    say(w, "goa", GUEST,
+    say(w, "goa 2 people", GUEST,
         tool("check_availability", place="Goa", check_in="2026-11-10", nights=1, adults=2), reply("ok"))
     assert last_tool(w)["error"] == "unknown place" and "Pozhiyoram, Alleppey" in last_tool(w)["places"]
 
@@ -767,6 +767,17 @@ def test_a_paid_guest_saying_hi_is_never_told_to_complete_the_payment(world):
     say(w, "is there parking?", GUEST,
         reply("Yes, parking is free. Please complete the payment."))
     assert w.wa.texts()[-1] == "Yes, parking is free."  # the stale payment talk is dropped
+
+
+def test_a_badly_spelt_or_unclear_location_answer_is_never_left_silent(world):
+    w = world
+    assert say(w, "Rooms?") == "location"
+    assert say(w, "alloy") == "form" and w.repo.get_state(GUEST)["form_place"] == w.p1.id  # 'all...' = Alleppey
+    assert say(w, "restart") == "restart"
+    say(w, "Rooms?")
+    towns = " or ".join(w.bot._towns())
+    assert say(w, "xyz") == "location" and w.wa.texts()[-1] == f"{towns} ?"  # not understood: asked again, short
+    assert say(w, "kanth") == "form" and w.repo.get_state(GUEST)["form_place"] == w.p2.id
 
 
 @pytest.mark.parametrize("wish", ["Rooms?", "room venam", "need a room", "resort booking", "any rooms available?",

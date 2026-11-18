@@ -21,7 +21,7 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import GREETING, PHOTO_ASK, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
+from app.resort.chat import CHANGE_ASK, GREETING, PHOTO_ASK, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
@@ -272,6 +272,12 @@ class BookingBot(IdProofMixin, ChatMixin):
             self._text(phone, t("greet", st.get("lang", "en")), repeat_ok=True)
             self._save(phone, st)
             return "greeting"
+        if CHANGE_ASK.search(text) and (live := [b for b in self.repo.list_bookings(phone=phone, limit=5)
+                                                 if b.status in ("paid", "checked_in", "hold")]):
+            # a guest wants to change or cancel a booking: the owner hears at once (the AI points them to the owner)
+            b = live[0]
+            self.alert_staff(f"Guest {b.guest_name or ''} {phone} wants to change/cancel booking {b.id} "
+                             f"({fmt_date(b.check_in)} to {fmt_date(b.check_out)}): \"{text[:200]}\"", b.property_id)
         if outcome := self.booking_wish(phone, st, text):
             return outcome
         if outcome := self._location_answer(phone, st, text):
