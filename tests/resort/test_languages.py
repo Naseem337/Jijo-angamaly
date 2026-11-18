@@ -122,7 +122,7 @@ def test_sir_ji_and_saar_count_as_sir_once(world):
 
 @pytest.mark.parametrize("hello, wants, dates, rooms_ok, ask_contact", [
     ("നമസ്കാരം", "ആലപ്പുഴ റൂം ഉണ്ടോ?", "ഡിസംബർ 12 മുതൽ 15 വരെ 2 പേർ",
-     "Und, ningalude dates-il rooms available aanu.", "Munnottu pokaan ningalude name-um mobile number-um ayakkamo?"),
+     "Und, ningalude dates-il rooms available aanu.", "Interested aanenkil ningalude name-um mobile number-um ayakkamo?"),
     ("வணக்கம்", "ஆலப்புழா ரூம் இருக்கா?", "டிசம்பர் 12 முதல் 15 வரை 2 பேர்",
      "Yes, rooms are available for your dates.", "Please share your name and mobile number to proceed."),
     ("नमस्ते", "अलेप्पी में कमरा मिलेगा?", "दिसंबर 12 से 15 तक 2 लोग",

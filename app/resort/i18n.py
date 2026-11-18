@@ -160,7 +160,7 @@ MN = {
     "pay": "Ee link vazhi advance pay cheyyuka:\n{url}",
     "rooms_ok": "Und, ningalude dates-il rooms available aanu.",
     "rooms_none": "Sorry, ningalude dates-il rooms available alla.",
-    "ask_contact": "Munnottu pokaan ningalude name-um mobile number-um ayakkamo?",
+    "ask_contact": "Interested aanenkil ningalude name-um mobile number-um ayakkamo?",
     "ask_name": "Ningalude name parayamo?",
     "fill_form": "Mukalile details share cheyyamo?",
     "say_again": "Kshamikkanam, onnu koodi churukki type cheyyamo?",

@@ -1341,7 +1341,7 @@ def test_casual_words_get_no_reply_but_real_talk_does(world):
     say(w, "beach adutha?", GUEST, reply("Athe, beach view aanu."))
     assert w.wa.texts()[-1].endswith(".")  # a statement: nothing is being asked now
     assert say(w, "ok") == "next_step"  # 'ok' mid-chat carries on to the open step (owner, 2026-11-18)
-    assert w.wa.texts()[-1] == "Munnottu pokaan ningalude name-um mobile number-um ayakkamo?"
+    assert w.wa.texts()[-1] == "Interested aanenkil ningalude name-um mobile number-um ayakkamo?"
     before, calls = len(w.wa.to(GUEST)), len(w.llm.calls)
     for casual in ("ok", "thanks a lot", "nice", "adipoli", "haha 😄", "okay then", "ok will see", "super bro", "kollam", "👍"):
         assert say(w, casual) == "quiet", casual
@@ -1432,7 +1432,7 @@ def test_the_summary_is_built_in_english_laid_out_line_by_line_and_sent_before_t
         tool("prepare_booking", room_type="Deluxe", rooms=1, early_checkin=True, language="manglish"),
         reply("Name-um mobile number-um parayamo?"))
     # the fixed ask already went with the glimpse: the AI's own repeat of it is not sent (nothing twice, 2026-11-18)
-    assert w.wa.texts()[-1] == "Munnottu pokaan ningalude name-um mobile number-um ayakkamo?"
+    assert w.wa.texts()[-1] == "Interested aanenkil ningalude name-um mobile number-um ayakkamo?"
     assert w.repo.list_bookings(phone=GUEST) == []
     say(w, "Kavana Priya, 80886 78167", GUEST,
         tool("create_booking", guest_name="Kavana Priya", mobile="80886 78167", language="manglish"), reply("[no reply]"))
