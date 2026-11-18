@@ -377,6 +377,13 @@ class ChatMixin:
         self._text(phone, t("form", st.get("lang", "en")))
         return "form"
 
+    def _own_location_question(self, reply: str) -> bool:
+        """'Sure, which location sir - Alleppey or Kanthalloor?': a question naming two or more of our towns, which
+        must always go out in the owner's fixed words (client, 2026-11-18)."""
+        towns = self._towns()
+        named = sum(1 for town in towns if town.lower() in reply.lower())
+        return len(towns) > 1 and named >= 2 and "?" in reply and "Kindly confirm the Location" not in reply
+
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         ctx.after.append(t("ask_location", ctx.st.get("lang", "en"), towns=" or ".join(self._towns())))
         ctx.silent = True
@@ -787,7 +794,11 @@ class ChatMixin:
         if reply and not quiet:
             guest = self.repo.get_guest(phone)
             clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
-            self._text(phone, self._ease_sir(phone, clean))
+            if self._own_location_question(clean):  # the AI asked "which location" in its own words: the owner's
+                clean = t("ask_location", st.get("lang", "en"), towns=" or ".join(self._towns()))  # wording only
+                self._text(phone, clean)
+            else:
+                self._text(phone, self._ease_sir(phone, clean))
         if ctx.photos:
             self._send_photos(phone, ctx.photos)
         asked = {t("ask_contact", lang) for lang in ("en", "mn")}

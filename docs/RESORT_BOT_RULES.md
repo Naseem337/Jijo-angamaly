@@ -6,7 +6,7 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 
 ## Booking flow (client, 2026-11-17; replaces the older order below where they differ)
 1. "Hi" -> "Hi, How may I assist you?"
-2. Wants a resort -> fixed (`ask_location` tool) "Sure, Kindly confirm the Location 📍 / Alleppey or Kanthalloor.?" (towns from the properties in the dashboard; a new property is added automatically). On every fixed step the AI's own line is not sent.
+2. Wants a resort -> fixed (`ask_location` tool) "Sure, Kindly confirm the Location 📍 / Alleppey or Kanthalloor ?" (exact, client 2026-11-18; towns from the properties in the dashboard; a new property is added automatically). On every fixed step the AI's own line is not sent. If the AI asks which location in its own words (a question naming 2+ of our towns), the code sends this fixed question instead (`_own_location_question`).
 3. Resort known -> the form (fixed, `ask_stay_details` tool): "Please share these details: Check in : / Check out : / Number of persons :"
 4. Filled -> `check_availability`. Available -> fixed "Yes, rooms are available for your dates." -> the resort's glimpse
    (`Property.intro`, editable in the dashboard; `{price}` = the real per-night price for their dates; sent once) ->

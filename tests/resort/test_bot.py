@@ -168,8 +168,16 @@ def test_a_booking_request_is_asked_which_resort_including_one_not_open_online(w
     say(w, "resort booking", GUEST, tool("ask_location"), reply("Which one sir, Alleppey or Munnar?"))
     sent = w.wa.texts()
     towns = [(p.city or p.name).split(",")[0].strip() for p in w.repo.list_properties(active_only=False)]
-    assert sent == [f"Sure,\nKindly confirm the Location 📍\n{' or '.join(towns)}.?"]  # the AI's own line is not sent
+    assert sent == [f"Sure, Kindly confirm the Location 📍\n{' or '.join(towns)} ?"]  # the AI's own line is not sent
     assert len(towns) == 2 and "online booking is not open yet" in w.llm.calls[0].system
+
+
+def test_the_ai_asking_which_location_in_its_own_words_is_replaced_by_the_owners_question(world):
+    w = world
+    towns = " or ".join(w.bot._towns())
+    say(w, "resort booking", GUEST, reply(f"Sure, which location sir - {towns.replace(' or ', ' or ')}?"))
+    assert w.wa.texts() == [f"Sure, Kindly confirm the Location 📍\n{towns} ?"]
+    assert say(w, "allepy") == "form"  # and the answer to it is understood as usual
 
 
 def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
