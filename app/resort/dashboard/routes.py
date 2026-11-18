@@ -978,6 +978,7 @@ async def property_save(property_id: str, request: Request, auth: Auth = Depends
     p.advance_pct, p.gst_pct = _int(f, "advance_pct", 50, 1, 100), _int(f, "gst_pct", 0, 0, 40)
     p.staff_numbers = staff  # photos are managed by the photo gallery (property_photos), not this form
     p.highlights = _lines(f.get("highlights", ""))[:12]
+    p.stay_info = f.get("stay_info", "").strip()[:3000]
     p.intro = f.get("intro", "").strip()[:3000]
     p.meal_plan = f.get("meal_plan", "").strip()[:40]
     p.early_checkin_time = f.get("early_checkin_time", "").strip()[:5]

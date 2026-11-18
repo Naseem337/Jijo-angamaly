@@ -90,7 +90,7 @@ def test_a_reply_in_native_script_is_never_sent(world):
     w = world
     say(w, "ரூம் இருக்கா?", GUEST, reply("ஆம், ரூம் இருக்கு."), reply("ஆம் சார், ரூம் இருக்கு."))
     no_native_script(w)
-    assert w.wa.texts()[-1] == "Sorry, could you please type that once more in a few words?"
+    assert w.wa.texts()[-1] == "Sorry, konjam short-a innoru thadava type pannunga?"  # Tanglish (owner, 2026-11-18)
     say(w, "beach pakkam?", GUEST, reply("ஆம். Yes, the beach is right there."), reply("ஆம்."))
     assert w.wa.texts()[-1] == "Yes, the beach is right there."  # the English-letter part is kept
 
@@ -124,9 +124,9 @@ def test_sir_ji_and_saar_count_as_sir_once(world):
     ("നമസ്കാരം", "ആലപ്പുഴ റൂം ഉണ്ടോ?", "ഡിസംബർ 12 മുതൽ 15 വരെ 2 പേർ",
      "Und, ningalude dates-il rooms available aanu.", "Interested aanenkil ningalude name-um mobile number-um ayakkamo?"),
     ("வணக்கம்", "ஆலப்புழா ரூம் இருக்கா?", "டிசம்பர் 12 முதல் 15 வரை 2 பேர்",
-     "Yes, rooms are available for your dates.", "Please share your name and mobile number to proceed."),
+     "Aamaa, unga dates-ku rooms available irukku.", "Interested-na unga name-um mobile number-um anuppunga?"),
     ("नमस्ते", "अलेप्पी में कमरा मिलेगा?", "दिसंबर 12 से 15 तक 2 लोग",
-     "Yes, rooms are available for your dates.", "Please share your name and mobile number to proceed."),
+     "Haan, aapki dates par rooms available hain.", "Interested hain to apna name aur mobile number bhejiye?"),
 ])
 def test_native_script_guest_full_flow(world, hello, wants, dates, rooms_ok, ask_contact):
     w = world
@@ -260,9 +260,9 @@ def test_a_hindi_voice_note_with_a_native_name_asks_the_name_in_english_letters(
         reply("[no reply]"))
     voice(w, "अनु, यही नंबर", reply("Aapka naam bata dijiye?"))
     # names only in English letters (owner, 2026-11-18): the Hindi-script name is not used, the name is asked
-    assert w.repo.list_bookings(phone=GUEST) == [] and w.wa.texts()[-1] == "Please share your name."
+    assert w.repo.list_bookings(phone=GUEST) == [] and w.wa.texts()[-1] == "Apna name bataiye?"  # Hinglish
     say(w, "Anu", GUEST, tool("create_booking", guest_name="Anu", mobile="same"), reply("[no reply]"))
-    assert w.repo.list_bookings(phone=GUEST)[0].guest_name == "Anu" and w.wa.texts()[-1].startswith("Please pay")
+    assert w.repo.list_bookings(phone=GUEST)[0].guest_name == "Anu" and w.wa.texts()[-1].startswith("Is link se advance pay")
     no_native_script(w)
 
 
@@ -286,3 +286,80 @@ def test_latin_only_keeps_english_letter_sentences():
     assert ChatMixin._latin_only("Yes. ആണ്.", "", st) == "Yes."
     assert ChatMixin._latin_only("ആണ്.", "Yes it is.", st) == "Yes it is."
     assert ChatMixin._latin_only("ആണ്.", "", {"lang": "mn"}) == "Kshamikkanam, onnu koodi churukki type cheyyamo?"
+
+
+# --------------------------------------------------------------------------- Step 3 (2026-11-18): Tanglish / Hinglish
+# fixed messages, language lock, Tamil vs Malayalam word lists, never an audio reply
+
+
+@pytest.mark.parametrize("text, style", [
+    ("enakku oru room venum", "tanglish"), ("enikk oru room venam", "manglish"),
+    ("room irukka?", "tanglish"), ("room undo?", "manglish"),
+    ("evlo price?", "tanglish"), ("ethra aanu rate?", "manglish"),
+    ("sollunga", "tanglish"), ("parayamo", "manglish"),
+    ("booking pannunga", "tanglish"), ("booking cheyyamo", "manglish"),
+    ("inniki room irukka", "tanglish"), ("innu room undo", "manglish"),
+    ("naalaikku room venum", "tanglish"), ("naale room venam", "manglish"),
+    ("date maathanum, 28th ku", "tanglish"), ("GPay number tharo?", "manglish"),
+    ("owner ne vilikkanam", "manglish"), ("kamra chahiye kya", "hinglish"),
+])
+def test_tamil_and_malayalam_words_in_english_letters(text, style):
+    st: dict = {}
+    ChatMixin._language_note(st, text)
+    assert st["style"] == style
+
+
+def test_neutral_messages_keep_the_last_language():
+    st: dict = {}
+    for text in ("room venum", "ok", "2", "👍"):
+        ChatMixin._language_note(st, text)
+        assert st["style"] == "tanglish", text
+
+
+def test_an_asked_language_stays_until_the_guest_switches():
+    st: dict = {}
+    for text, style in [("entha rate", "manglish"), ("sorry English please", "en"), ("ok", "en"), ("2", "en"),
+                        ("room undo", "en"),  # short: the asked language stays
+                        ("ningalude resort il pool undo ennu parayamo", "manglish"),  # a long Manglish message switches
+                        ("Tamil la pesunga", "tanglish"), ("pool?", "tanglish"), ("Hindi mein baat karo", "hinglish")]:
+        ChatMixin._language_note(st, text)
+        assert st["style"] == style, text
+
+
+@pytest.mark.parametrize("wants, step", [
+    ("room venum", "Sure, Kindly confirm the Location"),   # the owner's English wording for everyone
+    ("kamra chahiye", "Sure, Kindly confirm the Location"),
+])
+def test_tamil_and_hindi_guests_get_the_owners_location_question(world, wants, step):
+    assert say(world, wants) == "location" and world.wa.texts()[-1].startswith(step)
+
+
+@pytest.mark.parametrize("dates, rooms_ok, ask_contact", [
+    ("12 dec to 14 dec, 2 per, room venum", "Aamaa, unga dates-ku rooms available irukku.",
+     "Interested-na unga name-um mobile number-um anuppunga?"),
+    ("12 dec se 14 dec, 2 log, kamra chahiye", "Haan, aapki dates par rooms available hain.",
+     "Interested hain to apna name aur mobile number bhejiye?"),
+])
+def test_tamil_and_hindi_guests_get_the_fixed_steps_in_their_language(world, dates, rooms_ok, ask_contact):
+    w = world
+    say(w, dates, GUEST, tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-14",
+                              adults=2), reply("[no reply]"))
+    texts = w.wa.texts()
+    assert rooms_ok in texts and texts[-1] == ask_contact
+    no_native_script(w)
+
+
+def test_the_location_re_ask_never_swallows_a_real_question(world):
+    w = world
+    assert say(w, "Rooms?") == "location"
+    assert say(w, "ethra aanu rate?", GUEST, reply("Dates parayamo?")) != "location"
+    assert say(w, "pool undo?", GUEST, reply("Illa, pool illa.")) != "location"
+    assert w.repo.get_state(GUEST)["style"] == "manglish"
+
+
+def test_the_bot_never_sends_audio(world):
+    w = world
+    voice(w, "ഡിസംബർ ഇരുപതിന് രണ്ട് പേർക്ക് റൂം വേണം", reply("Dates confirm cheyyamo?"))
+    voice(w, "டிசம்பர் இருபது ரெண்டு பேருக்கு ரூம் வேணும்", reply("Check out date sollunga?"))
+    assert not [k for _, k, _ in w.wa.to(GUEST) if k in ("audio", "voice")]
+    no_native_script(w)

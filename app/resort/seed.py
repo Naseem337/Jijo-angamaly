@@ -40,6 +40,7 @@ We'd love to have you! Call or WhatsApp us to reserve your spot:
 📞 9995855789"""
 # The owner's cancellation policy (2026-11-18): a retention charge on the total, by days before arrival.
 POZHIYORAM_POLICY = (Path(__file__).with_name("pozhiyoram_policy.txt")).read_text(encoding="utf-8").strip()
+POZHIYORAM_STAY = (Path(__file__).with_name("pozhiyoram_stay.txt")).read_text(encoding="utf-8").strip()
 POZHIYORAM_TIERS = ({"days_before": 7, "retention_pct": 10}, {"days_before": 3, "retention_pct": 25},
                     {"days_before": 2, "retention_pct": 50}, {"days_before": 0, "retention_pct": 100})
 ALLEPPEY_EXTRAS = dict(intro=ALLEPPEY_INTRO, meal_plan="Stay Only", early_checkin_time="06:00", early_checkin_rate=1000)
@@ -53,7 +54,8 @@ ALLEPPEY = dict(
     highlights=["Beach view from every room", "Direct 24/7 beach access", "All 9 rooms air-conditioned",
                 "Peaceful 1-acre property"],
     contact_numbers=["+919497861924", "+919995855789"], extra_bed_rate=500, advance_pct=50,
-    map_url="https://maps.app.goo.gl/4x1rKZhq8wh2Pugw8", policies=POZHIYORAM_POLICY,
+    map_url="https://maps.app.goo.gl/zSRrxiT83MreVvYy8?g_st=ac", policies=POZHIYORAM_POLICY, stay_info=POZHIYORAM_STAY,
+    checkin_time="13:00", checkout_time="11:30",
     cancel_policy=list(POZHIYORAM_TIERS), **ALLEPPEY_EXTRAS)
 # room, units, adults, children, max occupancy, base rate; rates by date: (start, end, rate)
 ALLEPPEY_ROOM = ("Beach View AC Room", 9, 3, 3, 3, 2500)
@@ -135,10 +137,17 @@ def seed(repo: ResortRepo) -> list[str]:
                     setattr(p, key, value)
                 repo.save_property(p)
                 out.append(f"{p.name}: welcome message, meal plan and early check-in added.")
-            if p.name == ALLEPPEY["name"] and "retention" not in (p := repo.get_property(p.id)).policies.lower():
-                p.policies, p.cancel_policy = POZHIYORAM_POLICY, list(POZHIYORAM_TIERS)  # owner, 2026-11-18
+            p = repo.get_property(p.id)
+            if p.name == ALLEPPEY["name"] and ("retention" not in p.policies.lower()
+                                               or p.policies.startswith("Cancellation Policy\n")):
+                p.policies, p.cancel_policy = POZHIYORAM_POLICY, list(POZHIYORAM_TIERS)  # owner, 2026-11-18 (neat)
                 repo.save_property(p)
                 out.append(f"{p.name}: cancellation policy added.")
+            if p.name == ALLEPPEY["name"] and not p.stay_info:  # the owner's after-booking message (2026-11-18)
+                p.stay_info, p.checkin_time, p.checkout_time = POZHIYORAM_STAY, "13:00", "11:30"
+                p.map_url = "https://maps.app.goo.gl/zSRrxiT83MreVvYy8?g_st=ac"
+                repo.save_property(p)
+                out.append(f"{p.name}: stay details message, check-in/out times and map link added.")
         if not out:
             out.append("Properties already exist: nothing seeded.")
     email = (os.environ.get("RESORT_OWNER_EMAIL") or DEFAULT_OWNER_EMAIL).strip().lower()

@@ -40,11 +40,12 @@ from app.conversation.voice_in import VoiceResult  # noqa: E402
 from app.core.clock import IST, FixedClock  # noqa: E402
 from app.providers.llm.base import LLMError, LLMResponse  # noqa: E402
 from app.resort import chat as rchat  # noqa: E402
+from app.core.language import is_language_neutral  # noqa: E402
 from app.resort import seed  # noqa: E402
 from app.resort.config import load_resort_config  # noqa: E402
 from app.resort.db import ResortRepo, SoldOut  # noqa: E402
 from app.resort.flow import BookingBot  # noqa: E402
-from app.resort.i18n import MN, S  # noqa: E402
+from app.resort.i18n import HN, MN, TN, S  # noqa: E402
 from app.resort.models import Booking, RoomType  # noqa: E402
 from app.resort.payments import MockPayments  # noqa: E402
 from app.whatsapp.parse import InboundMessage  # noqa: E402
@@ -427,7 +428,12 @@ class Runner:
                 want[int(m.group(1))] = m.group(2)
             if re.search(r"tanglish throughout", e):
                 want = {i: "tanglish" for i in range(1, len(turn_langs) + 1)}
+        explicit = {int(m.group(1)) for e in expects for m in re.finditer(r"turn(\d+)\s+(?:en|manglish|tanglish|hinglish)", e)}
+        turns = [str(x) for x in (sc.get("turns") or [])]
         for i, lang in sorted(want.items()):
+            text = turns[i - 1] if i <= len(turns) else ""
+            if i not in explicit and (rchat.GREETING.match(text) or is_language_neutral(text)):
+                continue  # 'Hi' / 'ok' / '2' carry no language of their own: judged only when the scenario says so
             got = turn_langs[i - 1] if i <= len(turn_langs) else None
             res.check(f"turn {i} language {lang}", (got or "en") == lang, f"code detected {got}")
         if self.live and want:
@@ -508,7 +514,7 @@ class _Fixed:
 
     def __init__(self) -> None:
         templates = [x for v in S.values() for x in (v.values() if isinstance(v, dict) else [v]) if isinstance(x, str)]
-        templates += [v for v in MN.values() if isinstance(v, str)]
+        templates += [v for table in (MN, TN, HN) for v in table.values() if isinstance(v, str)]
         self._res = [re.compile(re.sub(r"\\\{\w+\\\}", ".*", re.escape(x)) + r"\Z", re.S) for x in templates]
 
     def __contains__(self, text: str) -> bool:

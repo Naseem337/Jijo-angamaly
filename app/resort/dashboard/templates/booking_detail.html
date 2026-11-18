@@ -13,7 +13,6 @@
     {% if b.status == 'paid' %}<button type="button" class="btn primary" data-open="checkin-dialog">{{ icon('door') }} Check in</button>{% endif %}
     {% if b.status == 'checked_in' %}<button type="button" class="btn primary" data-open="checkout-dialog">{{ icon('door') }} Check out</button>{% endif %}
     {% if b.status in ('paid','checked_in','checked_out') %}<button type="button" class="btn" data-open="idperson-dialog">{{ icon('id') }} ID shown in person</button>{% endif %}
-    <a class="btn" href="{{ BASE }}/bookings/{{ b.id }}/invoice.pdf" target="_blank" rel="noopener">{{ icon('doc') }} Invoice</a>
   </div>
 </div>
 
@@ -88,9 +87,8 @@
 </div>
 
 <section class="card" id="bill">
-  <div class="card-head"><div><h3>Guest bill</h3><p class="muted">Invoice {{ invoice_no }}{% if prop and prop.gstin %} · GSTIN {{ prop.gstin }}{% endif %}</p></div>
-    <div class="btn-row tight"><a class="btn" href="{{ BASE }}/bookings/{{ b.id }}/invoice" target="_blank" rel="noopener">View invoice</a><a class="btn" href="{{ BASE }}/bookings/{{ b.id }}/invoice.pdf" target="_blank" rel="noopener">PDF</a>
-      <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/send-invoice">{{ csrf_field(csrf) }}<button class="btn primary">Send PDF on WhatsApp</button></form></div></div>
+  <div class="card-head"><div><h3>Guest bill</h3></div>
+</div>
   <div class="table-wrap"><table class="list bill"><tbody>
   {% for l in f.lines %}<tr class="{{ l.kind }}"><td><b>{{ l.label }}</b><small class="block">{{ l.detail }}{% if l.at %} · {{ l.at|ist }}{% endif %}{% if l.by %} · {{ l.by }}{% endif %}</small></td>
     <td class="r">{{ l.amount|rupees if l.amount >= 0 else '− ' ~ ((-l.amount)|rupees) }}</td>

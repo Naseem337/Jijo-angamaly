@@ -39,6 +39,7 @@ class Property:
     policies: str = ""  # cancellation / refund / house rules, in the resort's own words
     intro: str = ""  # the "glimpse" sent once rooms are found for the guest's dates; {price} = the per-night price
     meal_plan: str = ""  # shown on the enquiry summary, e.g. "Stay Only"
+    stay_info: str = ""  # sent after the booking confirmation and the policy: location, caretaker, check-in, Wi-Fi
     early_checkin_time: str = ""  # e.g. "06:00"; empty = early check-in not offered
     early_checkin_rate: int = 0  # rupees per room
     gstin: str = ""  # shown on invoices

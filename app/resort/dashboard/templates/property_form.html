@@ -88,7 +88,8 @@
       <div class="chip-list"></div>
       <div class="chip-add"><span class="prefix">+91</span><input type="tel" inputmode="numeric" placeholder="98xxxxxxxx" maxlength="16"><button type="button" class="btn primary">{{ icon('plus') }} Add number</button></div>
     </div></div>
-  {{ area("Policies (cancellation, refund, house rules)", "policies", p.policies, 4) }}
+  {{ area("Cancellation policy (sent right after the booking confirmation)", "policies", p.policies, 12) }}
+  {{ area("After-booking message (location, caretaker, check-in, Wi-Fi; sent after the policy)", "stay_info", p.stay_info, 14) }}
 </section>
 <div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties">Back</a>
   {% if not is_new and auth.is_owner %}<button class="btn danger" formaction="{{ BASE }}/properties/{{ p.id }}/delete" data-confirm="Delete this property and its rooms?">Delete</button>{% endif %}

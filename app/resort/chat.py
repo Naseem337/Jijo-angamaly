@@ -51,7 +51,19 @@ STYLES = ("en", "ml", "manglish", "hi", "hinglish", "ta", "tanglish")
 # Replies are ALWAYS in English letters (user, 2026-11-11): a guest who writes or speaks Malayalam / Tamil / Hindi gets
 # Manglish / Tanglish / Hinglish, never the native script.
 LATIN_STYLE = {"ml": "manglish", "ta": "tanglish", "hi": "hinglish"}
-STYLE_LANG = {"en": "en", "ml": "ml", "hi": "hi", "ta": "ta", "manglish": "mn", "hinglish": "en", "tanglish": "en"}
+STYLE_LANG = {"en": "en", "ml": "ml", "hi": "hi", "ta": "ta", "manglish": "mn", "hinglish": "hn", "tanglish": "tn"}
+# "English please" / "Tamil la pesunga" / "Malayalathil" / "Hindi mein baat karo": that language stays until the guest
+# asks for another one or writes a long message clearly in another language (owner, 2026-11-18)
+LANG_REQUEST = {
+    "en": re.compile(r"\b(?:english\s*(?:please|pls|plz)|in english|speak english|reply in english|"
+                     r"english\s*(?:il|la|mein|me)\s*(?:parayamo|pesunga|sollunga|bolo|baat|reply))\b", re.IGNORECASE),
+    "tanglish": re.compile(r"\btamil\s*-?\s*(?:la|le|il|lae)?\s*(?:pesunga|pesu|sollunga|please|pls|reply|venum)\b|"
+                           r"\bin tamil\b|\btamil-?la\b", re.IGNORECASE),
+    "manglish": re.compile(r"\bmalayalam\s*(?:il|ithil|thil)?\s*(?:parayamo|paranja|please|pls|reply|venam)\b|"
+                           r"\bmalayalathil\b|\bin malayalam\b|\bmalayalam il\b", re.IGNORECASE),
+    "hinglish": re.compile(r"\bhindi\s*(?:mein|me|main)?\s*(?:baat|bolo|boliye|please|pls|reply|karo)\b|\bin hindi\b",
+                           re.IGNORECASE),
+}
 INDIC = re.compile(r"[\u0900-\u097f\u0b80-\u0bff\u0d00-\u0d7f]")
 ACK_WORDS = frozenset("""ok okay okk okey okie k kk kay thanks thank thankyou thanx thx tnx tq ty you so much lot a very fine cool
     noted got it sure alright all right yes yeah yep ya yup haha hahaha lol hmm hm mm mmm oh ohh ah aah aha wow nice great good
@@ -276,6 +288,8 @@ PAYMENT_ASK = re.compile(r"\b(?:pay\w*|paid|link|advance|refund|razorpay|upi|gpa
                          re.IGNORECASE)
 STALE_PAY = re.compile(r"\b(?:payment|pay|paid|link|advance)\b|confirm aak", re.IGNORECASE)
 FORM_LABELS = re.compile(r"check[\s-]?in\s*:|check[\s-]?out\s*:|(?:number of )?persons\s*:", re.IGNORECASE)
+QUESTION_WORD = re.compile(r"\b(?:what|how|when|where|which|why|who|is|are|do|does|can|price|rate|cost|ethra|evlo|"
+                           r"kitna|entha|enthu|enna|yenna|kya|evide|enga|kahan)\b", re.IGNORECASE)
 PHOTO_ASK = re.compile(r"\b(?:photos?|pics?|pictures?|images?|fotos?|padam|padangal|video)\b|ഫോട്ടോ|படம்|फोटो",
                        re.IGNORECASE)
 WISH_CORE = {"room", "rooms", "resort", "resorts", "booking", "book", "stay", "availability", "available", "cottage",
@@ -354,13 +368,18 @@ NO_OFFER = re.compile(
     r"குறைக்க முடியாது|कम नहीं (?:कर सकत[ेा]|हो सकता)|kurakkan pattilla|kuraikka mudiyaadhu|discount nahi", re.IGNORECASE)
 # Hindi / Malayalam typed in English letters: a Hinglish guest must not be answered in Manglish
 HINGLISH_WORDS = re.compile(r"\b(?:milega|milegi|kya|kitne|kitna|raat|chahiye|karna|kar do|theek|nahi|hai|hain|aap|mujhe|hum|log)\b", re.IGNORECASE)
-MANGLISH_WORDS = re.compile(r"\b(?:und|undo|aanu|ethra|venam|cheyyanam|cheyyam|ippol|aakum|evide|ningal\w*|parayamo|mathi)\b", re.IGNORECASE)
+MANGLISH_WORDS = re.compile(r"\b(?:und|undo|unda|aanu|aano|ethra|venam|venda|cheyyanam|cheyyam|cheyyamo|ippol|aakum|"
+                            r"evide|ningal\w*|parayamo|parayu|mathi|enikk\w*|innu|naale|mattannal|tharo|tharamo|"
+                            r"vilikk\w*|kittumo|pattumo|kaanan|varunnund|varunnilla|koode|ivide|aduthu|enthokke)\b",
+                            re.IGNORECASE)
 # Tamil typed in English letters (2026-11-18: "room irukka? evlo price?" was read as English and got English back)
 TANGLISH_WORDS = re.compile(r"\b(?:irukka|irukku|iruku|irukkum|irukkuma|evlo|evvalavu|ethana|ethanai|venum|vendum|"
                             r"sollunga|sollu|naanga|nanga|enga|unga|ungal\w*|enakku|enaku|pannunga|pannanum|panna|"
                             r"kudunga|kodunga|romba|mudiyuma|aaguma|aagum|thanguvom|varuvom|varom|varanum|illai|"
                             r"inga|anga|eppadi|epdi|vanakkam|irundhu|irunthu|varai|varaikkum|pakkam|thaan|"
-                            r"dhaan|kattanum|vaanga|ponga|aamaa|illainga|ethukku|yenna|enna)\b",
+                            r"dhaan|kattanum|vaanga|ponga|aamaa|illainga|ethukku|yenna|enna|maathanum|maathunga|"
+                            r"ku|inniki|innaiku|naalaikku|naalaiku|pesunga|venaam|mudiyaadhu|paakka|edam|"
+                            r"pakkathula|varanga|varuvanga)\b",
                             re.IGNORECASE)
 # A Malayalam word that slipped into a Tanglish / Hinglish reply and survived the rewrite -> the guest's own word
 _STRAY_ML = {"tanglish": {"und": "irukku", "undo": "irukka", "aanu": "thaan", "venam": "venum", "ippol": "ippo",
@@ -619,10 +638,15 @@ class ChatMixin:
             return None
         if len(text.split()) > 4:
             return None
-        prop = self._named_place(text) or self._place_by_start(text)  # 'alloy' -> Alleppey, 'kanth' -> Kanthalloor
+        # only a short, place-like answer ('alloy', 'kanth', 'xyz') is read as a place or gets the re-ask; a real
+        # question ('ethra aanu rate?', 'pool undo?') goes to the normal handling (Step 3, 2026-11-18)
+        place_like = (len(text.split()) <= 2 and "?" not in text and not QUESTION_WORD.search(text)
+                      and not (MANGLISH_WORDS.search(text) or TANGLISH_WORDS.search(text) or HINGLISH_WORDS.search(text))
+                      and not _classify_latin(_words(text))[0])  # 'confirm' / 'book' are words, not a misspelt town
+        prop = self._named_place(text) or (self._place_by_start(text) if place_like else None)
         if prop is None:
-            if PHOTO_ASK.search(text) or re.search(r"\d", text) or GREETING.match(text) or is_ack(text) \
-                    or NOT_NOW.search(text) or RESTART.match(text):
+            if not place_like or PHOTO_ASK.search(text) or re.search(r"\d", text) or GREETING.match(text) \
+                    or is_ack(text) or NOT_NOW.search(text) or RESTART.match(text):
                 return None  # not a place answer: the normal handling goes on
             # not understood: ask once more, short, never silence (owner, 2026-11-18)
             again = " or ".join(self._towns()) + " ?"
@@ -634,6 +658,15 @@ class ChatMixin:
         self._save(phone, st)
         self._text(phone, t("form", st.get("lang", "en")))
         return "form"
+
+    def _since_last_reply(self, phone: str) -> str:
+        """Everything the guest wrote since our last message (their latest message is already stored)."""
+        texts: list[str] = []
+        for m in reversed(self._session_rows(phone)):
+            if m.direction == "out":
+                break
+            texts.append(m.text)
+        return "\n".join(reversed(texts))
 
     def _name_in_chat(self, phone: str) -> str:
         """The newest name the guest typed with a number in this conversation ('Shibil 859002727' gives Shibil even
@@ -802,9 +835,14 @@ class ChatMixin:
             return None  # it says more than 'I want a room' (a question about the rooms): the AI answers
         if (st.get("bk") or {}).get("check_in"):
             return None  # a booking is in progress: the AI carries on from there
-        self._language_note(st, text)  # reads the guest's language (Manglish / Tanglish ...) as the AI path does
-        lang = st.get("lang", "en")
+        lang = st.get("lang", "en")  # the language was read in flow._dispatch, before any step answers
         prop = self._named_place(text)  # the owner always asks the location first, unless the guest named it
+        if prop is None and st.get("form_place"):
+            # the place is known and the form already went in this chat ('ok book' after the form): the open step,
+            # never the location question again (N01, Step 3)
+            form = t("form", lang)
+            self._text(phone, t("fill_form", lang) if self._form_was_last(phone) else form, repeat_ok=True)
+            return "form"
         if prop is None:
             self._text(phone, t("ask_location", lang, towns=" or ".join(self._towns())), repeat_ok=True)
             self._save(phone, st)
@@ -901,27 +939,42 @@ class ChatMixin:
         """The language of THIS reply, decided in code from the guest's latest message, so earlier chats cannot
         pull the AI into mixing languages."""
         own = st.get("gs", "")
-        if own in LANG_NAMES:
-            style = LATIN_STYLE[own]  # Malayalam / Tamil / Hindi script in -> Manglish / Tanglish / Hinglish out
+        asked = next((code for code, rx in LANG_REQUEST.items() if rx.search(text)), None)
+        strong = False  # the message itself clearly shows a language (script or our word lists)
+        if asked:
+            style = asked  # 'English please' / 'Tamil la pesunga': that language, and it stays (st["lang_lock"])
+        elif own in LANG_NAMES:
+            style, strong = LATIN_STYLE[own], True  # Malayalam / Tamil / Hindi script -> Manglish / Tanglish / Hinglish
         elif is_language_neutral(text):
             style = st.get("style") or "en"  # 'ok' / 'hi' / a name: the guest's own language so far
         elif (tamil := len(TANGLISH_WORDS.findall(text))) and tamil >= len(MANGLISH_WORDS.findall(text)) \
                 and not HINGLISH_WORDS.search(text):
-            style = "tanglish"
+            style, strong = "tanglish", True
         elif MANGLISH_WORDS.search(text) and not HINGLISH_WORDS.search(text):
-            style = "manglish"
+            style, strong = "manglish", True
         elif HINGLISH_WORDS.search(text) and not MANGLISH_WORDS.search(text):
-            style = "hinglish"
+            style, strong = "hinglish", True
         else:
             style = latin_style(text, st.get("style") or "en")
+            strong = style == "en" and _classify_latin(_words(text))[0] >= 4  # a long, clearly English message
             if st.get("style") in ("tanglish", "hinglish") and not MANGLISH_WORDS.search(text) and (
                     style == "manglish" or _classify_latin(_words(text))[0] < 3):
                 style = st["style"]  # a Tamil / Hindi guest's short or unknown words are not Malayalam or English
         if style not in STYLE_LABELS:
             style = "en"
-        if not is_language_neutral(text):
+        lock = asked or st.get("lang_lock")
+        if lock and not asked and style != lock:
+            if strong and len(_words(text)) >= 4:
+                lock = None  # a long message clearly in another language: the guest switched
+            else:
+                style = lock  # short / neutral / unclear messages keep the language the guest asked for
+        if lock:
+            st["lang_lock"] = lock
+        else:
+            st.pop("lang_lock", None)
+        if asked or lock or not is_language_neutral(text):
             st["style"] = style
-            if own not in LANG_NAMES:  # English letters: the fixed messages (payment, confirmation) follow too
+            if own not in LANG_NAMES or lock:  # English letters: the fixed messages (payment, confirmation) follow
                 st["lang"] = STYLE_LANG[style]
         extra = " Plain English words like room, booking and payment are fine inside it." if style != "en" else ""
         return (f"REPLY LANGUAGE (decided from the guest's latest message): {STYLE_LABELS[style]}. Write the whole "
@@ -1293,7 +1346,7 @@ class ChatMixin:
         if (quiet and not queued and BOOKING_WISH.search(text) and not NOT_NOW.search(text)
                 and not (st.get("bk") or {}).get("check_in")):
             # 'need a room' / 'resort venam' left unanswered by the AI: the next fixed step goes (client's flow)
-            if st.get("form_place") or self._named_place(text) or len(self._places()) == 1:
+            if st.get("form_place") or self._named_place(text):  # else the location question first (owner flow)
                 self._tool_form(ctx, {"place": self._place_label(self.repo.get_property(st["form_place"]))
                                       if st.get("form_place") else text})
             else:

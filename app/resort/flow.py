@@ -240,6 +240,13 @@ class BookingBot(IdProofMixin, ChatMixin):
                 st["lang"] = st["gs"] = detect_script(text, st.get("lang", "en"))
             elif not is_language_neutral(text):
                 st["gs"] = ""  # English letters (English or Manglish): "ok" and "hi" do not change this
+            # the reply language is read BEFORE any fixed step answers (location question, form, 'ok', photos...),
+            # so a code path never answers a Manglish / Tanglish / Hinglish guest in English (Step 3, 2026-11-18)
+            if not is_ack(text):  # 'ok' / 'thanks a lot' keep the language
+                # a 1-2 word message ('Alleppey') is read with what the guest wrote since our last reply, as the AI
+                # path does ('avde engane und' + 'Alleppey' is Manglish)
+                short = len(text.split()) <= 2
+                self._language_note(st, self._since_last_reply(phone) if short else text)
         st.setdefault("lang", "en")
         if st["lang"] not in FIXED_LANGS:
             st["lang"] = "en"
@@ -433,10 +440,13 @@ class BookingBot(IdProofMixin, ChatMixin):
         """Tell the guest their booking is confirmed and alert the staff (online or desk payment)."""
         prop = self.repo.get_property(b.property_id)
         rt = self.repo.get_room_type(b.room_type_id)
-        # The client's confirmation and nothing more (2026-11-17): no map line, no ID request after it.
+        # The client's confirmation, then the cancellation policy, then the stay details (owner, 2026-11-18).
+        # No invoice is sent to the guest any more (owner, 2026-11-18).
         delivered = self._notify_guest(b, self._confirmed_text(b, prop, rt), "paid", self._params(b))
-        if delivered:
-            self._send_invoice(b)  # the owner (2026-11-18): the invoice PDF follows the confirmation
+        if delivered and prop:
+            for extra in (prop.policies, prop.stay_info):
+                if extra and extra.strip():
+                    self._text(b.guest_phone, extra.strip())
         self.end_conversation(b.guest_phone)  # a confirmed booking closes the chat: the next message starts fresh
         try:  # ask for the ID proof once (only inside the 24 h window; the day-before reminder covers the rest)
             if delivered and ASK_ID_AFTER_PAYMENT:

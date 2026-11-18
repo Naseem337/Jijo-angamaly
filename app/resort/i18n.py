@@ -10,7 +10,8 @@ from __future__ import annotations
 import re
 
 LANGS = ("en", "ml", "ta", "hi")
-FIXED_LANGS = (*LANGS, "mn")  # "mn" = Manglish: fixed messages in Malayalam written in English letters
+# "mn" / "tn" / "hn" = Manglish / Tanglish / Hinglish: the fixed messages in English letters (owner, 2026-11-18)
+FIXED_LANGS = (*LANGS, "mn", "tn", "hn")
 LANG_NAMES = {"en": "English", "ml": "മലയാളം", "ta": "தமிழ்", "hi": "हिन्दी"}
 
 _SCRIPTS = (("ml", re.compile(r"[ഀ-ൿ]")), ("ta", re.compile(r"[஀-௿]")),
@@ -188,8 +189,70 @@ for _key, _text in MN.items():
     S[_key]["mn"] = _text
 
 
-# Fixed messages are never sent in native script (user, 2026-11-11): Malayalam -> Manglish, Tamil / Hindi -> English.
-_LATIN_LANG = {"ml": "mn", "ta": "en", "hi": "en"}
+# Tanglish (Tamil in English letters) and Hinglish (Hindi in English letters) for the fixed messages (owner,
+# 2026-11-18: Tamil and Hindi guests get their language everywhere, like Malayalam guests get Manglish). The greeting,
+# the location question and the form keep the owner's exact English wording for everyone; summaries, the booking
+# confirmation and the invoice stay English. Keys not listed here fall back to English.
+TN = {
+    "discount": "Nalla news: owner ungalukku special price tharaanga. Pudhu total ₹{total}, ippo pay panna vendiya advance ₹{advance}.",
+    "or": "illa",
+    "pay": "Indha link-la advance pay pannunga:\n{url}",
+    "rooms_ok": "Aamaa, unga dates-ku rooms available irukku.",
+    "rooms_none": "Sorry, unga dates-ku rooms available illa.",
+    "ask_contact": "Interested-na unga name-um mobile number-um anuppunga?",
+    "ask_name": "Unga name sollunga?",
+    "fill_form": "Mela irukkura details share pannunga?",
+    "say_again": "Sorry, konjam short-a innoru thadava type pannunga?",
+    "price_line": "{room}: oru night-ku {per}, {nights} night-ku total {total}.",
+    "greet_again": "Hi sir, innum enna help venum?",
+    "failed": "Payment nadakkala pola irukku. Innoru thadava try pannunga:",
+    "retry_link": "{url}",
+    "pending": "Payment link innum {minutes} nimisham irukku: {url}",
+    "handoff": "Thanks. Engal team seekiram inga message pannuvaanga.",
+    "ai_down": "Sorry, ippo reply panna mudiyala. Engal team seekiram help pannuvaanga.",
+    "voice_problem": "Sorry, andha voice note puriyala. Type pannunga?",
+    "unsupported": "Text-um voice note-um mattum thaan padikka mudiyum. Message type pannunga.",
+    "map_line": "Location: {url}",
+    "opt_out": "Sari, inimel offers anuppa maattom. Thirumba venumna START nu reply pannunga.",
+    "opt_in": "Welcome back! Inimel engal messages varum.",
+    "fb_thanks": "{property}-la thangiyadhukku thanks! Nalla time-a irundhirukkum nu nambrom.",
+    "fb_body": "Stay eppadi irundhuchu? 1 (mosam) mudhal 5 (super) varai oru rating anuppunga, venumna oru comment-um.",
+    "fb_done": "Feedback-ku thanks!",
+}
+HN = {
+    "discount": "Achhi khabar: owner aapko special price de rahe hain. Naya total ₹{total}, abhi pay karne wala advance ₹{advance}.",
+    "or": "ya",
+    "pay": "Is link se advance pay kijiye:\n{url}",
+    "rooms_ok": "Haan, aapki dates par rooms available hain.",
+    "rooms_none": "Sorry, aapki dates par rooms available nahi hain.",
+    "ask_contact": "Interested hain to apna name aur mobile number bhejiye?",
+    "ask_name": "Apna name bataiye?",
+    "fill_form": "Upar wali details share kijiye?",
+    "say_again": "Sorry, thoda chhota karke dobara type kijiye?",
+    "price_line": "{room}: ek night ka {per}, {nights} night ka total {total}.",
+    "greet_again": "Hi sir, aur kya help kar sakte hain?",
+    "failed": "Lagta hai payment nahi hua. Ek baar phir try kijiye:",
+    "retry_link": "{url}",
+    "pending": "Payment link abhi {minutes} minute aur chalega: {url}",
+    "handoff": "Thanks. Hamari team jaldi yahan message karegi.",
+    "ai_down": "Sorry, abhi jawab nahi de pa rahe. Hamari team jaldi help karegi.",
+    "voice_problem": "Sorry, voice note samajh nahi aaya. Type kar denge?",
+    "unsupported": "Hum sirf text aur voice note padh sakte hain. Message type kijiye.",
+    "map_line": "Location: {url}",
+    "opt_out": "Theek hai, ab offers nahi bhejenge. Dobara chahiye to START reply kijiye.",
+    "opt_in": "Welcome back! Ab aapko hamare messages milenge.",
+    "fb_thanks": "{property} mein rukne ke liye thanks! Ummeed hai achha time raha.",
+    "fb_body": "Stay kaisa raha? 1 (kharab) se 5 (bahut badhiya) tak rating bhejiye, chahein to comment bhi.",
+    "fb_done": "Feedback ke liye thanks!",
+}
+for _code, _table in (("tn", TN), ("hn", HN)):
+    for _key, _text in _table.items():
+        S[_key][_code] = _text
+
+
+# Fixed messages are never sent in native script (user, 2026-11-11): Malayalam -> Manglish, Tamil -> Tanglish,
+# Hindi -> Hinglish (owner, 2026-11-18).
+_LATIN_LANG = {"ml": "mn", "ta": "tn", "hi": "hn"}
 
 
 def t(key: str, lang: str, **values: object) -> str:

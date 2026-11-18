@@ -677,7 +677,7 @@ def test_script_detection():
 
 def test_every_string_exists_in_all_four_languages():
     for key, table in S.items():
-        assert {"en", "ml", "ta", "hi"} <= set(table) <= {"en", "ml", "ta", "hi", "mn"}, key
+        assert {"en", "ml", "ta", "hi"} <= set(table) <= {"en", "ml", "ta", "hi", "mn", "tn", "hn"}, key
         assert all(v.strip() for v in table.values()), key
     assert t("greet", "xx") == "Hi, How may I assist you?"  # unknown language: English
 
@@ -752,6 +752,20 @@ def test_stop_and_start(world):
     assert say(w, "STOP") == "opt_out"
     assert w.repo.get_guest(GUEST).offers_consent is False
     assert say(w, "START") == "opt_in"
+
+
+def test_after_payment_confirmation_then_policy_then_stay_details_and_no_invoice(world):
+    w = world
+    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__,
+                                     "stay_info": "Location 👇\nhttps://maps.app.goo.gl/x\nWifi - pass"}))
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    before = len(w.wa.to(GUEST))
+    w.bot.mark_paid(booking_id=b.id)
+    sent = w.wa.to(GUEST)[before:]
+    assert [k for _, k, _ in sent] == ["text", "text", "text"]  # no PDF document
+    assert sent[0][2].endswith("*Booking Confirmed ✅*") and sent[1][2] == "Free cancellation 7 days before."
+    assert sent[2][2].startswith("Location") and "Wifi" in sent[2][2]
 
 
 def test_talk_to_owner_pauses_the_bot_and_sends_the_owner_a_summary(world):
@@ -857,9 +871,10 @@ def test_after_payment_the_guest_gets_only_the_clients_confirmation_with_the_roo
     w.bot.mark_paid(booking_id=b.id)
     sent = w.wa.to(GUEST)[before:]
     # the confirmation, then the invoice PDF (owner, 2026-11-18); no map line, no ID request
-    assert [k for _, k, _ in sent] == ["text", "document"] and sent[1][2].startswith("Invoice-") and sent[1][2].endswith(".pdf")
-    w.bot.announce_paid(w.repo.get_booking(b.id))  # announced again by staff: the invoice is not sent twice
-    assert [k for _, k, _ in w.wa.to(GUEST)].count("document") == 1
+    # the confirmation, then the cancellation policy (owner, 2026-11-18); no invoice, no map line, no ID request
+    assert [k for _, k, _ in sent] == ["text", "text"] and sent[1][2] == "Free cancellation 7 days before."
+    w.bot.announce_paid(w.repo.get_booking(b.id))  # announced again by staff
+    assert [k for _, k, _ in w.wa.to(GUEST)].count("document") == 0  # no invoice is ever sent (owner, 2026-11-18)
     assert sent[0][2] == "\n".join([
         "Following are the glimpse of your booking,", "",
         "Guest - Asha Menon", "98470 12345",
@@ -878,7 +893,9 @@ def test_paid_event_confirms_booking_and_alerts_staff(world):
     assert w.bot.mark_paid(link_id=b.payment_link_id, payment_id="pay_1") == "paid"
     b = w.repo.get_booking(b.id)
     assert b.status == "paid" and b.razorpay_payment_id == "pay_1" and b.paid_at
-    assert w.wa.texts()[-1].endswith("*Booking Confirmed ✅*")  # the last message: no ID request after it
+    confirmed = next(x for x in w.wa.texts() if x.endswith("*Booking Confirmed ✅*"))
+    assert w.wa.texts()[-1] == "Free cancellation 7 days before."  # the policy follows; no ID request after it
+    assert w.wa.texts().index(confirmed) == len(w.wa.texts()) - 2
     assert "PAID" in w.wa.texts(STAFF)[-1]
     assert w.bot.mark_paid(link_id=b.payment_link_id) == "already_paid"  # webhook retries are harmless
 
