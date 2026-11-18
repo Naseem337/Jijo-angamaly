@@ -33,6 +33,7 @@ MAX_BYTES = 5 * 1024 * 1024
 ALLOWED_MIME = frozenset({"image/jpeg", "image/png", "image/webp"})
 MARK_ASKED = "[id-asked]"
 MARK_REMINDED = "[id-reminded]"
+ASK_ID_ON_WHATSAPP = False  # the client (2026-11-18): guests bring their ID; nothing is collected on WhatsApp
 SKIP_WORDS = {"skip", "later", "no", "none", "nope", "illa"}
 SKIP_PHRASE = re.compile(r"\b(later|skip)\b|(show|bring|give|submit)\w*.{0,25}check.?in|at check.?in$")
 REMIND_FROM_HOUR, REMIND_TO_HOUR = 9, 20  # IST window for the reminder
@@ -200,7 +201,8 @@ class IdProofMixin:
                                                 property=prop.name if prop else ""), "id_reminder", self._params(b))
             self._mark(b.id, MARK_REMINDED)
             sent += 1
-            if delivered:  # inside the 24 h window: their next photo counts as the ID
+            # The client (2026-11-18): IDs are shown at check-in, never sent on WhatsApp, so nothing waits for a photo
+            if delivered and ASK_ID_ON_WHATSAPP:
                 st = self.repo.get_state(b.guest_phone)
                 active = st.get("idp")
                 if not active or active.get("booking_id") == b.id:

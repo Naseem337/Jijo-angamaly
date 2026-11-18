@@ -71,6 +71,8 @@ class FakeWA:
 def world(tmp_path, monkeypatch):
     from app.resort import flow
     monkeypatch.setattr(flow, "ASK_ID_AFTER_PAYMENT", True)  # off in production (client, 2026-11-17); these test the ID flow
+    from app.resort import idproof
+    monkeypatch.setattr(idproof, "ASK_ID_ON_WHATSAPP", True)
     repo = ResortRepo(tmp_path / "r.sqlite3")
     prop = repo.save_property(Property("Pozhiyoram Resort", city="Kerala", advance_pct=50, staff_numbers=[STAFF]))
     rt = repo.save_room_type(RoomType(prop.id, "Deluxe", units=5, max_adults=2, max_children=1, max_occupancy=3,
@@ -261,7 +263,7 @@ def test_reminder_goes_once_the_day_before_check_in(world):
     assert w.bot.sweep().get("id_reminders") is None  # before 09:00 IST: wait
     w.clock.set(datetime(2026, 11, 2, 11, 0, tzinfo=IST))
     assert w.bot.sweep()["id_reminders"] == 1
-    assert "starts tomorrow" in w.wa.of("text")[-1]
+    assert w.wa.of("text")[-1] == "Please bring your ID proof while coming."  # client, 2026-11-18
     assert w.repo.get_state(GUEST)["idp"]["booking_id"] == b.id  # their next photo counts as the ID
     assert send_image(w) == "id_done"
     assert "id_reminders" not in w.bot.sweep()  # only once

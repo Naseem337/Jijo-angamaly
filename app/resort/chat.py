@@ -752,6 +752,8 @@ class ChatMixin:
             "or 'same number', pass mobile 'same'. If they give only the number (or 'same number') without a name, "
             "call create_booking anyway with an empty name: their WhatsApp name is used.\n"
             "- Photos: when the guest asks for photos or to see the place or a room, call send_photos.\n"
+            "- ID proof: if asked, say only 'Please bring your ID proof while coming.' Never name ID types and never ask "
+            "for an ID photo on WhatsApp.\n"
             "- Early check-in: only if the guest asks. Tell them the time and charge from the FACTS and pass "
             "early_checkin true to create_booking if they want it.\n"
             "- Never ask the same thing twice.\n"

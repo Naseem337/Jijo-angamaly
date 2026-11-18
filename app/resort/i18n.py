@@ -135,14 +135,8 @@ S.update({
                       "பரவாயில்லை, செக்-இனில் அட்டையைக் காட்டுங்கள்.", "कोई बात नहीं, चेक-इन पर आईडी दिखा दीजिए।"),
     "id_done": _t("All set, thank you! We look forward to welcoming you.", "എല്ലാം ശരിയായി, നന്ദി! നിങ്ങളെ സ്വാഗതം ചെയ്യാൻ കാത്തിരിക്കുന്നു.",
                   "எல்லாம் தயார், நன்றி! உங்களை வரவேற்கக் காத்திருக்கிறோம்.", "सब तैयार है, धन्यवाद! आपके स्वागत का इंतज़ार रहेगा।"),
-    "id_reminder": _t("Reminder: your stay {id} at {property} starts tomorrow. Please send an ID photo of each adult "
-                      "guest here, or show it at check-in.",
-                      "ഓർമ്മപ്പെടുത്തൽ: {property}-ലെ നിങ്ങളുടെ താമസം ({id}) നാളെ തുടങ്ങുന്നു. ഓരോ മുതിർന്ന അതിഥിയുടെയും ഐഡി ഫോട്ടോ "
-                      "ഇവിടെ അയക്കൂ, അല്ലെങ്കിൽ ചെക്ക്-ഇന്നിൽ കാണിക്കൂ.",
-                      "நினைவூட்டல்: {property}-ல் உங்கள் தங்கல் ({id}) நாளை தொடங்குகிறது. ஒவ்வொரு பெரியவரின் அடையாள அட்டை "
-                      "புகைப்படத்தையும் இங்கே அனுப்புங்கள், அல்லது செக்-இனில் காட்டுங்கள்.",
-                      "याद दिलाना: {property} में आपका ठहरना ({id}) कल शुरू हो रहा है। कृपया हर वयस्क मेहमान की आईडी फ़ोटो यहाँ भेजें, "
-                      "या चेक-इन पर दिखाएँ।"),
+    # the client (2026-11-18): only "bring your ID proof", no ID types, nothing sent on WhatsApp
+    "id_reminder": _t(*["Please bring your ID proof while coming."] * 4),
     "fb_thanks": _t("Thank you for staying with us at {property}! We hope you had a wonderful time.",
                     "{property}-ൽ താമസിച്ചതിന് നന്ദി! മനോഹരമായ സമയം ആയിരുന്നെന്ന് കരുതുന്നു.",
                     "{property}-ல் தங்கியதற்கு நன்றி! இனிய நேரமாக அமைந்திருக்கும் என நம்புகிறோம்.",
