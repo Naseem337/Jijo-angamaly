@@ -175,13 +175,12 @@ def home(request: Request, auth: Auth = Depends(require_user)):
     hour = now.astimezone(IST).hour
     greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
     active = [p for p in props if p.active] or props
-    banner = [ref for p in active for ref in p.photo_urls[:3]][:5]  # the resorts' own photos, cover first
     upcoming = sorted((b for b in mine if b.status == "paid" and b.check_in > today),
                       key=lambda b: b.check_in)
     return page(request, "home.html", auth, nav="home", today=today, greeting=greeting, arrivals=arrivals, departures=departures,
                 holds=holds, in_house=in_house, occ=occ, props=props_by_id, rooms=rooms, collected=collected,
                 tonight_used=used, tonight_total=total, tonight_pct=round(100 * used / total) if total else 0,
-                welcome=active[0].name if len(active) == 1 else "Resort Desk", banner=banner, upcoming=upcoming,
+                welcome=active[0].name if len(active) == 1 else "Resort Desk", upcoming=upcoming,
                 place=", ".join(dict.fromkeys(p.city.split(",")[0].strip() for p in active if p.city)))
 
 

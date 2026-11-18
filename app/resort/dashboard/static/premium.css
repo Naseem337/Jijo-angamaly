@@ -232,3 +232,55 @@ details.more>summary:after{content:"";width:8px;height:8px;border-right:2px soli
 details.more[open]>summary:after{transform:rotate(-135deg)}
 details.more>summary:hover{background:var(--hover)}
 details.more>.kv{padding:4px 14px 12px;margin:0}
+
+/* ================================================================ standard theme (owner, 2026-11-18)
+   Minimal and standard, like the owner's reference: light grey page, white cards, white sidebar, ONE blue accent.
+   Overrides the teal / gold look above. */
+:root:root{
+  --bg:#f5f6f8;--card:#ffffff;--ink:#111827;--muted:#6b7280;--line:#e7e9ee;--line-2:#d8dbe2;--soft:#f9fafb;--hover:#f3f4f6;
+  --gray-soft:#f3f4f6;--control-bg:#ffffff;--brand:#2f54eb;--brand-d:#1d3fd0;--brand-soft:#eef2ff;--on-brand:#ffffff;
+  --gold:#2f54eb;--gold-soft:#eef2ff;--ring:rgba(47,84,235,.18);--bar:rgba(255,255,255,.94);
+  --side-a:#ffffff;--side-b:#ffffff;--side-ink:#374151;--side-muted:#9ca3af;
+  --shadow:0 1px 2px rgba(16,24,40,.04);--shadow-lg:0 12px 32px rgba(16,24,40,.10);
+}
+html[data-theme=dark]:root{
+  --bg:#0f1115;--card:#171a21;--ink:#e5e7eb;--muted:#9ca3af;--line:#262a33;--line-2:#323743;--soft:#13161c;--hover:#1e222b;
+  --gray-soft:#1e222b;--control-bg:#13161c;--brand:#6b8cff;--brand-d:#8ea6ff;--brand-soft:#1a2240;--on-brand:#0b1020;
+  --gold:#6b8cff;--gold-soft:#1a2240;--ring:rgba(107,140,255,.25);--bar:rgba(23,26,33,.94);
+  --side-a:#171a21;--side-b:#171a21;--side-ink:#d1d5db;--side-muted:#6b7280;
+}
+html body .sidebar{background:var(--card);border-right:1px solid var(--line);color:var(--side-ink)}
+html body .brand{color:var(--ink)}
+html body .brand small{color:var(--muted)}
+html body .brand .logo-mark{box-shadow:none}
+html body .scope select{background:var(--soft);color:var(--ink);border:1px solid var(--line)}
+html body .sidebar nav a{color:var(--side-ink)}
+html body .sidebar nav a .ic{color:var(--side-muted)}
+html body .sidebar nav a:hover{background:var(--hover);color:var(--ink)}
+html body .sidebar nav a.active{background:var(--brand-soft);color:var(--brand)}
+html body .sidebar nav a.active .ic{color:var(--brand)}
+html body .sidebar nav a.active:before{background:var(--brand)}
+html[data-theme=dark] body .sidebar nav a:hover{background:var(--hover)}
+html[data-theme=dark] body .sidebar nav a.active{background:var(--brand-soft)}
+html body .btn.primary{background:var(--brand);border-color:var(--brand);box-shadow:none}
+html body .btn.primary:hover{background:var(--brand-d)}
+html body .avatar{background:var(--brand)}
+html body h3 .ic{color:var(--brand)}
+html body .card{box-shadow:var(--shadow)}
+/* home: four plain tiles in one style */
+.hm-tile{background:var(--card) !important;color:var(--ink) !important;border:1px solid var(--line);box-shadow:var(--shadow)}
+.hm-tile:hover{box-shadow:var(--shadow-lg);border-color:var(--line-2)}
+.hm-ic{background:var(--brand-soft)}
+.hm-ic .ic{color:var(--brand)}
+.hm-txt small{color:var(--muted) !important}
+.hm-txt b{font-size:17px;color:var(--ink)}
+.hm-go{background:var(--soft);border:1px solid var(--line)}
+.hm-go .ic{color:var(--muted)}
+.hm-who .logo-mark{box-shadow:none}
+.hm-date{color:var(--brand)}
+html[data-theme=dark] .hm-date{color:var(--brand)}
+.hm-tags .tag.ok{background:var(--brand-soft);color:var(--brand)}
+.btn.sm.dark{background:var(--ink);border-color:var(--ink);color:var(--card)}
+.hm-empty .ic{color:var(--muted)}
+.occ-bars i{background:#c7d2fe}.occ-bars i.mid{background:#7c93f5}.occ-bars i.full{background:var(--brand)}
+html[data-theme=dark] .occ-bars i{background:#2b3766}

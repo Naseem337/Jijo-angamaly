@@ -12,33 +12,22 @@
   <div class="hm-foot"><span class="btn sm dark">{{ 'Give discount' if kind == 'hold' else 'Open' }} {{ icon('right') }}</span>{% if props.get(b.property_id) %}<small>{{ props[b.property_id].name }}</small>{% endif %}</div>
 </a>
 {%- endmacro %}
-{# Premium home (owner, 2026-11-18): welcome, four colour tiles, the resort's own photos, then card columns #}
+{# Home (owner, 2026-11-18): minimal and standard. Welcome, four stat tiles in one colour, card columns #}
 <div class="hm-head">
   <div class="hm-who">{{ logo_mark(40) }}<div><small>Welcome,</small><b>{{ welcome }}</b></div></div>
   <a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a>
 </div>
 
 <div class="hm-tiles">
-  <a class="hm-tile t-blue" href="{{ BASE }}/stay"><span class="hm-ic">{{ icon('door') }}</span>
+  <a class="hm-tile" href="{{ BASE }}/stay"><span class="hm-ic">{{ icon('door') }}</span>
     <span class="hm-txt"><small>Arrivals today</small><b>{{ arrivals|length }} arriving</b></span><span class="hm-go">{{ icon('plus') }}</span></a>
-  <a class="hm-tile t-amber" href="{{ BASE }}/stay"><span class="hm-ic">{{ icon('door') }}</span>
+  <a class="hm-tile" href="{{ BASE }}/stay"><span class="hm-ic">{{ icon('door') }}</span>
     <span class="hm-txt"><small>Departures today</small><b>{{ departures|length }} leaving</b></span><span class="hm-go">{{ icon('right') }}</span></a>
-  <a class="hm-tile t-green" href="{{ BASE }}/stay"><span class="hm-ic">{{ icon('users') }}</span>
+  <a class="hm-tile" href="{{ BASE }}/stay"><span class="hm-ic">{{ icon('users') }}</span>
     <span class="hm-txt"><small>In the house</small><b>{{ in_house|length }} staying</b></span><span class="hm-go">{{ icon('right') }}</span></a>
-  <a class="hm-tile t-violet" href="{{ BASE }}/reports/collections"><span class="hm-ic">{{ icon('bolt') }}</span>
+  <a class="hm-tile" href="{{ BASE }}/reports/collections"><span class="hm-ic">{{ icon('bolt') }}</span>
     <span class="hm-txt"><small>Collected today</small><b>{{ collected|rupees }}</b></span><span class="hm-go">{{ icon('right') }}</span></a>
 </div>
-
-<section class="hm-hero{{ ' no-photo' if not banner }}">
-  {% for ref in banner %}<img src="{{ ref }}" alt="" class="{{ 'on' if loop.first }}" {{ 'loading="lazy"' if not loop.first }}>{% endfor %}
-  <div class="hm-hero-txt">
-    <small>{{ today.strftime('%A, %d %B') }}{% if place %} · {{ place }}{% endif %}</small>
-    <b>{{ tonight_used }} of {{ tonight_total }} rooms booked tonight</b>
-    <div class="hm-meter"><i style="width:{{ tonight_pct }}%"></i></div>
-  </div>
-  {% if not banner %}<a class="hm-hero-add" href="{{ BASE }}/properties">{{ icon('image') }} Add resort photos</a>{% endif %}
-</section>
-
 <div class="hm-cols">
   <section class="hm-col">
     <div class="hm-col-head"><h3>Arriving today</h3><a class="hm-all" href="{{ BASE }}/stay">All ({{ arrivals|length }})</a></div>
