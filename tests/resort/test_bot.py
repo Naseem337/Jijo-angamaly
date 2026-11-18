@@ -281,6 +281,24 @@ def test_a_misspelt_place_is_understood_and_the_form_follows(world, answer, plac
 FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
 
 
+def test_photos_do_not_push_the_guests_details_out_of_the_ais_memory(world):
+    w = world
+    say(w, "Alleppey, 12 dec to 15 dec, 3 persons", GUEST, reply("[no reply]"))
+    for i in range(30):  # a glimpse with many photos: each is stored as its own row
+        w.bot._log(GUEST, f"[photo] /resort/media/x{i}.jpg")
+    say(w, "Rahul", GUEST, reply("[no reply]"))
+    seen = "\n".join(m.content for m in w.llm.calls[-1].messages)
+    assert "12 dec to 15 dec, 3 persons" in seen and "[photos sent: 30]" in seen and "x7.jpg" not in seen
+
+
+def test_the_conversation_is_remembered_through_a_long_pause_the_same_day(world):
+    w = world
+    say(w, "Alleppey, 12 dec to 15 dec, 3 persons", GUEST, reply("[no reply]"))
+    w.clock.advance(hours=14)  # the guest comes back the next day
+    say(w, "hi, any update?", GUEST, reply("[no reply]"))
+    assert any("12 dec to 15 dec" in m.content for m in w.llm.calls[-1].messages)
+
+
 def test_the_ai_never_asks_dates_in_its_own_words_the_form_goes(world):
     w = world
     say(w, "need a room in Alleppey", GUEST, reply("Rooms are available in Alleppey. What is your check-in date?"))
@@ -377,7 +395,7 @@ def test_no_message_is_ever_sent_twice_in_a_conversation(world):
     say(w, "Is there a beach view?", GUEST, reply(line))
     say(w, "hmm?", GUEST, reply(line))
     assert w.wa.texts().count(line) == 1
-    w.clock.advance(minutes=60 * 7)  # a new conversation after a long gap may say it again
+    w.clock.advance(minutes=60 * 25)  # a new conversation after a day of silence may say it again
     say(w, "Is there a beach view?", GUEST, reply(line))
     assert w.wa.texts().count(line) == 2
 

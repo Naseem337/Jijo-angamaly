@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from typing import Any
 
@@ -38,8 +38,8 @@ log = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 6
 MAX_REPLY_TOKENS = 700
-HISTORY = 16
-SESSION_GAP = timedelta(hours=6)  # a pause this long starts a new conversation: older chat is not shown to the AI
+HISTORY = 20  # real messages the AI sees (photo rows do not count)
+SESSION_GAP = timedelta(hours=24)  # a pause this long starts a new conversation: older chat is not shown to the AI
 LINK = re.compile(r"https?://\S+")
 STYLE_LABELS = {"en": "English", "ml": "Malayalam script", "hi": "Hindi script", "ta": "Tamil script",
                 "manglish": "Manglish (Malayalam in English letters)", "hinglish": "Hinglish (Hindi in English letters)",
@@ -559,9 +559,8 @@ class ChatMixin:
 
     def _recent_guest_text(self, phone: str) -> str:
         """The guest's messages in this conversation, oldest first (their stay details may be spread over several)."""
-        rows = self.repo.list_chat(phone, limit=HISTORY)
-        rows = rows[self._session_start(rows):]
-        return "\n".join(m.text for m in rows if m.direction == "in")[-1500:]
+        rows = [m for m in self._session_rows(phone) if m.direction == "in"][-HISTORY:]
+        return "\n".join(m.text for m in rows)[-1500:]
 
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         if prop := self._named_place(ctx.text):  # 'rooms available in allepy?': the place is known, the form follows
@@ -831,17 +830,31 @@ class ChatMixin:
                 return i
         return 0
 
+    def _session_rows(self, phone: str) -> list[ChatMessage]:
+        """Every stored message of the current conversation (up to 200), photos included."""
+        rows = self.repo.list_chat(phone, limit=200)
+        return rows[self._session_start(rows):]
+
     def _chatting_now(self, phone: str) -> bool:
         """True when we already talked in this conversation (no long gap): a 'hi' then continues, never restarts."""
-        rows = self.repo.list_chat(phone, limit=HISTORY)
-        rows = rows[self._session_start(rows):]
-        return any(m.direction == "out" for m in rows)
+        return any(m.direction == "out" for m in self._session_rows(phone))
 
     def _history(self, phone: str) -> list[ChatMessage]:
+        """The last HISTORY real messages of this conversation. Each photo is stored as its own '[photo] ...' row; those
+        used to fill the window (a glimpse with 12 photos pushed out the guest's dates and name, 2026-11-18), so a run of
+        photos is now one short note."""
         merged: list[ChatMessage] = []
-        rows = self.repo.list_chat(phone, limit=HISTORY)
-        rows = rows[self._session_start(rows):]  # the current conversation only; older chat is fetched on demand
-        for m in rows:
+        rows: list[ChatMessage] = []
+        for m in self._session_rows(phone):
+            if m.direction == "out" and m.text.startswith("[photo] "):
+                if rows and rows[-1].text.startswith("[photos sent"):
+                    n = int(re.search(r"\d+", rows[-1].text).group(0)) + 1
+                    rows[-1] = replace(rows[-1], text=f"[photos sent: {n}]")
+                else:
+                    rows.append(replace(m, text="[photos sent: 1]"))
+                continue
+            rows.append(m)
+        for m in rows[-HISTORY:]:  # the current conversation only; older chat is fetched on demand
             role = "user" if m.direction == "in" else "assistant"
             text = LINK.sub("[link]", m.text[:700])  # an old payment link must never be copied into a new chat
             if merged and merged[-1].role == role:

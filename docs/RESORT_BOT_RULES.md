@@ -92,6 +92,14 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Premium look: `static/premium.css` (ocean teal + sand gold, Fraunces headings), sun-and-waves logo (`logo.svg`,
   `logo_mark` macro, regenerated PWA icons via scripts/make_pwa_icons.py).
 
+## Memory (2026-11-18)
+- The AI sees the last 20 real messages of the current conversation (`HISTORY`), plus the guest's records (name, last
+  bookings) every time, and can read older chat with `recall_old_chat`.
+- A conversation ends after 24 h of silence (`SESSION_GAP`, was 6 h): a guest who comes back the next morning
+  continues where they left off.
+- Each sent photo is stored as its own "[photo] ..." row. They no longer count towards the 20: a run of photos is one
+  "[photos sent: N]" note (12 glimpse photos used to push the guest's dates and name out of view).
+
 ## Strict form, enforced in code (client, 2026-11-18)
 - The AI never asks for dates, nights or persons in its own words. Any such ask (a question, or "please share your
   dates") is replaced by the fixed form; the rest of its answer is kept ("Yes, right on the beach." + form), and an
