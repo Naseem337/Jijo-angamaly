@@ -29,7 +29,7 @@
   </tbody></table></div>
   {% else %}{{ empty("No room types yet.") }}{% endif %}
 </section>
-{{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "Outside, beach, garden and common areas. The bot sends these AUTOMATICALLY to every guest right after the welcome message (glimpse), in this order (the first 6), then the offered room's photos. Room pictures go under each room type below.", "General photos", "Sent after the glimpse") }}
+{{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "", "Photos", "") }}
 {% else %}
 <section class="card hint-card" id="rooms"><h3>Rooms &amp; rates</h3><p class="muted">Save the property first. Then you can add room types, rates and seasonal prices here.</p></section>
 {% endif %}
@@ -79,17 +79,17 @@
     <div class="chipbox" data-chips="staff_numbers" data-kind="phone" data-max="10">
       <textarea name="staff_numbers" hidden>{{ p.staff_numbers|join('\n') }}</textarea>
       <div class="chip-list"></div>
-      <div class="chip-add"><span class="prefix">+91</span><input type="tel" inputmode="numeric" placeholder="98xxxxxxxx" maxlength="16"><button type="button" class="btn primary">{{ icon('plus') }} Add number</button></div>
+      <div class="chip-add"><input type="tel" inputmode="numeric" placeholder="Phone number" maxlength="16"><button type="button" class="btn" aria-label="Add">{{ icon('plus') }}</button></div>
     </div></div>
   <div class="field"><span>Owner contact numbers (given to guests)</span>
     <div class="chipbox" data-chips="contact_numbers" data-kind="phone" data-max="5">
       <textarea name="contact_numbers" hidden>{{ p.contact_numbers|join('
 ') }}</textarea>
       <div class="chip-list"></div>
-      <div class="chip-add"><span class="prefix">+91</span><input type="tel" inputmode="numeric" placeholder="98xxxxxxxx" maxlength="16"><button type="button" class="btn primary">{{ icon('plus') }} Add number</button></div>
+      <div class="chip-add"><input type="tel" inputmode="numeric" placeholder="Phone number" maxlength="16"><button type="button" class="btn" aria-label="Add">{{ icon('plus') }}</button></div>
     </div></div>
-  {{ area("Cancellation policy (sent right after the booking confirmation)", "policies", p.policies, 12) }}
-  {{ area("After-booking message (location, caretaker, check-in, Wi-Fi; sent after the policy)", "stay_info", p.stay_info, 14) }}
+  {{ area("Cancellation policy", "policies", p.policies, 12) }}
+  {{ area("After-booking message", "stay_info", p.stay_info, 14) }}
 </section>
 <div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties">Back</a>
   {% if not is_new and auth.is_owner %}<button class="btn danger" formaction="{{ BASE }}/properties/{{ p.id }}/delete" data-confirm="Delete this property and its rooms?">Delete</button>{% endif %}

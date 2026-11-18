@@ -127,3 +127,9 @@ html body .cal-day.today .num{background:var(--ink);color:var(--card)}
 
 /* No underline on hover anywhere in the dashboard (owner, 2026-11-18) */
 html body a,html body a:hover,html body a:focus{text-decoration:none}
+.mg-stats{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+/* minimal phone add: one input and a small + button */
+.chip-add .btn[aria-label="Add"]{width:36px;padding:0;justify-content:center}
+/* photos: compact grid */
+#photos .gallery{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+#photos .ph img{aspect-ratio:4/3;object-fit:cover}

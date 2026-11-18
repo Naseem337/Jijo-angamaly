@@ -10,8 +10,7 @@
   <a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a></div></div>
 
 <div class="mg-stats">
-  <div class="mg-stat"><small>Collected this month</small><b>{{ month_collected|rupees }}</b><span>{{ month_count }} payment{{ 's' if month_count != 1 }}</span></div>
-  <div class="mg-stat"><small>Waiting for payment</small><b>{{ waiting_sum|rupees }}</b><span>{{ waiting|length }} booking{{ 's' if waiting|length != 1 }}</span></div>
+  <div class="mg-stat"><small>Collected this month</small><b>{{ month_collected|rupees }}</b></div>
   <div class="mg-stat"><small>Upcoming stays</small><b>{{ upcoming_count }}</b><span>Next 30 days</span></div>
 </div>
 
