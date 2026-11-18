@@ -11,6 +11,8 @@ import logging
 import os
 import threading
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, wait
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -39,7 +41,7 @@ def verify(request: Request) -> str:
 
 
 @router.post("/resort/webhook")
-async def receive(request: Request, background: BackgroundTasks) -> dict[str, int]:
+async def receive(request: Request) -> dict[str, int]:
     body = await request.body()
     secret = os.environ.get("RESORT_WHATSAPP_APP_SECRET", "")
     if not secret or not verify_signature(secret, body, request.headers.get("x-hub-signature-256")):
@@ -52,11 +54,43 @@ async def receive(request: Request, background: BackgroundTasks) -> dict[str, in
     services = _services(request)
     messages = parse_webhook(payload, os.environ.get("RESORT_WHATSAPP_PHONE_NUMBER_ID", ""))
     for msg in messages:
-        background.add_task(_handle_message, services, msg)
+        _WORKERS.submit(_handle_message, services, msg)
     echoes = parse_echoes(payload, os.environ.get("RESORT_WHATSAPP_PHONE_NUMBER_ID", ""))
     for echo in echoes:  # staff typed in the phone app: pause the bot for that guest
-        background.add_task(_handle_echo, services, echo)
+        _WORKERS.submit(_handle_echo, services, echo)
     return {"received": len(messages)}
+
+
+# Guest messages run on their own threads (stress test, 2026-11-18). FastAPI's BackgroundTasks share one pool of 40
+# threads with every plain `def` route, so 40 guests waiting on the AI (each turn holds a thread for its 2.5-8 s
+# "wait for a second message" plus the AI calls) froze /health (Railway's restart check) and the dashboard for
+# seconds. RESORT_BOT_THREADS caps how many guests are answered at the same moment; the rest queue in order.
+class _Workers:
+    def __init__(self, threads: int) -> None:
+        self._pool = ThreadPoolExecutor(max_workers=threads, thread_name_prefix="resort-msg")
+        self._pending: set[Future] = set()
+        self._lock = threading.Lock()
+
+    def submit(self, fn: Callable[..., Any], *args: Any) -> Future:
+        future = self._pool.submit(fn, *args)
+        with self._lock:
+            self._pending.add(future)
+        future.add_done_callback(self._done)
+        return future
+
+    def _done(self, future: Future) -> None:
+        with self._lock:
+            self._pending.discard(future)
+
+    def wait_idle(self, timeout: float = 10.0) -> None:
+        """Tests: block until every guest message handed over so far has been handled."""
+        with self._lock:
+            pending = list(self._pending)
+        wait(pending, timeout=timeout)
+
+
+_WORKERS = _Workers(int(os.environ.get("RESORT_BOT_THREADS") or 64))
+wait_idle = _WORKERS.wait_idle
 
 
 def _handle_echo(services: ResortServices, echo) -> None:

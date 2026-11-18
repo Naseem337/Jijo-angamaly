@@ -176,6 +176,23 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
 - Only when the guest refers to something earlier ("as I told you", "my last booking", "the link you sent", a payment query) does the bot look. Greetings, small talk and timepass get a short polite reply with no lookup (no extra tokens).
 - Payment questions about an old booking are answered politely and plainly (paid, what is left at the property, on hold, expired). An old link is never pasted: only `send_payment_link` sends one, and only for a booking still on hold.
 
+## Every language, checked (2026-11-18)
+- Tanglish is now recognised (`TANGLISH_WORDS`: irukka, evlo, venum, sollunga...): a Tamil-in-English-letters guest
+  gets Tanglish, not English. Hinglish / Tanglish guests answered in English (6+ words) or in Manglish get one rewrite.
+- Native script is NEVER sent, even when the rewrite still has it (`_latin_only`): the English-letter sentences are
+  kept, else "Sorry, could you please type that once more in a few words?" (Manglish for Malayalam guests).
+- The stay is read in any script (`parse_stay` via `_latin_stay`): months, persons (പേർ / பேர் / लोग), nights
+  (രാത്രി / இரவு / रात, raat, iravu) and "until" (വരെ / வரை / तक, varai, tak). Town names in native script
+  (ആലപ്പുഴ, ஆலப்புழா, अलेप्पी, കാന്തല്ലൂർ) are understood (`NATIVE_PLACES`), so the form / room check follow in code.
+- "Same number" in any language (yahi number, இதே நம்பர், ഇതേ നമ്പർ, यही नंबर) and Tamil / Hindi filler words
+  around the name (en peyar, mera naam ... hai, thaan) are read by `contact_in`.
+- Prices asked in any language (evlo, kitna, എത്ര, எவ்வளவு, कितना) count as a price question.
+- "sir ji", "saar", "ma'am" count as "sir" (said once per conversation).
+- Voice notes: the transcript goes through exactly the same path as typed text (place, form, dates, language); the
+  reply is ALWAYS text (this bot never sends voice). A note that was not understood gets one short text.
+- Fixed step messages: Malayalam guests get the Manglish versions where they exist; Tamil / Hindi (script or
+  English letters) get the English ones.
+
 ## Always English letters (user, 2026-11-11, replaces "Malayalam script gets Malayalam script")
 Whatever language the guest writes or speaks (typed or voice note), the reply is in English letters only:
 English -> English, Malayalam (any script, or a voice note) -> Manglish, Tamil -> Tanglish, Hindi -> Hinglish.

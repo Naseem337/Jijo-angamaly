@@ -854,7 +854,60 @@ def test_meta_webhook_verify_and_signature(world, monkeypatch):
     assert client.post("/resort/webhook", content=body, headers={"x-hub-signature-256": "sha256=bad"}).status_code == 403
     sig = "sha256=" + _signed(body, "appsecret")
     assert client.post("/resort/webhook", content=body, headers={"x-hub-signature-256": sig}).json() == {"received": 1}
+    web.wait_idle()  # handled on the bot's own threads, after Meta got its 200
     assert w.wa.last()[1] == "text" and w.wa.last()[2] == "Hi, How may I assist you?"
+
+
+def test_the_webhook_answers_meta_at_once_and_never_waits_for_a_slow_guest_turn(world, monkeypatch):
+    """Stress test (2026-11-18): guest turns run on the bot's own threads, so a slow AI turn never holds up Meta's
+    200 or the shared threads behind /health and the dashboard."""
+    import threading
+    import time
+    monkeypatch.setenv("RESORT_WHATSAPP_APP_SECRET", "appsecret")
+    monkeypatch.setenv("RESORT_WHATSAPP_PHONE_NUMBER_ID", "123")
+    w = world
+    release, started = threading.Event(), threading.Event()
+
+    def slow(msg):
+        started.set()
+        release.wait(5)
+        return "answered"
+
+    services = ResortServices(w.bot.config, w.repo, w.wa, w.pay, w.clock, None, _llm=w.llm)
+    services.__dict__["bot"] = type("B", (), {"handle": staticmethod(slow)})()
+    app = FastAPI()
+    app.state.resort = services
+    app.include_router(web.router)
+    body = json.dumps({"entry": [{"changes": [{"field": "messages", "value": {
+        "metadata": {"phone_number_id": "123"}, "messages": [{"from": "919847012345", "id": "wamid.slow1",
+                                                              "timestamp": "1790000000", "type": "text",
+                                                              "text": {"body": "room?"}}]}}]}]}).encode()
+    t0 = time.monotonic()
+    resp = TestClient(app).post("/resort/webhook", content=body,
+                                headers={"x-hub-signature-256": "sha256=" + _signed(body, "appsecret")})
+    assert resp.status_code == 200 and time.monotonic() - t0 < 2  # Meta is answered while the turn still runs
+    assert started.wait(2)
+    release.set()
+    web.wait_idle()
+
+
+def test_a_guest_who_loses_the_last_room_to_someone_else_is_told_it_is_not_available(world):
+    """Stress test (2026-11-18): with many guests at once, more were told 'available' than there were rooms; the one
+    whose name came in after the last room went got silence. Now the fixed 'not available' line goes."""
+    w = world
+    for rt in w.repo.list_room_types(w.p1.id):
+        if rt.name != "Deluxe":
+            w.repo.save_room_type(RoomType(**{**rt.__dict__, "active": False}))
+    say(w, "Alleppey 12 dec to 14 dec 2 people", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-14", adults=2),
+        reply("[no reply]"))
+    for i in range(2):  # meanwhile two other guests take both Deluxe rooms
+        w.repo.create_hold(Booking(w.p1.id, w.deluxe.id, f"+91981111111{i}", date(2026, 12, 12), date(2026, 12, 14),
+                                   2, 0, 1, 8000, 4000, w.clock.now(),
+                                   hold_expires_at=w.clock.now() + timedelta(minutes=15)), w.clock.now())
+    say(w, "Asha, 9847012345", GUEST, tool("create_booking", guest_name="Asha", mobile="9847012345"), reply("[no reply]"))
+    assert w.wa.texts()[-1] == "Sorry, rooms are not available for your dates."
+    assert w.repo.list_bookings(phone=GUEST) == []
 
 
 # --------------------------------------------------------------------------- WhatsApp client / parse

@@ -94,13 +94,15 @@ MAX_GENERAL_PHOTOS = 6  # general photos sent automatically after the glimpse
 DATES_QUESTION = re.compile(
     r"check[\s-]?in|check[\s-]?out|\bdates?\b|which day|\bwhen\b|how many (?:people|persons|guests|nights|days|of you)"
     r"|\bstaying\b|\bnights\b|\bpax\b|ethra (?:per|peru|aal|divasam|day|night)|\beppol|\bennu\b|kitne (?:log|din)"
-    r"|\bkab\b", re.IGNORECASE)
-BOOKING_WISH = re.compile(r"\b(?:rooms?|resorts?|stay|book\w*|cottages?|accommodation|vacancy|availab\w*|kamra)\b",
-                          re.IGNORECASE)
+    r"|\bkab\b|evlo (?:per|peru|naal|days?)|evvalavu (?:per|naal)|ethana(?:i)? (?:per|peru|naal)|\beppo\b|\beppodhu\b"
+    r"|kitni raat|kab se|\bta?reekh|\btarikh|\bthethi|\bthedhi", re.IGNORECASE)
+BOOKING_WISH = re.compile(r"\b(?:rooms?|resorts?|stay|book\w*|cottages?|accommodation|vacancy|availab\w*|kamra)\b|"
+                          r"റൂം|മുറി|റിസോർട്ട്|ബുക്ക്|ரூம்|அறை|ரிசார்ட்|புக்|रूम|कमरा|रिसॉर्ट|बुक", re.IGNORECASE)
 NOT_NOW = re.compile(r"\b(?:later|will|thanks|thank|pinne|sheri|ok|okay|nice|good|was|were|cancel\w*)\b", re.IGNORECASE)
 ASKING = re.compile(r"\b(?:share|tell|send|give|let me know|please|pls|kindly|confirm|need|needed|require|venam|"
                     r"parayamo|parayu|parayoo|ariyikk"
-                    r"\w*|batao|bataiye|sollunga)\b", re.IGNORECASE)
+                    r"\w*|batao|bataiye|bataye|batayein|bataiyega|sollunga|sollungal|sollu|anuppunga|kodunga|"
+                    r"ayakkamo|ayakku)\b", re.IGNORECASE)
 FILLER = re.compile(r"(?:(?:got it|sure|okay|ok|alright|noted|fine|great|thanks|thank you|sheri|shari)[\s,.!]*"
                     r"(?:sir|madam)?[\s,.!]*)*", re.IGNORECASE)
 _MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
@@ -111,10 +113,11 @@ _MON_DAY = re.compile(rf"\b{_MON}\s*(\d{{1,2}})(?:st|nd|rd|th)?\b", re.IGNORECAS
 _NUMERIC = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b")
 _DAY_ONLY = re.compile(r"\b(?:till|to|until|upto|up to|-|thru|through)\s*(\d{1,2})(?:st|nd|rd|th)?\b"
                        r"(?!\s*(?:[/.-]\d|person|people|pax|per\b|adult|night|room|guest|member|aal|days?))", re.IGNORECASE)
-_UNTIL = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:vare|vareyum|varey|tak|tk)\b", re.IGNORECASE)  # '22 vare'
-_STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|divas\w*|ra+thri\w*|din)\b|\bone night\b|\bovernight\b|"
+_UNTIL = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:vare|vareyum|varey|tak|tk|varai|varaikkum|varaikum)\b",
+                    re.IGNORECASE)  # '22 vare'
+_STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|divas\w*|ra+thri\w*|din|raat\w*|iravu|naal)\b|\bone night\b|\bovernight\b|"
                           r"\b(?:a|one|two|three)\s+(?:nights?|days?)\b", re.IGNORECASE)
-_NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|rathri)\b", re.IGNORECASE)
+_NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|ra+thri|raat|raatein|iravu)\b", re.IGNORECASE)
 _PERSONS = re.compile(r"(?:number of persons|persons|pax|guests|people)\s*[:=-]\s*(\d{1,2})\b|\b(\d{1,2})\s*(?:persons?|"
                       r"people|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b", re.IGNORECASE)
 
@@ -131,10 +134,32 @@ def _upcoming(day: int, month: int, today: date, year: int | None = None) -> dat
     return None
 
 
+# Month, person, night and "until" words in Malayalam, Tamil and Hindi script (typed or from a voice note), turned into
+# the English-letter words parse_stay already reads (2026-11-18: "ഡിസംബർ 12 മുതൽ 15 വരെ 3 പേർ" read nothing before).
+_NATIVE_STAY_WORDS = [
+    ("jan", "ജനുവരി|ஜனவரி|जनवरी"), ("feb", "ഫെബ്രുവരി|பிப்ரவரி|फ़रवरी|फरवरी"), ("mar", "മാർച്ച്|மார்ச்|मार्च"),
+    ("apr", "ഏപ്രിൽ|ஏப்ரல்|अप्रैल"), ("may", "മേയ്|മെയ്|மே|मई"), ("jun", "ജൂൺ|ஜூன்|जून"), ("jul", "ജൂലൈ|ஜூலை|जुलाई"),
+    ("aug", "ഓഗസ്റ്റ്|ആഗസ്റ്റ്|ஆகஸ்ட்|अगस्त"), ("sep", "സെപ്റ്റംബർ|செப்டம்பர்|सितंबर|सितम्बर"),
+    ("oct", "ഒക്ടോബർ|அக்டோபர்|अक्टूबर|अक्तूबर"), ("nov", "നവംബർ|நவம்பர்|नवंबर|नवम्बर"),
+    ("dec", "ഡിസംബർ|டிசம்பர்|दिसंबर|दिसम्बर"),
+    ("per", "പേർ|പേര്|ആളുകൾ|ആൾക്കാർ|ആൾ|பேர்|நபர்கள்|நபர்|लोगों|लोग|व्यक्ति|आदमी|जन"),
+    ("nights", "രാത്രി|ராத்திரி|இரவு|इरवु|रातें|रात"), ("vare", "വരെ|வரை|तक"),
+]
+_NATIVE_STAY = [(word, re.compile(pattern)) for word, pattern in _NATIVE_STAY_WORDS]
+
+
+def _latin_stay(text: str) -> str:
+    for word, rx in _NATIVE_STAY:
+        text = rx.sub(f" {word} ", text)
+    return text
+
+
 def parse_stay(text: str, today: date) -> dict[str, Any]:
     """Check-in, check-out and persons from what the guest typed, in any order or spread over messages:
     'Check in :dec 12 / Check out :dec 15 / Number of persons :3', '12 dec to 14 dec, 2 people', 'dec 12 ... 3 persons,
-    till 15', '25/12 2 nights 4 pax'. Only what is clearly there is returned (no guessing)."""
+    till 15', '25/12 2 nights 4 pax', 'dec 12 se 15 tak 3 log', '12 dec la irundhu 15 varai 3 per', and the same in
+    Malayalam / Tamil / Hindi script. Only what is clearly there is returned (no guessing)."""
+    text = _latin_stay(text)
     found: list[tuple[int, date]] = []
     for m in _DAY_MON.finditer(text):
         if d := _upcoming(int(m.group(1)), _MONTHS[m.group(2).lower()[:3]], today):
@@ -176,12 +201,18 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
 
 
 _MOBILE = re.compile(r"(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}\b")
-_SAME_NO = re.compile(r"\b(?:same|this|my whatsapp|whatsapp|ithe|ee)\s*(?:number|no\b\.?|num|nbr|nmbr)|^\s*same\s*[.!]*\s*$",
+_SAME_NO = re.compile(r"\b(?:same|this|my whatsapp|whatsapp|ithe|ee|yahi|yehi|isi|wahi|idhe|idhey|indha|intha|ithu|idhu)"
+                      r"\s*(?:number|no\b\.?|num|nbr|nmbr)|^\s*same\s*[.!]*\s*$|"
+                      r"(?:ഇതേ|ഈ|ഇത്|இதே|இந்த|இது|यही|इसी|यह|ये)\s*(?:നമ്പർ|നമ്പര്|நம்பர்|எண்|नंबर|नम्बर)",
                       re.IGNORECASE)
 _NOT_NAME = {"my", "name", "is", "number", "mobile", "phone", "no", "and", "same", "this", "sir", "its", "it", "i",
              "am", "here", "ok", "okay", "yes", "the", "whatsapp", "num", "nbr", "contact", "please", "pls", "use",
              "ente", "peru", "per", "aanu", "same.", "mera", "naam", "hai", "number.", "fine", "good", "take", "call",
-             "on", "to", "me", "at", "for", "is.", "thanks", "thank", "you", "mathi", "ithe", "ee", "aa"}
+             "on", "to", "me", "at", "for", "is.", "thanks", "thank", "you", "mathi", "ithe", "ee", "aa",
+             # Tamil / Hindi / Malayalam fillers in English letters (2026-11-18)
+             "en", "enoda", "ennoda", "peyar", "per", "thaan", "dhaan", "than", "idhu", "ithu", "idhe", "intha", "indha",
+             "yahi", "yehi", "isi", "wahi", "ye", "yeh", "ka", "ki", "ke", "hain", "hu", "hoon", "nte", "ende", "enda",
+             "naan", "nan", "sir.", "ji", "saar", "number,", "mobile:", "name:"}
 
 
 def contact_in(text: str) -> tuple[str, str] | None:
@@ -202,7 +233,9 @@ def contact_in(text: str) -> tuple[str, str] | None:
 
 _MONEY = re.compile(r"₹|\brs\.?\s?\d|\brupees?\b|\binr\b|\badvance\b|\d{1,3},\d{3}", re.IGNORECASE)
 _PRICE_ASK = re.compile(r"price|rate|cost|how much|charge|amount|advance|total|tariff|ethra|ethrayaa|evlo|kitna|"
-                        r"rupee|₹|budget|cheap|discount|offer|reduce|pay", re.IGNORECASE)
+                        r"kitne|kimat|keemat|daam|kiraya|vila|vilai|kaasu|rupee|₹|budget|cheap|discount|offer|reduce|pay|"
+                        r"എത്ര|വില|റേറ്റ്|ചാർജ്|எவ்வளவு|விலை|கட்டணம்|ரேட்|कितना|कितने|दाम|किराया|कीमत|रेट|पैसे",
+                        re.IGNORECASE)
 
 
 def no_unasked_prices(reply: str, guest_text: str) -> str:
@@ -215,7 +248,8 @@ def no_unasked_prices(reply: str, guest_text: str) -> str:
     return " ".join(keep).strip()
 
 
-SIR = re.compile(r"\b(sir|madam)\b", re.IGNORECASE)
+# "sir" in any form the AI writes it: sir, sir ji, saar (Tanglish), madam, ma'am (said at most once per conversation)
+SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE)
 MAX_ROOM_PHOTOS = 6  # photos of the offered room type, sent right after the general photos
 
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
@@ -225,6 +259,17 @@ _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s",
 
 # Other names guests use for a town (small spelling mistakes are caught by close_word).
 PLACE_ALIASES = {"alleppey": ("alappuzha", "alapuzha"), "alappuzha": ("alleppey",)}
+# Town names typed in Malayalam / Tamil / Hindi script (or from a voice note) -> the English-letter name the dashboard has
+NATIVE_PLACES = [(re.compile(p), name) for p, name in (
+    ("ആലപ്പുഴ|ആലപ്പി|ആലപ്പീ|ஆலப்புழா|ஆலப்புழை|ஆலப்பி|अलेप्पी|अलप्पुझा|अलाप्पुझा", "alleppey"),
+    ("കാന്തല്ലൂർ|കാന്തലൂർ|காந்தலூர்|காந்தல்லூர்|कांतलूर|कान्तलूर", "kanthalloor"),
+    ("മൂന്നാർ|மூணார்|மூன்னார்|मुन्नार", "munnar"), ("പൊഴിയോരം|பொழியோரம்|पोझियोरम", "pozhiyoram"))]
+
+
+def latin_places(text: str) -> str:
+    for rx, name in NATIVE_PLACES:
+        text = rx.sub(f" {name} ", text)
+    return text
 
 
 def close_word(said: str, name: str) -> bool:
@@ -258,6 +303,11 @@ NO_OFFER = re.compile(
 # Hindi / Malayalam typed in English letters: a Hinglish guest must not be answered in Manglish
 HINGLISH_WORDS = re.compile(r"\b(?:milega|milegi|kya|kitne|kitna|raat|chahiye|karna|kar do|theek|nahi|hai|hain|aap|mujhe|hum|log)\b", re.IGNORECASE)
 MANGLISH_WORDS = re.compile(r"\b(?:und|undo|aanu|ethra|venam|cheyyanam|cheyyam|ippol|aakum|evide|ningal\w*|parayamo|mathi)\b", re.IGNORECASE)
+# Tamil typed in English letters (2026-11-18: "room irukka? evlo price?" was read as English and got English back)
+TANGLISH_WORDS = re.compile(r"\b(?:irukka|irukku|iruku|irukkum|irukkuma|evlo|evvalavu|ethana|ethanai|venum|vendum|"
+                            r"sollunga|sollu|naanga|nanga|enga|unga|ungal\w*|enakku|enaku|pannunga|pannanum|panna|"
+                            r"kudunga|kodunga|romba|mudiyuma|aaguma|aagum|thanguvom|varuvom|varom|varanum|illai|"
+                            r"inga|anga|eppadi|epdi|vanakkam|seri|sari)\b", re.IGNORECASE)
 ASKS_REDUCE = re.compile(r"reduc|discount|lower|less|last price|final price|negotiat|bargain|best price|kurach|kurakk|kuraikk|"
                          r"kam kar|chhoot|குறை|കുറ|कम कर|छूट|ഡിസ്കൗണ്ട്|തള്ള", re.IGNORECASE)
 
@@ -489,7 +539,7 @@ class ChatMixin:
     def _named_place(self, text: str) -> Property | None:
         """An open resort the guest named by town or name, spelling mistakes and all ('Alleppey', 'allepy', 'aleppey',
         'Alappuzha', 'pozhiyoram', 'kanthaloor'), else None (client, 2026-11-17)."""
-        words = set(re.findall(r"[a-z]{4,}", text.lower()))
+        words = set(re.findall(r"[a-z]{4,}", latin_places(text).lower()))
         hits = [p for p in self._places() if any(close_word(w, n) for w in words for n in self._place_words(p))]
         return hits[0] if len(hits) == 1 else None
 
@@ -645,6 +695,9 @@ class ChatMixin:
             style = LATIN_STYLE[own]  # Malayalam / Tamil / Hindi script in -> Manglish / Tanglish / Hinglish out
         elif is_language_neutral(text):
             style = st.get("style") or "en"  # 'ok' / 'hi' / a name: the guest's own language so far
+        elif (tamil := len(TANGLISH_WORDS.findall(text))) and tamil >= len(MANGLISH_WORDS.findall(text)) \
+                and not HINGLISH_WORDS.search(text):
+            style = "tanglish"
         elif MANGLISH_WORDS.search(text) and not HINGLISH_WORDS.search(text):
             style = "manglish"
         elif HINGLISH_WORDS.search(text) and not MANGLISH_WORDS.search(text):
@@ -889,6 +942,13 @@ class ChatMixin:
             st["hing"] = True
         if st.get("hing") and not MANGLISH_WORDS.search(guest_text) and MANGLISH_WORDS.search(reply):
             return "Rewrite that reply in Hinglish (Hindi in English letters), the guest's language. Do not use Malayalam."
+        if st.get("style") == "tanglish" and MANGLISH_WORDS.search(reply) and not MANGLISH_WORDS.search(guest_text):
+            return "Rewrite that reply in Tanglish (Tamil in English letters), the guest's language. Do not use Malayalam."
+        mine = {"hinglish": HINGLISH_WORDS, "tanglish": TANGLISH_WORDS}.get(st.get("style", ""))
+        if mine is not None and chatty_words(reply) >= 6 and not mine.search(reply) and latin_style(talk) == "en":
+            name = "Hinglish (Hindi" if st["style"] == "hinglish" else "Tanglish (Tamil"
+            return (f"Rewrite that reply in {name} in English letters), the guest's language. Do not answer in "
+                    "English; words like room, booking and payment are fine.")
         if NO_OFFER.search(reply) and ASKS_REDUCE.search(guest_text):
             return ("Rewrite that reply without saying there is no discount or that you cannot reduce. Instead "
                     "convince the guest warmly that the price is fair, using the real good points of the place.")
@@ -915,8 +975,21 @@ class ChatMixin:
         try:
             fixed = llm.complete(system, [*messages, ChatMessage("assistant", reply), ask], None, MAX_REPLY_TOKENS).text.strip()
         except LLMError:
+            fixed = ""
+        out = fixed if fixed and not self._reply_problem(fixed, guest_text, st) else reply
+        return self._latin_only(out, fixed, st)
+
+    @staticmethod
+    def _latin_only(reply: str, other: str, st: dict[str, Any]) -> str:
+        """Native script is NEVER sent (client rule): when the reply still has Malayalam / Tamil / Hindi letters after
+        the rewrite, the sentences in English letters are kept (from whichever version has them); if none is left, a
+        short ask to say it again goes instead of a native-script line (2026-11-18)."""
+        if not INDIC.search(reply):
             return reply
-        return fixed if fixed and not self._reply_problem(fixed, guest_text, st) else reply
+        if other and not INDIC.search(other):
+            return other
+        keep = [s for s in re.split(r"(?<=[.?!])\s+|\n+", reply) if s.strip() and not INDIC.search(s)]
+        return " ".join(keep).strip() or t("say_again", st.get("lang", "en"))
 
     def _ease_sir(self, phone: str, reply: str) -> str:
         """'sir' only ONCE per conversation (client, 2026-11-17): once any of our messages in this conversation said
@@ -925,8 +998,8 @@ class ChatMixin:
         said = any(m.direction == "out" and SIR.search(m.text) for m in rows[self._session_start(rows):])
         if not said or not SIR.search(reply):
             return reply
-        eased = re.sub(r"^\s*(sir|madam)\b[,.!]?\s*", "", reply, flags=re.IGNORECASE)
-        eased = re.sub(r"\s*,?\s*\b(sir|madam)\b", "", eased, flags=re.IGNORECASE).strip()
+        eased = re.sub(rf"^\s*(?:{SIR.pattern})[,.!]?\s*", "", reply, flags=re.IGNORECASE)
+        eased = re.sub(rf"\s*,?\s*(?:{SIR.pattern})", "", eased, flags=re.IGNORECASE).strip()
         return eased[:1].upper() + eased[1:] if eased else reply
 
     def _converse(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0,
@@ -1072,7 +1145,7 @@ class ChatMixin:
         props = self._places()
         if len(props) == 1:
             return props[0]
-        query = re.sub(r"[^a-z0-9 ]", " ", (place or "").lower())
+        query = re.sub(r"[^a-z0-9 ]", " ", latin_places(place or "").lower())
         best, best_score = None, 0
         for p in props:
             said = set(re.findall(r"[a-z]{4,}", query))
@@ -1260,6 +1333,14 @@ class ChatMixin:
             out["note"] += " Rooms are still available. Answer only what the guest asked, in one short line."
         return out
 
+    def _sold_out(self, ctx: _Turn) -> None:
+        """The last rooms went to another guest while this one was giving their name (stress test, 2026-11-18: with
+        many guests at once the AI left the losers unanswered). The fixed 'not available' line goes, once per turn."""
+        msg = t("rooms_none", ctx.st.get("lang", "en"))
+        if msg not in ctx.after:
+            ctx.after.append(msg)
+        ctx.silent = True
+
     def _tool_prepare(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st = ctx.st
         self._set_style(st, a)
@@ -1276,7 +1357,9 @@ class ChatMixin:
             # told about other room types or asked to pick (client, 2026-11-17).
             chosen = fits[0]
         if chosen is None:
-            return {"error": "no room is free for these dates any more; say so in one short line and suggest other dates"}
+            self._sold_out(ctx)
+            return {"error": "no room is free for these dates any more; the guest is told automatically. Reply exactly "
+                             "[no reply]."}
         rt, options = chosen
         rooms, beds = self._int(a, "rooms", options[0]), self._int(a, "extra_beds")
         early = bool(a.get("early_checkin")) and str(a.get("early_checkin")).lower() not in ("false", "0", "no")
@@ -1439,7 +1522,9 @@ class ChatMixin:
             self.repo.create_hold(booking, now)
         except SoldOut:
             bk.pop("chosen", None)
-            return {"error": "those rooms were just taken by someone else; call check_availability again"}
+            self._sold_out(ctx)
+            return {"error": "those rooms were just taken by someone else; the guest is told automatically. Reply "
+                             "exactly [no reply]."}
         try:  # Razorpay wants a link that lives at least 15 minutes
             link = self.payments.create_payment_link(
                 booking.advance, booking.id, name, phone,
