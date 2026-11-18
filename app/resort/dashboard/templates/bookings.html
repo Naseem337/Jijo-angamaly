@@ -1,30 +1,52 @@
 {% extends "base.html" %}
-{% from "macros.html" import page_head, pill, empty, icon, method_chip %}
+{% from "macros.html" import pill, empty, icon, method_chip %}
 {% block title %}Bookings · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head("Bookings", items|length ~ " shown · " ~ (collected|rupees) ~ " collected") %}
-<a class="btn" href="{{ BASE }}/bookings/export.csv?{{ query }}">{{ icon('download') }} CSV</a>
-<a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a>
-{% endcall %}
-<form class="filters" method="get">
-  <select name="property_id"><option value="">All properties</option>{% for p in my_props %}<option value="{{ p.id }}" {{ 'selected' if f.property_id == p.id }}>{{ p.name }}</option>{% endfor %}</select>
-  <select name="status"><option value="">Any status</option>{% for s in statuses %}<option value="{{ s }}" {{ 'selected' if f.status == s }}>{{ s|capitalize }}</option>{% endfor %}</select>
-  <select name="method"><option value="">Any payment</option><option value="unpaid" {{ 'selected' if f.method == 'unpaid' }}>Unpaid</option>{% for key, label in methods.items() if key != 'mixed' %}<option value="{{ key }}" {{ 'selected' if f.method == key }}>{{ label }}</option>{% endfor %}<option value="mixed" {{ 'selected' if f.method == 'mixed' }}>Mixed</option></select>
-  <input type="date" name="from" value="{{ f.get('from','') }}" title="Stay from"><input type="date" name="to" value="{{ f.get('to','') }}" title="Stay until">
-  <input name="q" placeholder="Name, phone or ID" value="{{ f.get('q','') }}">
-  <button class="btn">Filter</button><a class="btn ghost" href="{{ BASE }}/bookings?property_id=">Clear</a>
+{# Bookings management in the owner's reference style (2026-11-18): summary cards, status tabs, search, one clean table #}
+{% set keep = {'property_id': f.get('property_id', ''), 'q': f.get('q', ''), 'sort': f.get('sort', '')} %}
+{% macro tab_url(status) -%}{{ BASE }}/bookings?status={{ status }}{% for k, v in keep.items() if v %}&{{ k }}={{ v|urlencode }}{% endfor %}{%- endmacro %}
+<div class="mg-head"><h1>Bookings management</h1>
+  <div class="actions"><a class="btn" href="{{ BASE }}/bookings/export.csv?{{ query }}">{{ icon('download') }} Export</a>
+  <a class="btn primary" href="{{ BASE }}/bookings/new">{{ icon('plus') }} New booking</a></div></div>
+
+<div class="mg-stats">
+  <div class="mg-stat"><small>Collected this month</small><b>{{ month_collected|rupees }}</b><span>{{ month_count }} payment{{ 's' if month_count != 1 }}</span></div>
+  <div class="mg-stat"><small>Waiting for payment</small><b>{{ waiting_sum|rupees }}</b><span>{{ waiting|length }} booking{{ 's' if waiting|length != 1 }}</span></div>
+  <div class="mg-stat"><small>Upcoming stays</small><b>{{ upcoming_count }}</b><span>Next 30 days</span></div>
+</div>
+
+<nav class="mg-tabs">
+  <a href="{{ tab_url('') }}" class="{{ 'on' if not f.get('status') }}">All <i>{{ total_count }}</i></a>
+  {% for key, label in [('paid', 'Confirmed'), ('hold', 'Waiting for payment'), ('checked_in', 'In house'), ('checked_out', 'Completed'), ('cancelled', 'Cancelled'), ('expired', 'Expired')] %}
+  <a href="{{ tab_url(key) }}" class="{{ 'on' if f.get('status') == key }}">{{ label }}{% if counts[key] %} <i>{{ counts[key] }}</i>{% endif %}</a>{% endfor %}
+</nav>
+
+<form class="mg-tools" method="get">
+  <input type="hidden" name="status" value="{{ f.get('status', '') }}">
+  <span class="mg-count">{{ items|length }} booking{{ 's' if items|length != 1 }}</span>
+  <label class="mg-search">{{ icon('search') }}<input name="q" placeholder="Search name, phone or ID…" value="{{ f.get('q','') }}"></label>
+  <select name="sort" onchange="this.form.submit()" aria-label="Sort"><option value="">Newest first</option>
+    <option value="stay" {{ 'selected' if f.get('sort') == 'stay' }}>By stay date</option><option value="amount" {{ 'selected' if f.get('sort') == 'amount' }}>By amount</option></select>
+  <details class="mg-more"><summary class="btn">Filters</summary><div class="mg-filters">
+    <select name="property_id"><option value="">All properties</option>{% for p in my_props %}<option value="{{ p.id }}" {{ 'selected' if f.property_id == p.id }}>{{ p.name }}</option>{% endfor %}</select>
+    <select name="method"><option value="">Any payment</option><option value="unpaid" {{ 'selected' if f.method == 'unpaid' }}>Unpaid</option>{% for key, label in methods.items() if key != 'mixed' %}<option value="{{ key }}" {{ 'selected' if f.method == key }}>{{ label }}</option>{% endfor %}<option value="mixed" {{ 'selected' if f.method == 'mixed' }}>Mixed</option></select>
+    <input type="date" name="from" value="{{ f.get('from','') }}" title="Stay from"><input type="date" name="to" value="{{ f.get('to','') }}" title="Stay until">
+    <button class="btn primary">Apply</button><a class="btn ghost" href="{{ BASE }}/bookings?property_id=">Clear</a></div></details>
 </form>
-<div class="card table-wrap">
-<table class="list"><thead><tr><th>Booking</th><th>Guest</th><th>Property</th><th>Stay</th><th>Rooms</th><th class="r">Total</th><th>Payment</th><th>Status</th></tr></thead><tbody>
+
+<div class="mg-table"><table><thead><tr><th>Guest</th><th>Booking</th><th>Stay</th><th>Room</th><th>Guests</th><th>Status</th><th class="r">Amount</th><th>Booked on</th><th></th></tr></thead><tbody>
 {% for b in items %}
-<tr class="click" data-href="{{ BASE }}/bookings/{{ b.id }}"><td><b>{{ b.id }}</b></td>
-<td>{{ b.guest_name or '—' }}<small class="block">{{ b.guest_phone }}</small></td>
-<td>{{ props[b.property_id].name }}<small class="block">{{ rooms[b.room_type_id].name }}</small></td>
-<td>{{ b.check_in.strftime('%d %b') }} → {{ b.check_out.strftime('%d %b') }}<small class="block">{{ b.nights }} night(s) · {{ b.adults }}A {{ b.children }}C</small></td>
-<td>{{ b.rooms }}</td><td class="r">{{ b.total|rupees }}</td>
-<td>{% if b.paid_amount %}{{ method_chip(b.payment_method or 'online') }}<small class="block">{{ b.paid_amount|rupees }} paid{% if b.balance %} · {{ b.balance|rupees }} due{% endif %}</small>{% else %}<span class="muted">Unpaid</span>{% endif %}</td>
-<td>{{ pill(b.status) }}</td></tr>
-{% else %}<tr><td colspan="8">{{ empty("No bookings match these filters", "book", BASE ~ "/bookings/new", "Create a booking") }}</td></tr>{% endfor %}
+<tr class="click" data-href="{{ BASE }}/bookings/{{ b.id }}">
+  <td><div class="mg-who"><span class="mg-av">{{ (b.guest_name or '?')[:1]|upper }}</span><div><b>{{ b.guest_name or 'Guest' }}</b><small>{{ b.guest_phone }}</small></div></div></td>
+  <td class="mono">{{ b.id }}</td>
+  <td>{{ b.check_in.strftime('%d %b') }} → {{ b.check_out.strftime('%d %b %Y') }}<small class="block">{{ b.nights }} night{{ 's' if b.nights != 1 }}</small></td>
+  <td>{{ rooms[b.room_type_id].name if b.room_type_id in rooms else '' }}{% if b.rooms > 1 %} × {{ b.rooms }}{% endif %}{% if b.room_numbers %}<small class="block">#{{ b.room_numbers }}</small>{% endif %}</td>
+  <td>{{ b.adults + b.children }}</td>
+  <td>{{ pill(b.status) }}</td>
+  <td class="r"><b>{{ b.total|rupees }}</b>{% if b.paid_amount %}<small class="block">{{ b.paid_amount|rupees }} paid</small>{% else %}<small class="block">Unpaid</small>{% endif %}</td>
+  <td>{{ b.created_at|ist('%d %b %Y · %I:%M %p') }}</td>
+  <td class="r"><a class="mg-dots" href="{{ BASE }}/bookings/{{ b.id }}" aria-label="Open">•••</a></td></tr>
+{% else %}<tr><td colspan="9">{{ empty("No bookings match", "book", BASE ~ "/bookings/new", "Create a booking") }}</td></tr>{% endfor %}
 </tbody></table>
-<div class="list-foot"><span>{{ items|length }} of {{ items|length }}</span><span>{{ collected|rupees }} collected</span></div></div>
+<div class="mg-foot"><span>{{ items|length }} shown</span><span>{{ collected|rupees }} collected</span></div></div>
 {% endblock %}

@@ -1,0 +1,102 @@
+/* Neutral theme and page layouts in the style of the owner's references (2026-11-18).
+   Loaded LAST (after premium.css): black and white, black buttons, a soft grey pill for the active menu item,
+   colour only in the small status chips. */
+:root:root:root{--brand:#111827;--brand-d:#000000;--brand-soft:#f1f1f3;--gold:#111827;--gold-soft:#f1f1f3;
+  --ring:rgba(17,24,39,.12);--bg:#fafafa;--line:#ececef;--line-2:#dedee3}
+html[data-theme=dark]:root:root{--brand:#f3f4f6;--brand-d:#ffffff;--brand-soft:#23262d;--on-brand:#111827;--gold:#f3f4f6;--gold-soft:#23262d}
+html body .sidebar nav a{border-radius:999px;height:38px;padding:0 14px}
+html body .sidebar nav a.active{background:var(--brand-soft);color:var(--ink);font-weight:600}
+html body .sidebar nav a.active .ic{color:var(--ink)}
+html body .sidebar nav a.active:before{display:none}
+html body .btn{border-radius:999px}
+html body .btn.primary{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+html body .avatar{background:var(--ink)}
+html body h3 .ic{color:var(--ink)}
+.hm-tags .tag.ok{background:#eef4ff;color:#1d4ed8}
+html[data-theme=dark] .hm-tags .tag.ok{background:#1b2550;color:#a9b8ff}
+.hm-date,html[data-theme=dark] .hm-date{color:var(--muted)}
+.hm-ic{background:var(--brand-soft)}.hm-ic .ic{color:var(--ink)}
+.occ-bars i{background:#d4d4d8}.occ-bars i.mid{background:#71717a}.occ-bars i.full{background:var(--ink)}
+/* status pills: soft and small */
+html body .pill{border-radius:6px;font-size:11.5px;font-weight:600;padding:2px 8px;border:1px solid transparent}
+html body .pill.paid,html body .pill.checked_out{background:#ecfdf3;color:#067647;border-color:#abefc6}
+html body .pill.hold{background:#fffaeb;color:#b54708;border-color:#fedf89}
+html body .pill.checked_in{background:#eff8ff;color:#175cd3;border-color:#b2ddff}
+html body .pill.cancelled,html body .pill.expired,html body .pill.failed{background:#fef3f2;color:#b42318;border-color:#fecdca}
+
+/* ---------------- bookings management */
+.mg-head,.bd-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.mg-head h1,.bd-head h1{margin:0;font-size:24px}
+.mg-head .actions,.bd-head .actions{display:flex;gap:8px;flex-wrap:wrap}
+.mg-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:22px}
+.mg-stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:grid;grid-template-columns:1fr auto;align-items:end;gap:2px 10px}
+.mg-stat small{grid-column:1/-1;color:var(--muted);font-size:12.5px}
+.mg-stat b{font-size:24px;font-weight:700;letter-spacing:-.02em}
+.mg-stat span{font-size:12.5px;color:var(--muted);padding-bottom:5px}
+.mg-tabs{display:flex;gap:22px;border-bottom:1px solid var(--line);margin-bottom:14px;overflow-x:auto}
+.mg-tabs a{padding:10px 0;color:var(--muted) !important;text-decoration:none;font-weight:500;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-1px}
+.mg-tabs a.on{color:var(--ink) !important;border-color:var(--ink)}
+.mg-tabs a i{font-style:normal;font-size:11px;font-weight:700;background:var(--brand-soft);color:var(--ink);border-radius:999px;padding:1px 7px;margin-left:4px}
+.mg-tabs a.on i{background:var(--ink);color:var(--card)}
+.mg-tools{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.mg-count{margin-right:auto;color:var(--muted);font-size:13px}
+.mg-search{display:flex;align-items:center;gap:8px;height:38px;padding:0 14px;border:1px solid var(--line);border-radius:999px;background:var(--card);min-width:240px}
+.mg-search .ic{width:16px;height:16px;color:var(--muted)}
+.mg-search input{border:0;outline:0;background:transparent;width:100%;height:100%;padding:0}
+.mg-tools select{height:38px;border-radius:999px;border:1px solid var(--line);padding:0 12px;background:var(--card)}
+.mg-more{position:relative}
+.mg-more>summary{list-style:none}.mg-more>summary::-webkit-details-marker{display:none}
+.mg-filters{position:absolute;right:0;top:44px;z-index:20;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;
+  box-shadow:var(--shadow-lg);display:grid;gap:8px;width:260px}
+.mg-filters select,.mg-filters input{height:36px;border-radius:10px;border:1px solid var(--line);padding:0 10px;width:100%}
+.mg-table{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow-x:auto}
+.mg-table table{width:100%;border-collapse:collapse;font-size:13.5px}
+.mg-table th{text-align:left;font-weight:500;color:var(--muted);font-size:12.5px;padding:12px 14px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--soft)}
+.mg-table td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+.mg-table tr:last-child td{border-bottom:0}
+.mg-table tr.click{cursor:pointer}.mg-table tr.click:hover td{background:var(--soft)}
+.mg-table .r{text-align:right}
+.mg-table small.block{display:block;color:var(--muted);font-size:12px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+.mg-who{display:flex;align-items:center;gap:10px}.mg-who b{display:block;font-weight:600}.mg-who small{color:var(--muted);font-size:12px}
+.mg-av{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--brand-soft);color:var(--ink);font-weight:700;font-size:13px}
+.mg-dots{color:var(--ink) !important;text-decoration:none;font-weight:700;letter-spacing:1px}
+.mg-foot{display:flex;justify-content:space-between;padding:10px 14px;color:var(--muted);font-size:12.5px;border-top:1px solid var(--line)}
+
+/* ---------------- booking details */
+.bd-title{display:flex;align-items:center;gap:10px}
+.bd-strip{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:18px}
+.bd-cells{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));padding:16px 4px}
+.bd-cells>div{padding:0 16px;border-left:1px solid var(--line);min-width:0}
+.bd-cells>div:first-child{border-left:0}
+.bd-cells small{display:block;color:var(--muted);font-size:12px;margin-bottom:3px}
+.bd-cells b{display:block;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bd-cells span{display:block;color:var(--muted);font-size:12px}
+.bd-foot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:11px 20px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+.bd-foot a{word-break:break-all}
+.bd-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px;align-items:start;margin-bottom:16px}
+.bd-main{display:grid;gap:16px}.bd-main>.card,.bd-side>.card{margin:0}
+.bd-person{display:flex;align-items:center;gap:10px;margin:6px 0 10px}
+.bd-kv{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;margin:0;font-size:13.5px}
+.bd-kv dt{color:var(--muted)}.bd-kv dd{margin:0;text-align:right}
+.bd-activity{list-style:none;margin:6px 0 0;padding:0;position:relative}
+.bd-activity li{display:flex;gap:12px;padding-bottom:16px;position:relative}
+.bd-activity li:not(:last-child):before{content:"";position:absolute;left:13px;top:28px;bottom:0;width:1px;background:var(--line)}
+.bd-dot{flex:none;width:27px;height:27px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;background:var(--card)}
+.bd-dot .ic{width:13px;height:13px;color:var(--ink)}
+.bd-activity p{margin:3px 0 0;font-size:13.5px;font-weight:500}.bd-activity small{color:var(--muted);font-size:12px}
+
+/* ---------------- calendar guest chips */
+.cal-day .chips{display:grid;gap:3px;margin-top:4px;min-width:0}
+.gchip{display:flex;justify-content:space-between;gap:4px;font-size:11.5px;font-style:normal;font-weight:500;padding:2px 6px;border-radius:5px;
+  border:1px solid;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.gchip em{font-style:normal;opacity:.7;font-size:10.5px}
+.gchip.g-paid,.gchip.g-checked_out{background:#eff8ff;color:#175cd3;border-color:#b2ddff}
+.gchip.g-hold{background:#fffaeb;color:#b54708;border-color:#fedf89}
+.gchip.g-checked_in{background:#ecfdf3;color:#067647;border-color:#abefc6}
+.gmore{font-size:11px;color:var(--muted)}
+.legend .gchip{display:inline-flex;margin-right:6px}
+@media (max-width:1100px){.bd-cells{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:14px}.bd-cells>div:nth-child(5){border-left:0}.bd-grid{grid-template-columns:1fr}}
+@media (max-width:700px){.mg-stats{grid-template-columns:1fr}.bd-cells{grid-template-columns:repeat(2,minmax(0,1fr))}.bd-cells>div{border-left:0}.mg-search{min-width:0;flex:1}}
+
+/* ---------------- property pages (owner's reference, 2026-11-18): add rules below this line */

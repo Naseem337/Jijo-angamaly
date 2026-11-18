@@ -212,9 +212,25 @@ def bookings_list(request: Request, auth: Auth = Depends(require_user)):
         params["property_id"] = scope  # the sidebar switcher is the default filter
     items = _filtered_bookings(repo, auth, params)
     props, rooms = _names(repo)
+    # the tabs count everything the other filters let through, whatever the status (owner's reference, 2026-11-18)
+    every = _filtered_bookings(repo, auth, {k: v for k, v in params.items() if k != "status"})
+    counts = {s: sum(1 for b in every if b.status == s) for s in STATUSES}
+    today, now = today_ist(), now_utc()
+    month = [b for b in _visible_bookings(repo, auth, property_id=params.get("property_id") or None, limit=5000)
+             if b.paid_at and b.paid_at.astimezone(IST).date().replace(day=1) == today.replace(day=1)]
+    waiting = [b for b in every if b.status == "hold" and av.booking_blocks(b, now)]
+    upcoming = [b for b in every if b.status == "paid" and today <= b.check_in <= today + timedelta(days=30)]
+    sort = params.get("sort", "")
+    if sort == "stay":
+        items = sorted(items, key=lambda b: b.check_in)
+    elif sort == "amount":
+        items = sorted(items, key=lambda b: -b.total)
     return page(request, "bookings.html", auth, nav="bookings", items=items, props=props, rooms=rooms,
                 my_props=auth.properties(repo), statuses=STATUSES, f=params, methods=METHODS,
-                query=str(request.query_params), collected=sum(b.paid_amount for b in items))
+                query=str(request.query_params), collected=sum(b.paid_amount for b in items), counts=counts,
+                total_count=len(every), month_collected=sum(b.paid_amount for b in month),
+                month_count=len(month), waiting=waiting, waiting_sum=sum(b.advance for b in waiting),
+                upcoming_count=len(upcoming))
 
 
 def _csv_cell(value: object) -> str:
@@ -786,7 +802,11 @@ def _month_weeks(repo, prop: Property, types: list[RoomType], rt_id: str, first:
                          "weekend": day.weekday() >= 5, "paid": paid, "held": held, "in_house": in_h, "free": free, "total": total,
                          "pct": round(100 * (paid + held) / total) if total else 0,
                          "state": "none" if not total else "full" if free == 0 else "busy" if paid + held else "free",
-                         "past": day < today})
+                         "past": day < today,
+                         # guest chips like the owner's reference calendar (2026-11-18): who arrives that day
+                         "chips": [{"name": (b.guest_name or b.guest_phone).split()[0][:12], "status": b.status,
+                                    "nights": b.nights} for b in sorted(on, key=lambda x: x.created_at)
+                                   if b.check_in == day or (day == grid_start and b.check_in < day)]})
             day += timedelta(days=1)
         weeks.append(week)
     return weeks

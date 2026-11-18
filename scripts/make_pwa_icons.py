@@ -8,7 +8,7 @@ import zlib
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "app" / "resort" / "dashboard" / "static"
-A, B, C = (70, 104, 245), (47, 84, 235), (29, 63, 208)  # the dashboard blue, as the logo (2026-11-18)
+A, B, C = (55, 65, 81), (17, 24, 39), (0, 0, 0)  # black, as the dashboard logo (2026-11-18)
 
 
 def mix(p, q, k):

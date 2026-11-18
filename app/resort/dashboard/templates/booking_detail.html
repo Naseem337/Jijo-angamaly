@@ -6,27 +6,40 @@
 <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="{{ action }}"><button class="{{ cls }}">{{ label }}</button></form>
 {%- endmacro %}
 {% block content %}
-{% call page_head(b.id, (prop.name if prop else '') ~ ' · ' ~ (rt.name if rt else '')) %}{{ pill(b.status) }}{{ id_chip(id_state) if b.status in ('paid','checked_in','checked_out') }}{% endcall %}
-
-<div class="stay-bar">
-  {% if b.status == 'paid' %}<button type="button" class="btn primary" data-open="checkin-dialog">{{ icon('door') }} Check in</button>{% endif %}
-  {% if b.status == 'checked_in' %}<button type="button" class="btn primary" data-open="checkout-dialog">{{ icon('door') }} Check out</button>{% endif %}
-  {% if b.status in ('paid','checked_in','checked_out') %}<button type="button" class="btn" data-open="idperson-dialog">{{ icon('id') }} ID shown in person</button>{% endif %}
-  <a class="btn" href="{{ BASE }}/bookings/{{ b.id }}/invoice" target="_blank" rel="noopener">{{ icon('doc') }} Invoice</a>
+{# Booking details in the owner's reference style (2026-11-18): name + status, one summary strip, info cards, activity #}
+<div class="bd-head">
+  <div class="bd-title"><h1>#{{ b.guest_name or b.guest_phone }}</h1>{{ pill(b.status) }}{{ id_chip(id_state) if b.status in ('paid','checked_in','checked_out') }}</div>
+  <div class="actions">
+    {% if b.status == 'paid' %}<button type="button" class="btn primary" data-open="checkin-dialog">{{ icon('door') }} Check in</button>{% endif %}
+    {% if b.status == 'checked_in' %}<button type="button" class="btn primary" data-open="checkout-dialog">{{ icon('door') }} Check out</button>{% endif %}
+    {% if b.status in ('paid','checked_in','checked_out') %}<button type="button" class="btn" data-open="idperson-dialog">{{ icon('id') }} ID shown in person</button>{% endif %}
+    <a class="btn" href="{{ BASE }}/bookings/{{ b.id }}/invoice.pdf" target="_blank" rel="noopener">{{ icon('doc') }} Invoice</a>
+  </div>
 </div>
 
-<div class="grid2">
-<section class="card"><h3>Guest</h3>
-  <dl class="kv"><dt>Name</dt><dd>{{ b.guest_name or '—' }}</dd><dt>Phone</dt><dd><a href="{{ BASE }}/guests/{{ b.guest_phone|urlq }}">{{ b.guest_phone }}</a> · <a href="{{ BASE }}/conversations/{{ b.guest_phone|urlq }}">chat</a></dd>
-  <dt>Language</dt><dd>{{ b.language }}</dd></dl>
-  <h3>Stay</h3>
-  <dl class="kv"><dt>Check-in</dt><dd>{{ b.check_in.strftime('%a, %d %b %Y') }}{% if prop %} · from {{ prop.checkin_time }}{% endif %}</dd>
-  <dt>Check-out</dt><dd>{{ b.check_out.strftime('%a, %d %b %Y') }}{% if prop %} · by {{ prop.checkout_time }}{% endif %}</dd>
-  <dt>Nights</dt><dd>{{ b.nights }}</dd><dt>Rooms</dt><dd>{{ b.rooms }} × {{ rt.name if rt else '' }}{% if b.room_numbers %} · <b>room {{ b.room_numbers }}</b>{% endif %}</dd>
-  <dt>Guests</dt><dd>{{ b.adults }} adults, {{ b.children }} children</dd>
-  {% if b.cancel_reason %}<dt>Cancelled because</dt><dd>{{ b.cancel_reason }}</dd>{% endif %}</dl>
-  <h3>Timeline</h3>
-  <ul class="timeline">{% for at, text in timeline %}<li>{{ text }}{% if at %}<small>{{ at|ist }}</small>{% endif %}</li>{% endfor %}</ul>
+<section class="bd-strip">
+  <div class="bd-cells">
+    <div><small>Check in</small><b>{{ b.check_in.strftime('%d %b %Y') }}</b>{% if prop %}<span>from {{ prop.checkin_time }}</span>{% endif %}</div>
+    <div><small>Check out</small><b>{{ b.check_out.strftime('%d %b %Y') }}</b>{% if prop %}<span>by {{ prop.checkout_time }}</span>{% endif %}</div>
+    <div><small>Nights</small><b>{{ b.nights }}</b></div>
+    <div><small>Room</small><b>{{ rt.name if rt else '' }}{% if b.rooms > 1 %} × {{ b.rooms }}{% endif %}</b>{% if b.room_numbers %}<span>#{{ b.room_numbers }}</span>{% endif %}</div>
+    <div><small>Guests</small><b>{{ b.adults }} adults{% if b.children %}, {{ b.children }} children{% endif %}</b></div>
+    <div><small>Total</small><b>{{ f.bill_total|rupees }}</b></div>
+    <div><small>Payment</small><b>{{ 'Paid' if f.balance == 0 and f.net_paid else ('Advance paid' if f.net_paid else 'Unpaid') }}</b></div>
+  </div>
+  <div class="bd-foot"><span>Booking <b class="mono">{{ b.id }}</b>{% if prop %} · {{ prop.name }}{% endif %}</span>
+    {% if b.status == 'hold' and b.payment_link_url %}<span>Payment link: <a href="{{ b.payment_link_url }}" target="_blank" rel="noopener">{{ b.payment_link_url }}</a></span>{% endif %}
+    {% if b.cancel_reason %}<span>Cancelled because: {{ b.cancel_reason }}</span>{% endif %}</div>
+</section>
+
+<div class="bd-grid">
+<div class="bd-main">
+<section class="card"><h3>Guest information</h3>
+  <div class="bd-person"><span class="mg-av">{{ (b.guest_name or '?')[:1]|upper }}</span><b>{{ b.guest_name or 'Guest' }}</b></div>
+  <dl class="bd-kv"><dt>Phone number</dt><dd><a href="{{ BASE }}/guests/{{ b.guest_phone|urlq }}">{{ b.guest_phone }}</a></dd>
+  <dt>WhatsApp chat</dt><dd><a href="{{ BASE }}/conversations/{{ b.guest_phone|urlq }}">Open chat</a></dd>
+  <dt>Language</dt><dd>{{ b.language }}</dd>
+  <dt>Booked on</dt><dd>{{ b.created_at|ist }}</dd></dl>
 </section>
 <section class="card"><h3>Payment</h3>
   <div class="money-strip">
@@ -67,7 +80,12 @@
     <button type="button" class="btn danger" data-open="cancel-dialog">Cancel booking</button>
   {% endif %}
   </div>
-</section></div>
+</section>
+</div>
+<aside class="bd-side"><section class="card"><h3>Activity</h3>
+  <ul class="bd-activity">{% for at, text in timeline %}<li><span class="bd-dot">{{ icon('bolt') }}</span><div><p>{{ text }}</p>{% if at %}<small>{{ at|ist }}</small>{% endif %}</div></li>{% endfor %}</ul>
+</section></aside>
+</div>
 
 <section class="card" id="bill">
   <div class="card-head"><div><h3>Guest bill</h3><p class="muted">Invoice {{ invoice_no }}{% if prop and prop.gstin %} · GSTIN {{ prop.gstin }}{% endif %}</p></div>
