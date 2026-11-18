@@ -403,7 +403,7 @@ def test_a_mid_chat_hi_is_never_left_unanswered(world):
     say(w, "Is there a beach view?", GUEST, reply("Yes sir, every room has a beach view."))
     assert say(w, "hi") == "greeting"
     assert w.wa.texts()[-1] == "Hi, How may I assist you?"
-    assert say(w, "hi") == "greeting" and w.wa.texts().count("Hi, How may I assist you?") == 1  # not twice in a row
+    assert say(w, "Hello") == "greeting" and w.wa.texts().count("Hi, How may I assist you?") == 2  # always answered
 
 
 def test_no_message_is_ever_sent_twice_in_a_conversation(world):
