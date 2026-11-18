@@ -262,13 +262,16 @@ CONTACT_ASK = re.compile(r"\b(?:name|naam|peru|peyar|perum)(?:-?um)?\s*(?:,|and|
                          r"\b(?:mobile|phone)(?:\s*number)?(?:-?um)?\s*(?:,|and|aur|&|-?um)\s*(?:name|naam|peru|peyar)\b",
                          re.IGNORECASE)
 # "sir" in any form the AI writes it: sir, sir ji, saar (Tanglish), madam, ma'am (said at most once per conversation)
+PAYMENT_ASK = re.compile(r"\b(?:pay\w*|paid|link|advance|refund|razorpay|upi|gpay|transaction|amount|balance)\b",
+                         re.IGNORECASE)
+STALE_PAY = re.compile(r"\b(?:payment|pay|paid|link|advance)\b|confirm aak", re.IGNORECASE)
 RESTART = re.compile(r"^\s*(?:restart|reset|start again|start over|new chat)\s*[.!]*\s*$", re.IGNORECASE)
 RESTART_MARK = "[restart]"  # stored in the chat; the AI's view of the conversation begins after it
 SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE)
 MAX_ROOM_PHOTOS = 6  # photos of the offered room type, sent right after the general photos
 
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
-MAX_CHAT_WORDS = 30  # "very simple" (client, 2026-11-17)
+MAX_CHAT_WORDS = 15  # "reply in so few words" (client, 2026-11-18; was 30)
 _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s", re.IGNORECASE)
 
 
@@ -677,6 +680,19 @@ class ChatMixin:
                 self._text(phone, t("greet_again", lang))
             return
         self._text(phone, t("form", lang), repeat_ok=True)
+
+    def _no_stale_payment(self, phone: str, guest_text: str, reply: str) -> str:
+        """A guest whose booking is paid, with nothing waiting for payment, is never told to complete a payment or
+        offered the link again, unless they asked about payment themselves (2026-11-18)."""
+        if not reply or PAYMENT_ASK.search(guest_text):
+            return reply
+        now = self.clock.now()
+        rows = self.repo.list_bookings(phone=phone, limit=5)
+        if not any(b.status in ("paid", "checked_in") for b in rows) or any(
+                b.status == "hold" and b.hold_expires_at and b.hold_expires_at > now for b in rows):
+            return reply
+        keep = [s for s in re.split(r"(?<=[.?!])\s+|\n+", reply) if s.strip() and not STALE_PAY.search(s)]
+        return " ".join(keep).strip()
 
     def _form_was_last(self, phone: str) -> bool:
         return (self.repo.last_outbound_text(phone) or "") in {t("form", "en"), t("form", "mn")}
@@ -1180,7 +1196,7 @@ class ChatMixin:
                 self._text(phone, clean)
             elif (dates := self._own_dates_ask(st, clean))[0]:  # it asked for dates / persons itself: the owner's form
                 self._strict_form(ctx, dates[1])
-            elif clean := self._no_repeat_ask(phone, self._tool_prices_only(ctx, no_unasked_prices(clean, text))):
+            elif clean := self._no_stale_payment(phone, text, self._no_repeat_ask(phone, self._tool_prices_only(ctx, no_unasked_prices(clean, text)))):
                 self._text(phone, self._ease_sir(phone, clean))
         if ctx.photos:
             self._send_photos(phone, ctx.photos)

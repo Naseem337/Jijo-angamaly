@@ -102,85 +102,47 @@ def build_invoice_pdf(ctx: dict[str, Any]) -> bytes:
     pdf.multi_cell(col, 5, _t(room + (f"  |  room {b.room_numbers}" if b.room_numbers else "")),
                    new_x="LMARGIN", new_y="NEXT")
 
-    # bill lines
+    # Only what was paid (owner, 2026-11-18): the payments received and their sum. No bill total, no balance.
     pdf.ln(6)
     pdf.set_fill_color(*SOFT)
     pdf.set_draw_color(*LINE)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*MUTED)
-    pdf.cell(width * 0.75, 8, "  DESCRIPTION", border="TB", fill=True)
+    pdf.cell(width * 0.75, 8, "  PAYMENT RECEIVED", border="TB", fill=True)
     pdf.cell(width * 0.25, 8, "AMOUNT  ", border="TB", fill=True, align="R", new_x="LMARGIN", new_y="NEXT")
-    for line in f.lines:
-        y = pdf.get_y()
+    payments = ctx.get("payments") or []
+    for p in payments:
+        pdf.set_x(18)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*INK)
-        pdf.set_x(18)
-        pdf.cell(width * 0.75 - 2, 6, _t(line.label), new_x="LMARGIN", new_y="NEXT")
-        if line.detail:
-            pdf.set_x(18)
-            pdf.set_font("Helvetica", "", 8.5)
-            pdf.set_text_color(*MUTED)
-            pdf.multi_cell(width * 0.75 - 2, 4.5, _t(line.detail), new_x="LMARGIN", new_y="NEXT")
-        end = pdf.get_y() + 1.5
-        pdf.set_xy(16 + width * 0.75, y)
+        pdf.cell(width * 0.75 - 2, 6, _t(f"{_day(p.at)}  |  {method_label(p.method)}"))
         pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(*INK)
-        pdf.cell(width * 0.25, 6, _rs(line.amount) + "  ", align="R")
-        pdf.set_y(end)
+        pdf.cell(width * 0.25, 6, _rs(p.amount) + "  ", align="R", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_x(18)
+        pdf.set_font("Helvetica", "", 8.5)
+        pdf.set_text_color(*MUTED)
+        pdf.cell(width * 0.75 - 2, 4.5, _t(f"Ref {p.ref}"), new_x="LMARGIN", new_y="NEXT")
+        end = pdf.get_y() + 1.5
         pdf.line(16, end, 16 + width, end)
-        pdf.ln(1)
-
-    # totals
-    rows = []
-    if f.gst_pct:
-        half = round(f.gst_pct / 2, 1)
-        rows += [("Taxable value", f.subtotal), (f"CGST @ {half}%", f.cgst), (f"SGST @ {half}%", f.sgst)]
-    for label, amount in rows:
-        _total_row(pdf, width, label, amount)
+        pdf.set_y(end + 1)
+    if not payments:
+        pdf.set_x(18)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*MUTED)
+        pdf.cell(width, 7, "No payment received yet.", new_x="LMARGIN", new_y="NEXT")
+    paid = sum(p.amount for p in payments)
     pdf.set_fill_color(*TEAL)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Helvetica", "B", 11)
     pdf.set_x(16 + width * 0.45)
-    pdf.cell(width * 0.30, 9, "  Total", fill=True)
-    pdf.cell(width * 0.25, 9, _rs(f.bill_total) + "  ", fill=True, align="R", new_x="LMARGIN", new_y="NEXT")
-
-    # payments and balance
-    pdf.ln(7)
-    top = pdf.get_y()
-    _label(pdf, "PAYMENTS RECEIVED")
-    pdf.set_font("Helvetica", "", 9.5)
-    pdf.set_text_color(*INK)
-    payments = ctx.get("payments") or []
-    for p in payments:
-        pdf.cell(col, 5, _t(f"{_day(p.at)}  |  {method_label(p.method)}  |  {_rs(p.amount)}"), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_text_color(*MUTED)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.cell(col, 4, _t(f"Ref {p.ref}"), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_text_color(*INK)
-        pdf.set_font("Helvetica", "", 9.5)
-    if not payments:
-        pdf.cell(col, 5, "No payment received yet.", new_x="LMARGIN", new_y="NEXT")
-    for r in ctx.get("refund_list") or []:
-        pdf.cell(col, 5, _t(f"Refund {_day(r.at)}  |  {_rs(r.amount)}"), new_x="LMARGIN", new_y="NEXT")
-    after = pdf.get_y()
-    box_x, box_w = 16 + col + 6, col - 6
-    pdf.set_fill_color(*SOFT)
-    pdf.set_draw_color(*LINE)
-    pdf.rect(box_x, top, box_w, 26, "DF")
-    pdf.set_xy(box_x + 5, top + 4)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_text_color(*MUTED)
-    pdf.cell(box_w - 10, 4, "BALANCE PAYABLE AT CHECK-IN" if f.balance else "BALANCE", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_xy(box_x + 5, top + 10)
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.set_text_color(*(TEAL if f.balance else (31, 122, 82)))
-    pdf.cell(box_w - 10, 10, _rs(f.balance))
+    pdf.cell(width * 0.30, 9, "  Amount paid", fill=True)
+    pdf.cell(width * 0.25, 9, _rs(paid) + "  ", fill=True, align="R", new_x="LMARGIN", new_y="NEXT")
     if b.status == "cancelled":
-        pdf.set_xy(box_x + 5, top + 21)
-        pdf.set_font("Helvetica", "", 8)
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(194, 65, 59)
-        pdf.cell(box_w - 10, 4, "This booking was cancelled.")
-    pdf.set_y(max(after, top + 26) + 8)
+        pdf.cell(width, 5, "This booking was cancelled.", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(8)
 
     if prop and prop.policies:
         _label(pdf, "TERMS")

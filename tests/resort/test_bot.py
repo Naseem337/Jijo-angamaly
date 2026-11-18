@@ -190,9 +190,10 @@ def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
     say(w, "need a room in Pozhiyoram", GUEST, reply("Sure. Which dates?"))
     form = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
     assert w.wa.texts()[-1] == form  # never the AI's own 'Which dates?' (client, 2026-11-18)
-    assert say(w, "hi", GUEST, reply("Which dates would you like?")) == "answered"
-    assert w.wa.texts()[-2:] == [form, "Hi sir, how can I help you further?"]  # never the same form twice in a row
-    assert any("need a room in Pozhiyoram" in m.content for m in w.llm.calls[-1].messages)  # it saw the chat so far
+    assert say(w, "hi") == "greeting"  # mid-chat: the owner's greeting, no AI call (2026-11-18)
+    assert w.wa.texts()[-2:] == [form, "Hi, How may I assist you?"]
+    say(w, "2 people", GUEST, reply("[no reply]"))
+    assert any("need a room in Pozhiyoram" in m.content for m in w.llm.calls[-1].messages)  # the chat is remembered
 
 
 def test_english_with_place_and_room_words_stays_english():
@@ -400,8 +401,9 @@ def test_a_town_answer_to_the_location_question_gets_the_form_without_the_ai(wor
 def test_a_mid_chat_hi_is_never_left_unanswered(world):
     w = world
     say(w, "Is there a beach view?", GUEST, reply("Yes sir, every room has a beach view."))
-    assert say(w, "hi", GUEST, reply("[no reply]")) == "answered"
-    assert w.wa.texts()[-1] == "Hi, how can I help you further?"  # 'sir' was already said once
+    assert say(w, "hi") == "greeting"
+    assert w.wa.texts()[-1] == "Hi, How may I assist you?"
+    assert say(w, "hi") == "greeting" and w.wa.texts().count("Hi, How may I assist you?") == 1  # not twice in a row
 
 
 def test_no_message_is_ever_sent_twice_in_a_conversation(world):
@@ -742,6 +744,21 @@ def test_stop_and_start(world):
     assert say(w, "STOP") == "opt_out"
     assert w.repo.get_guest(GUEST).offers_consent is False
     assert say(w, "START") == "opt_in"
+
+
+def test_a_paid_guest_saying_hi_is_never_told_to_complete_the_payment(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    w.bot.mark_paid(booking_id=b.id)
+    w.clock.advance(hours=15)  # the next morning, same conversation (the real case on 2026-11-18)
+    calls = len(w.llm.calls)
+    assert say(w, "Hi") == "greeting"
+    assert w.wa.texts()[-1] == "Hi, How may I assist you?"
+    assert len(w.llm.calls) == calls  # no AI guess for a plain hi
+    say(w, "is there parking?", GUEST,
+        reply("Yes, parking is free. Please complete the payment."))
+    assert w.wa.texts()[-1] == "Yes, parking is free."  # the stale payment talk is dropped
 
 
 def test_after_payment_the_guest_gets_only_the_clients_confirmation_with_the_room_number(world):
