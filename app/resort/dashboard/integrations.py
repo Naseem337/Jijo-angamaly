@@ -92,10 +92,7 @@ def announce_cancelled(booking: Booking, refund_amount: int) -> str | None:
             return None
     except Exception as exc:  # noqa: BLE001
         log.warning("bot.announce_cancelled failed: %s", exc)
-    text = (f"Your booking {booking.id} ({booking.check_in:%d %b} to {booking.check_out:%d %b}) has been cancelled."
-            + (f" A refund of ₹{refund_amount:,} has been arranged." if refund_amount else "")
-            + " Please reply here if you need any help.")
-    return send_staff_text(booking.guest_phone, text)  # TODO(bot fork): translated announce_cancelled
+    return send_staff_text(booking.guest_phone, "Booking cancelled.")  # just that (owner, 2026-11-18)
 
 
 def announce_checked_out(booking: Booking) -> None:
