@@ -845,7 +845,7 @@
   cat: flow
   turns: ["Hi", "room venum Dec 20", "4 per", "pool irukka?", "ok book", "oh actually 2 more friends varanga", "one is a kid 6 years", "confirm", "location?"]
   expect:
-    - "tanglish throughout"
+    - "owner rule: each reply follows the guest's LAST message (Tanglish -> Tanglish, an English sentence -> English)"
     - "final booking 6 guests incl. 1 child"
     - "rooms correct for capacity"
     - "single booking id"
