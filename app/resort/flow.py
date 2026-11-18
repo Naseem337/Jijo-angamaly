@@ -393,6 +393,8 @@ class BookingBot(IdProofMixin, ChatMixin):
         rt = self.repo.get_room_type(b.room_type_id)
         # The client's confirmation and nothing more (2026-11-17): no map line, no ID request after it.
         delivered = self._notify_guest(b, self._confirmed_text(b, prop, rt), "paid", self._params(b))
+        if delivered:
+            self._send_invoice(b)  # the owner (2026-11-18): the invoice PDF follows the confirmation
         try:  # ask for the ID proof once (only inside the 24 h window; the day-before reminder covers the rest)
             if delivered and ASK_ID_AFTER_PAYMENT:
                 self.start_id_request(b)
@@ -402,6 +404,23 @@ class BookingBot(IdProofMixin, ChatMixin):
                          f"{fmt_date(b.check_in)} to {fmt_date(b.check_out)}, {b.adults}A {b.children}C. "
                          f"{b.guest_name} {b.guest_phone}. Paid Rs {b.paid_amount} of Rs {b.total} "
                          f"({method_label(b.payment_method)}).", b.property_id)
+
+    def _send_invoice(self, b: Booking) -> bool:
+        """The invoice as a PDF document, once per conversation. A failure is logged and never blocks the booking."""
+        from app.resort.invoice_pdf import build_invoice_pdf, invoice_context, invoice_filename
+        try:
+            ctx = invoice_context(self.repo, self.repo.get_booking(b.id) or b, self.clock.now())
+            name = invoice_filename(ctx["invoice_no"])
+            note = f"[invoice] {name}"
+            if self._already_sent(b.guest_phone, note):
+                return False
+            media_id = self.wa.upload_media(build_invoice_pdf(ctx), "application/pdf", name)
+            self.wa.send_document(b.guest_phone, media_id, name)
+            self._log(b.guest_phone, note, "system")
+            return True
+        except Exception:
+            log.exception("Invoice PDF for %s was not sent", b.id)
+            return False
 
     def payment_failed(self, *, booking_id: str = "", link_id: str = "", payment_id: str = "") -> str:
         b = (self.repo.get_booking(booking_id) if booking_id else None) or (

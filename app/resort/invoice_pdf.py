@@ -39,6 +39,16 @@ def invoice_filename(invoice_no: str) -> str:
     return f"Invoice-{invoice_no}.pdf"
 
 
+def invoice_context(repo: Any, b: Any, issued: datetime) -> dict[str, Any]:
+    """What the invoice shows, for the dashboard page and for the PDF the bot sends after payment."""
+    from app.resort import billing
+    prop, rt = repo.get_property(b.property_id), repo.get_room_type(b.room_type_id)
+    f = billing.folio(b, repo.list_charges(b.id), repo.list_refunds(b.id), prop, rt.name if rt else "")
+    return {"b": b, "prop": prop, "rt": rt, "f": f, "payments": billing.payments_of(b),
+            "refund_list": repo.list_refunds(b.id), "invoice_no": billing.invoice_number(b, prop),
+            "guest": repo.get_guest(b.guest_phone), "issued": issued}
+
+
 def build_invoice_pdf(ctx: dict[str, Any]) -> bytes:
     """ctx is the dashboard's invoice context: b, prop, rt, f (folio), payments, refund_list, invoice_no, issued."""
     b, prop, rt, f = ctx["b"], ctx["prop"], ctx["rt"], ctx["f"]

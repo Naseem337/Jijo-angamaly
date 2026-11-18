@@ -65,6 +65,10 @@ class FakeWA:
         self.sent.append((to, "image", media_id))
         return "wamid.x"
 
+    def send_document(self, to, media_id, filename, caption=""):
+        self.sent.append((to, "document", filename))
+        return "wamid.x"
+
     def to(self, phone):
         return [s for s in self.sent if s[0] == phone]
 
@@ -737,7 +741,10 @@ def test_after_payment_the_guest_gets_only_the_clients_confirmation_with_the_roo
     before = len(w.wa.to(GUEST))
     w.bot.mark_paid(booking_id=b.id)
     sent = w.wa.to(GUEST)[before:]
-    assert len(sent) == 1  # only the confirmation: no map line, no ID request
+    # the confirmation, then the invoice PDF (owner, 2026-11-18); no map line, no ID request
+    assert [k for _, k, _ in sent] == ["text", "document"] and sent[1][2].startswith("Invoice-") and sent[1][2].endswith(".pdf")
+    w.bot.announce_paid(w.repo.get_booking(b.id))  # announced again by staff: the invoice is not sent twice
+    assert [k for _, k, _ in w.wa.to(GUEST)].count("document") == 1
     assert sent[0][2] == "\n".join([
         "Following are the glimpse of your booking,", "",
         "Guest - Asha Menon", "98470 12345",
