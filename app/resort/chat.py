@@ -215,6 +215,10 @@ _NOT_NAME = {"my", "name", "is", "number", "mobile", "phone", "no", "and", "same
              "naan", "nan", "sir.", "ji", "saar", "number,", "mobile:", "name:"}
 
 
+_NATIVE_NOT_NAME = {"ഇതേ", "ഈ", "നമ്പർ", "നമ്പര്", "ആണ്", "എന്റെ", "പേര്", "இதே", "இந்த", "நம்பர்", "என்", "பெயர்",
+                    "யही", "यही", "इसी", "नंबर", "नम्बर", "है", "मेरा", "नाम", "ये", "यह"}
+
+
 def contact_in(text: str) -> tuple[str, str] | None:
     """(name or '', mobile or 'same') when the guest's message gives a mobile number or says 'same number' / 'this
     number'. None otherwise. The name is what is left once the number and filler words are taken out (1-4 words)."""
@@ -226,7 +230,11 @@ def contact_in(text: str) -> tuple[str, str] | None:
     if not mobile:
         return None
     rest = (text[:phone.start()] + " " + text[phone.end():]) if phone else _SAME_NO.sub(" ", text)
-    words = [w for w in re.findall(r"[A-Za-z][A-Za-z.']*", rest) if w.lower().strip(".") not in _NOT_NAME]
+    # a name typed (or spoken) in Malayalam / Tamil / Hindi script counts too: the booking keeps it, while texts to
+    # the guest stay in English letters (the summary simply has no "Guest -" line then)
+    words = [w for w in re.findall(r"[A-Za-zऀ-ॿ஀-௿ഀ-ൿ][\w.'ऀ-ॿ஀-௿"
+                                   r"ഀ-ൿ]*", rest)
+             if w.lower().strip(".,") not in _NOT_NAME and w.strip(".,") not in _NATIVE_NOT_NAME]
     name = " ".join(words) if 1 <= len(words) <= 4 else ""
     return name, mobile
 
@@ -248,7 +256,14 @@ def no_unasked_prices(reply: str, guest_text: str) -> str:
     return " ".join(keep).strip()
 
 
+# The AI asking for the guest's name and / or mobile number in its own words, any language in English letters
+# (both name AND mobile: a name-only question, once the number is saved, is new and stays)
+CONTACT_ASK = re.compile(r"\b(?:name|naam|peru|peyar|perum)(?:-?um)?\s*(?:,|and|aur|&|-?um)?\s*(?:mobile|phone|contact)\b|"
+                         r"\b(?:mobile|phone)(?:\s*number)?(?:-?um)?\s*(?:,|and|aur|&|-?um)\s*(?:name|naam|peru|peyar)\b",
+                         re.IGNORECASE)
 # "sir" in any form the AI writes it: sir, sir ji, saar (Tanglish), madam, ma'am (said at most once per conversation)
+RESTART = re.compile(r"^\s*(?:restart|reset|start again|start over|new chat)\s*[.!]*\s*$", re.IGNORECASE)
+RESTART_MARK = "[restart]"  # stored in the chat; the AI's view of the conversation begins after it
 SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE)
 MAX_ROOM_PHOTOS = 6  # photos of the offered room type, sent right after the general photos
 
@@ -264,6 +279,19 @@ NATIVE_PLACES = [(re.compile(p), name) for p, name in (
     ("ആലപ്പുഴ|ആലപ്പി|ആലപ്പീ|ஆலப்புழா|ஆலப்புழை|ஆலப்பி|अलेप्पी|अलप्पुझा|अलाप्पुझा", "alleppey"),
     ("കാന്തല്ലൂർ|കാന്തലൂർ|காந்தலூர்|காந்தல்லூர்|कांतलूर|कान्तलूर", "kanthalloor"),
     ("മൂന്നാർ|மூணார்|மூன்னார்|मुन्नार", "munnar"), ("പൊഴിയോരം|பொழியோரம்|पोझियोरम", "pozhiyoram"))]
+
+
+def english_letters_only(text: str, lang: str = "en") -> str:
+    """The last guard before ANY text goes to a guest (owner, 2026-11-18: "strictly no text in regional-language
+    alphabets, only English letters"). Lines with Malayalam / Tamil / Devanagari letters are left out (a summary line
+    'Guest - अनु' included); if nothing is left, a short ask to type it again. Native script may only ever be heard
+    in a voice reply's audio, never read in text."""
+    if not INDIC.search(text):
+        return text
+    kept = [line for line in text.split("\n") if not INDIC.search(line)]
+    if any(line.strip() for line in kept):
+        return "\n".join(kept).strip("\n")
+    return t("say_again", lang)
 
 
 def latin_places(text: str) -> str:
@@ -307,7 +335,14 @@ MANGLISH_WORDS = re.compile(r"\b(?:und|undo|aanu|ethra|venam|cheyyanam|cheyyam|i
 TANGLISH_WORDS = re.compile(r"\b(?:irukka|irukku|iruku|irukkum|irukkuma|evlo|evvalavu|ethana|ethanai|venum|vendum|"
                             r"sollunga|sollu|naanga|nanga|enga|unga|ungal\w*|enakku|enaku|pannunga|pannanum|panna|"
                             r"kudunga|kodunga|romba|mudiyuma|aaguma|aagum|thanguvom|varuvom|varom|varanum|illai|"
-                            r"inga|anga|eppadi|epdi|vanakkam|seri|sari)\b", re.IGNORECASE)
+                            r"inga|anga|eppadi|epdi|vanakkam|irundhu|irunthu|varai|varaikkum|pakkam|thaan|"
+                            r"dhaan|kattanum|vaanga|ponga|aamaa|illainga|ethukku|yenna|enna)\b",
+                            re.IGNORECASE)
+# A Malayalam word that slipped into a Tanglish / Hinglish reply and survived the rewrite -> the guest's own word
+_STRAY_ML = {"tanglish": {"und": "irukku", "undo": "irukka", "aanu": "thaan", "venam": "venum", "ippol": "ippo",
+                          "ethra": "evlo", "mathi": "podhum"},
+             "hinglish": {"und": "hai", "undo": "hai kya", "aanu": "hai", "venam": "chahiye", "ippol": "abhi",
+                          "ethra": "kitna", "mathi": "chalega"}}
 ASKS_REDUCE = re.compile(r"reduc|discount|lower|less|last price|final price|negotiat|bargain|best price|kurach|kurakk|kuraikk|"
                          r"kam kar|chhoot|குறை|കുറ|कम कर|छूट|ഡിസ്കൗണ്ട്|തള്ള", re.IGNORECASE)
 
@@ -358,6 +393,7 @@ class _Turn:
     silent: bool = False  # a fixed step message replaces the AI's own line this turn
     photos: list[str] = field(default_factory=list)  # uploaded photo references to send after the reply
     text: str = ""  # the guest's message this turn
+    priced: bool = False  # a tool worked out a price this turn (the only source of a price the AI may state)
 
 
 LANGUAGE_FIELD = {"type": "string", "enum": list(STYLES),
@@ -582,6 +618,36 @@ class ChatMixin:
             rest = ""
         return asked, rest
 
+    def _tool_prices_only(self, ctx: _Turn, reply: str) -> str:
+        """A price, total or advance only from a tool this turn (2026-11-18: an English guest asking 'how much is it?'
+        got a made-up Rs 2,000 a night). Amounts the AI wrote without a tool are dropped; when the stay is known the
+        real price for those dates is put in their place."""
+        if ctx.priced or not _MONEY.search(reply):
+            return reply
+        keep = [s for s in re.split(r"(?<=[.?!])\s+|\n+", reply) if s.strip() and not _MONEY.search(s)]
+        bk = ctx.st.get("bk") or {}
+        prop = self.repo.get_property(bk["property_id"]) if bk.get("property_id") else None
+        if prop and bk.get("check_in") and bk.get("check_out"):
+            fits = self._fits(prop, bk)
+            if fits:
+                rt, options = fits[0]
+                ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
+                q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, options[0])
+                per = round(q.total / max(1, q.nights * options[0]))
+                keep.insert(0, t("price_line", ctx.st.get("lang", "en"), room=rt.name, per=_money(per),
+                                 total=_money(q.total), nights=q.nights, s="s" if q.nights != 1 else ""))
+        return " ".join(keep).strip()
+
+    def _no_repeat_ask(self, phone: str, reply: str) -> str:
+        """Once the fixed 'Please share your name and mobile number' went, the AI does not ask it again in its own
+        words ('Name aur mobile number share kijiye', 'Ningalude name-um mobile number-um ayakkamo?'): nothing is said
+        twice (client rule). The rest of its answer stays."""
+        asks = {t(k, lang) for k in ("ask_contact", "ask_name") for lang in ("en", "mn")}
+        if reply in asks or not any(m.direction == "out" and m.text in asks for m in self._session_rows(phone)):
+            return reply
+        keep = [s for s in re.split(r"(?<=[.?!])\s+|\n+", reply) if s.strip() and not CONTACT_ASK.search(s)]
+        return " ".join(keep).strip()
+
     def _strict_form(self, ctx: _Turn, rest: str) -> None:
         """Instead of the AI's own ask for dates: what it said besides (if anything), then the next fixed step. If the
         guest already gave the dates and persons across their messages, rooms are checked straight away; else the
@@ -604,8 +670,16 @@ class ChatMixin:
             self._save(phone, st)
             return  # rooms available / not, glimpse, photos and the name ask follow from ctx.after
         self._save(phone, st)
-        if not any(m in ctx.after for m in (t("form", "en"), t("form", "mn"))):  # once per turn
-            self._text(phone, t("form", lang), repeat_ok=True)
+        if any(m in ctx.after for m in (t("form", "en"), t("form", "mn"))):  # once per turn
+            return
+        if self._form_was_last(phone):  # never the same form twice in a row (client: nothing sent twice)
+            if not rest and GREETING.match(ctx.text or ""):  # a mid-chat 'hi' still gets an answer
+                self._text(phone, t("greet_again", lang))
+            return
+        self._text(phone, t("form", lang), repeat_ok=True)
+
+    def _form_was_last(self, phone: str) -> bool:
+        return (self.repo.last_outbound_text(phone) or "") in {t("form", "en"), t("form", "mn")}
 
     def _recent_guest_text(self, phone: str) -> str:
         """The guest's messages in this conversation, oldest first (their stay details may be spread over several)."""
@@ -704,6 +778,9 @@ class ChatMixin:
             style = "hinglish"
         else:
             style = latin_style(text, st.get("style") or "en")
+            if st.get("style") in ("tanglish", "hinglish") and not MANGLISH_WORDS.search(text) and (
+                    style == "manglish" or _classify_latin(_words(text))[0] < 3):
+                style = st["style"]  # a Tamil / Hindi guest's short or unknown words are not Malayalam or English
         if style not in STYLE_LABELS:
             style = "en"
         if not is_language_neutral(text):
@@ -763,7 +840,11 @@ class ChatMixin:
             "- Always polite, concise and to the point.\n"
             "- Talk ONLY about our resorts: rooms, prices, dates, bookings, payment, the stay, location and facilities. "
             "For anything else (general questions, other places, news, jokes, coding, personal chat) say politely in "
-            "one short line that you can help only with resort bookings.\n"
+            "one short line that you can help only with resort bookings. Questions about the stay itself (parking, food, "
+            "pool, beach, Wi-Fi, AC, check-in time, ID, distance, places nearby) ARE resort questions: answer from the "
+            "FACTS, or say the owner will confirm and give the owner's numbers. Never refuse them.\n"
+            "- A price, total or advance only from a tool result in THIS turn (call check_availability); never from "
+            "memory or the welcome message.\n"
             "- When the guest's message carries a note that they swiped to reply to an earlier message, answer about "
             "THAT message.\n"
             "- VERY SIMPLE: easy everyday words a school child understands, short sentences, no fancy or formal "
@@ -879,9 +960,12 @@ class ChatMixin:
 
     @staticmethod
     def _session_start(rows: list[ChatMessage]) -> int:
-        """Index of the first message of the current conversation: a pause of SESSION_GAP starts a new one."""
-        for i in range(len(rows) - 1, 0, -1):
-            if rows[i].at - rows[i - 1].at >= SESSION_GAP:
+        """Index of the first message of the current conversation: a pause of SESSION_GAP, or the guest typing
+        'restart', starts a new one."""
+        for i in range(len(rows) - 1, -1, -1):
+            if rows[i].text == RESTART_MARK:
+                return i + 1
+            if i and rows[i].at - rows[i - 1].at >= SESSION_GAP:
                 return i
         return 0
 
@@ -901,6 +985,8 @@ class ChatMixin:
         merged: list[ChatMessage] = []
         rows: list[ChatMessage] = []
         for m in self._session_rows(phone):
+            if m.direction == "in" and m.text.startswith("[image]") and not getattr(self, "READ_IMAGES", False):
+                continue  # ignored images are not shown to the AI (it once replied "checking your payment screenshot")
             if m.direction == "out" and m.text.startswith("[photo] "):
                 if rows and rows[-1].text.startswith("[photos sent"):
                     n = int(re.search(r"\d+", rows[-1].text).group(0)) + 1
@@ -977,6 +1063,9 @@ class ChatMixin:
         except LLMError:
             fixed = ""
         out = fixed if fixed and not self._reply_problem(fixed, guest_text, st) else reply
+        swap = _STRAY_ML.get(st.get("style", ""))
+        if swap and not MANGLISH_WORDS.search(guest_text):  # the rewrite kept a Malayalam word: put the guest's own
+            out = MANGLISH_WORDS.sub(lambda m: swap.get(m.group(0).lower(), m.group(0)), out)
         return self._latin_only(out, fixed, st)
 
     @staticmethod
@@ -1091,7 +1180,7 @@ class ChatMixin:
                 self._text(phone, clean)
             elif (dates := self._own_dates_ask(st, clean))[0]:  # it asked for dates / persons itself: the owner's form
                 self._strict_form(ctx, dates[1])
-            elif clean := no_unasked_prices(clean, text):
+            elif clean := self._no_repeat_ask(phone, self._tool_prices_only(ctx, no_unasked_prices(clean, text))):
                 self._text(phone, self._ease_sir(phone, clean))
         if ctx.photos:
             self._send_photos(phone, ctx.photos)
@@ -1103,8 +1192,9 @@ class ChatMixin:
             if ctx.summary_message and message in asked:  # they already gave name and mobile in this turn
                 continue
             forms = {t("form", lang) for lang in ("en", "mn")}
-            if message in forms:  # the form may go again when the guest's answer missed a part (client, 2026-11-18)
-                self._text(phone, message, repeat_ok=True)
+            if message in forms:  # the form may go again for a missing part (client, 2026-11-18), never twice in a row
+                if not self._form_was_last(phone):
+                    self._text(phone, message, repeat_ok=True)
                 continue
             self._text(phone, message)
         if ctx.summary_message and ctx.summary_message != st.get("last_summary"):  # never the same summary twice
@@ -1234,6 +1324,7 @@ class ChatMixin:
 
     def _tool_check(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st = ctx.st
+        ctx.priced = True
         self._set_style(st, a)
         prop = self._find_property(a.get("place", ""))
         if prop is None:
@@ -1343,6 +1434,7 @@ class ChatMixin:
 
     def _tool_prepare(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st = ctx.st
+        ctx.priced = True
         self._set_style(st, a)
         bk = st.get("bk")
         if not bk:
@@ -1463,6 +1555,7 @@ class ChatMixin:
 
     def _tool_create(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         st, phone = ctx.st, ctx.phone
+        ctx.priced = True
         self._set_style(st, a)
         bk = st.get("bk") or {}
         if not bk:

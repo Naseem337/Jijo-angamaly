@@ -24,6 +24,12 @@ speaking_style: >
 
 providers:
   llm:
+    deepseek:                       # paid, cheap; the go-live brain (owner, 2026-11-18). Key: DEEPSEEK_API_KEY
+      kind: openai_compatible
+      base_url: https://api.deepseek.com
+      model: "${DEEPSEEK_MODEL:-deepseek-chat}"
+      api_key_secret: deepseek_api_key
+      timeout_s: 30
     gemini:
       kind: openai_compatible
       base_url: https://generativelanguage.googleapis.com/v1beta/openai/

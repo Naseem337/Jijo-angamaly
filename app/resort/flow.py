@@ -21,7 +21,7 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import GREETING, ChatMixin, is_ack
+from app.resort.chat import GREETING, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
@@ -85,6 +85,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         return any(m.direction == "out" and " ".join(m.text.split()) == wanted for m in rows)
 
     def _text(self, phone: str, text: str, *, repeat_ok: bool = False) -> bool:
+        text = english_letters_only(text)  # never Malayalam / Tamil / Hindi letters in a text (owner, 2026-11-18)
         if not repeat_ok and self._already_sent(phone, text):
             log.info("Not sending a message twice to %s", mask_phone(phone))
             return False
@@ -224,6 +225,14 @@ class BookingBot(IdProofMixin, ChatMixin):
                 self.repo.upsert_guest(guest)
                 self._text(phone, t("opt_out", st.get("lang", "en")))
                 return "opt_out"
+            if RESTART.match(text):  # 'restart': a fresh conversation (owner, 2026-11-18). Bookings and records stay.
+                keep = {k: st[k] for k in ("lang", "style", "gs", "opted_out") if k in st}
+                st.clear()
+                st.update(keep)
+                self._save(phone, st)
+                self._text(phone, t("greet", st.get("lang", "en")), repeat_ok=True)
+                self._log(phone, RESTART_MARK, "system")  # the conversation starts after this line (a 'hi' greets)
+                return "restart"
             if INDIC.search(text):  # a script gives the language away at once
                 st["lang"] = st["gs"] = detect_script(text, st.get("lang", "en"))
             elif not is_language_neutral(text):
@@ -296,6 +305,7 @@ class BookingBot(IdProofMixin, ChatMixin):
     def _notify_guest(self, booking: Booking, text: str, template_key: str, params: list[str]) -> bool:
         """Text inside the 24 h window, else the approved template. True only when the plain text went out."""
         phone = booking.guest_phone
+        text = english_letters_only(text)  # never Malayalam / Tamil / Hindi letters in a text (owner, 2026-11-18)
         try:
             self.wa.send_text(phone, text)
             self._log(phone, text, "system")

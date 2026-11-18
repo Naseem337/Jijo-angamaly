@@ -192,6 +192,17 @@ Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the mo
   reply is ALWAYS text (this bot never sends voice). A note that was not understood gets one short text.
 - Fixed step messages: Malayalam guests get the Manglish versions where they exist; Tamil / Hindi (script or
   English letters) get the English ones.
+- **Strictly English letters in every text (owner, 2026-11-18).** A last guard in `flow._text` and `_notify_guest`
+  (`english_letters_only`) drops any line with Malayalam / Tamil / Devanagari letters from ANY text (AI line, fixed
+  message, summary, confirmation): a native-script name drops the "Guest -" line. Native script may only be heard in
+  a voice reply's audio, and a voice reply only ever answers a voice note (this bot sends text only today).
+- A Tamil / Hindi guest keeps Tanglish / Hinglish on short or unknown-word messages; only a few real English words
+  switch them to English.
+- Prices only from a tool in that turn (`_tool_prices_only`): a made-up amount is replaced by the real price for the
+  guest's dates (`price_line`), or dropped.
+- After the fixed "Please share your name and mobile number", the AI's own repeat of it is left out (`_no_repeat_ask`).
+- Ignored images are not shown to the AI (it once answered a "hi" with "checking your payment screenshot").
+- Stay questions (parking, food, pool, Wi-Fi...) are resort questions, never refused as off-topic.
 
 ## Always English letters (user, 2026-11-11, replaces "Malayalam script gets Malayalam script")
 Whatever language the guest writes or speaks (typed or voice note), the reply is in English letters only:

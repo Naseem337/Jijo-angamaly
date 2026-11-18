@@ -196,6 +196,89 @@ def test_a_voice_note_that_was_not_understood_gets_one_short_text(world):
     assert len(w.wa.texts()) == 1 and not INDIC.search(w.wa.texts()[0])
 
 
+def test_no_fixed_message_in_any_language_has_native_script():
+    """The owner (2026-11-18): every text uses English letters only, whatever the guest's language or script."""
+    from string import Formatter
+
+    from app.resort.i18n import FIXED_LANGS, S, t
+    for key in S:
+        for lang in (*FIXED_LANGS, "ml", "ta", "hi"):
+            fields = {f for _, f, _, _ in Formatter().parse(S[key].get("en", "")) if f}
+            text = t(key, lang, **{f: "X" for f in fields}) if fields else t(key, lang)
+            assert not INDIC.search(text), (key, lang, text)
+
+
+def test_the_last_guard_never_lets_native_script_out():
+    from app.resort.chat import english_letters_only
+    assert english_letters_only("Guest - अनु\n98470 12345\n2 PAX") == "98470 12345\n2 PAX"
+    assert english_letters_only("ഹായ്") == "Sorry, could you please type that once more in a few words?"
+    assert english_letters_only("Hi, How may I assist you?") == "Hi, How may I assist you?"
+
+
+def test_a_native_script_name_never_reaches_the_guest_in_text(world):
+    w = world
+    say(w, "Alleppey, 12 dec to 15 dec, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-15", adults=2),
+        reply("[no reply]"))
+    say(w, "अनु, यही नंबर", GUEST, tool("create_booking", guest_name="अनु", mobile="same"), reply("[no reply]"))
+    texts = w.wa.texts()
+    assert texts[-2].startswith("Following are the glimpse of your enquiry") and "Guest -" not in texts[-2]
+    no_native_script(w)
+
+
+def test_a_price_the_ai_made_up_is_replaced_by_the_real_one(world):
+    w = world
+    say(w, "Alleppey, 10 nov to 12 nov, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", check_out="2026-11-12", adults=2),
+        reply("[no reply]"))
+    say(w, "how much is it?", GUEST, reply("It is Rs 2,000 a night, Rs 4,000 in total."))  # no tool: made up
+    assert w.wa.texts()[-1] == "Deluxe: ₹4,000 per night, ₹8,000 for 2 nights."
+
+
+def test_the_ai_does_not_ask_name_and_mobile_again_after_the_fixed_ask(world):
+    w = world
+    say(w, "Alleppey, 10 nov to 12 nov, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", check_out="2026-11-12", adults=2),
+        reply("[no reply]"))
+    say(w, "kya pool hai?", GUEST, reply("Nahi, pool nahi hai. Aapka naam aur mobile number share kijiye."))
+    assert w.wa.texts()[-1] == "Nahi, pool nahi hai."
+
+
+def test_a_name_only_question_after_the_number_is_saved_is_sent(world):
+    w = world
+    say(w, "Alleppey, 10 nov to 12 nov, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", check_out="2026-11-12", adults=2),
+        reply("[no reply]"))
+    say(w, "this number is fine", GUEST, reply("We have your mobile saved. What is your name?"))
+    assert w.wa.texts()[-1] in ("We have your mobile saved. What is your name?", "Please share your name.")
+
+
+def test_a_hindi_voice_note_with_a_native_name_books_and_the_texts_stay_in_english_letters(world):
+    w = world
+    say(w, "Alleppey, 10 nov to 12 nov, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", check_out="2026-11-12", adults=2),
+        reply("[no reply]"))
+    voice(w, "अनु, यही नंबर", reply("Aapka naam bata dijiye?"))  # the AI did not book: the code does
+    assert w.repo.list_bookings(phone=GUEST)[0].guest_name == "अनु"
+    assert w.wa.texts()[-1].startswith("Please pay")
+    no_native_script(w)
+
+
+def test_an_ignored_image_is_not_shown_to_the_ai(world):
+    w = world
+    say(w, "Is there parking?", GUEST, reply("Yes, free parking."))
+    w.bot.handle(InboundMessage(f"wamid.i{next(_ids)}", GUEST, "image", datetime(2026, 11, 2, 4, 30), media_id="img"))
+    say(w, "ok and wifi?", GUEST, reply("Yes, Wi-Fi is there."))
+    assert "[image]" not in "\n".join(m.content for m in w.llm.calls[-1].messages)
+
+
+def test_a_tanglish_guest_stays_tanglish_on_a_message_with_unknown_words(world):
+    w = world
+    say(w, "room irukka?", GUEST, reply("[no reply]"))
+    say(w, "dec 20 la 2 per", GUEST, reply("[no reply]"))
+    assert ": Tanglish" in system_language(w)
+
+
 def test_latin_only_keeps_english_letter_sentences():
     st = {"lang": "en"}
     assert ChatMixin._latin_only("Yes. ആണ്.", "", st) == "Yes."

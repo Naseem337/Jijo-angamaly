@@ -191,7 +191,7 @@ def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
     form = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
     assert w.wa.texts()[-1] == form  # never the AI's own 'Which dates?' (client, 2026-11-18)
     assert say(w, "hi", GUEST, reply("Which dates would you like?")) == "answered"
-    assert w.wa.texts()[-2:] == [form, form]  # the form again: what is still needed, in the owner's format
+    assert w.wa.texts()[-2:] == [form, "Hi sir, how can I help you further?"]  # never the same form twice in a row
     assert any("need a room in Pozhiyoram" in m.content for m in w.llm.calls[-1].messages)  # it saw the chat so far
 
 
@@ -285,6 +285,17 @@ def test_a_misspelt_place_is_understood_and_the_form_follows(world, answer, plac
 FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
 
 
+def test_restart_starts_a_fresh_conversation_and_keeps_bookings(world):
+    w = world
+    say(w, "Alleppey, 12 dec to 15 dec, 3 persons", GUEST, reply("[no reply]"))
+    assert say(w, "Restart") == "restart"
+    assert w.wa.texts()[-1] == "Hi, How may I assist you?" and "bk" not in w.repo.get_state(GUEST)
+    assert say(w, "hi") == "greeting"  # a fresh start greets again
+    say(w, "is it near the beach?", GUEST, reply("Yes, right on the beach."))
+    seen = "\n".join(m.content for m in w.llm.calls[-1].messages)
+    assert "12 dec" not in seen and "[restart]" not in seen  # the old conversation is gone from the AI's view
+
+
 def test_photos_do_not_push_the_guests_details_out_of_the_ais_memory(world):
     w = world
     say(w, "Alleppey, 12 dec to 15 dec, 3 persons", GUEST, reply("[no reply]"))
@@ -328,7 +339,7 @@ def test_details_spread_over_messages_are_checked_in_code_not_asked_again(world)
     w = world
     say(w, "need a room in Alleppey", GUEST, tool("ask_stay_details", place="Alleppey"), reply("[no reply]"))
     say(w, "dec 12", GUEST, reply("Check out date? And how many persons?"))
-    assert w.wa.texts() == [FORM, FORM]
+    assert w.wa.texts() == [FORM]  # the form is already the last message: not sent twice in a row
     say(w, "3 persons, till 15", GUEST, reply("Could you confirm check-in is 12 December and check-out 15 December?"))
     assert w.wa.texts()[-2:] == ["Yes, rooms are available for your dates.",
                                  "Please share your name and mobile number to proceed."]
@@ -1337,7 +1348,9 @@ def test_the_summary_is_built_in_english_laid_out_line_by_line_and_sent_before_t
     say(w, "deluxe mathi, early check-in venam", GUEST,
         tool("prepare_booking", room_type="Deluxe", rooms=1, early_checkin=True, language="manglish"),
         reply("Name-um mobile number-um parayamo?"))
-    assert w.wa.texts()[-1] == "Name-um mobile number-um parayamo?" and w.repo.list_bookings(phone=GUEST) == []
+    # the fixed ask already went with the glimpse: the AI's own repeat of it is not sent (nothing twice, 2026-11-18)
+    assert w.wa.texts()[-1] == "Munnottu pokaan ningalude name-um mobile number-um ayakkamo?"
+    assert w.repo.list_bookings(phone=GUEST) == []
     say(w, "Kavana Priya, 80886 78167", GUEST,
         tool("create_booking", guest_name="Kavana Priya", mobile="80886 78167", language="manglish"), reply("[no reply]"))
     texts = w.wa.texts()
@@ -1489,9 +1502,9 @@ def test_sir_is_said_only_once_in_a_conversation(world):
     say(w, "beach und?", GUEST, reply("Sir, und. Beach thottu aanu."))
     say(w, "pool?", GUEST, reply("Sir, pool illa."))
     say(w, "food?", GUEST, reply("Sheri sir, Swiggy, Zomato varum. Ok sir."))
-    say(w, "price?", GUEST, reply("It is Rs 4,000 a night. Thank you sir!"))
+    say(w, "parking?", GUEST, reply("Parking und. Thank you sir!"))
     assert w.wa.texts() == ["Sir, und. Beach thottu aanu.", "Pool illa.", "Sheri, Swiggy, Zomato varum. Ok.",
-                            "It is Rs 4,000 a night. Thank you!"]  # client, 2026-11-17: sir once only
+                            "Parking und. Thank you!"]  # client, 2026-11-17: sir once only
 
 
 def test_the_guest_is_never_called_by_name_in_any_script():
