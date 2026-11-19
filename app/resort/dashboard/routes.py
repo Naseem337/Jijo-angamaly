@@ -241,7 +241,6 @@ def bookings_list(request: Request, auth: Auth = Depends(require_user)):
 
 
 BOOKINGS_PER_PAGE = 100
-MAX_PHOTOS = 20  # per property and per room type
 CSV_BOM = chr(0xFEFF)  # so Excel reads Malayalam / Tamil names as UTF-8
 
 
@@ -957,13 +956,8 @@ async def _apply_photos(request: Request, auth: Auth, photos: list[str]) -> tupl
     if action == "cover" and ref in photos:
         return [ref] + [x for x in photos if x != ref], "Cover photo set"
     files = [f for f in form.getlist("photos") if hasattr(f, "read")]
-    room = MAX_PHOTOS - len(photos)  # photos past the limit were saved, counted as added, then dropped (2026-11-19)
-    if files and room <= 0:
-        return photos, f"!This already has {MAX_PHOTOS} photos. Remove some first"
     added, problem = 0, ""
-    if len(files) > min(12, room):
-        problem = f"only {min(12, room)} could be added (at most 12 at a time, {MAX_PHOTOS} in all)"
-    for upload in files[:min(12, room)]:
+    for upload in files:  # no limit (client, 2026-11-19): every photo the owner uploads is kept and sent
         try:
             photos = photos + [ph.save_photo(await upload.read())]
             added += 1

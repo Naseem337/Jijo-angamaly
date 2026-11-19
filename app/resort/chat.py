@@ -45,7 +45,9 @@ STYLE_LABELS = {"en": "English", "ml": "Malayalam script", "hi": "Hindi script",
                 "manglish": "Manglish (Malayalam in English letters)", "hinglish": "Hinglish (Hindi in English letters)",
                 "tanglish": "Tanglish (Tamil in English letters)"}
 GREETING = re.compile(r"^\W*((hi+|hello+|hey+|hai+|hlo|hola|namaste|namaskar\w*|vanakkam|good\s*(morning|afternoon|evening))"
-                      r"|നമസ്കാരം|ഹായ്|ഹലോ|வணக்கம்|ஹாய்|நமஸ்தே|नमस्ते|हाय|हेलो|हैलो)\W*$", re.IGNORECASE)
+                      r"|നമസ്കാരം|ഹായ്|ഹലോ|வணக்கம்|ஹாய்|நமஸ்தே|नमस्ते|हाय|हेलो|हैलो)"
+                      r"(?:[\s,]+(?:sir|madam|mam|maam|bro|brother|chetta|chettan|chechi|dear|there|team|ji|anna|bhai|"
+                      r"bhaiya|machane|macha|da|all|everyone|friend))?\W*$", re.IGNORECASE)
 # Styles the AI may report. Fixed messages (payment, ID) use the script language; Latin-script styles get English.
 STYLES = ("en", "ml", "manglish", "hi", "hinglish", "ta", "tanglish")
 # Replies are ALWAYS in English letters (user, 2026-11-11): a guest who writes or speaks Malayalam / Tamil / Hindi gets
@@ -101,7 +103,7 @@ def latin_style(text: str, previous: str = "en") -> str:
     return "manglish" if unknown > english else "en"
 
 
-MAX_GENERAL_PHOTOS = 6  # general photos sent automatically after the glimpse
+MAX_GENERAL_PHOTOS = None  # no limit (client, 2026-11-19): every general photo uploaded in the dashboard goes
 # The AI asking for the stay details itself (any language in English letters): replaced by the owner's form.
 DATES_QUESTION = re.compile(
     r"check[\s-]?in|check[\s-]?out|\bdates?\b|which day|\bwhen\b|how many (?:people|persons|guests|nights|days|of you|friends|members|adults|kids|children|are coming)"
@@ -385,6 +387,13 @@ PHOTO_ASK = re.compile(r"\b(?:photos?|pics?|pictures?|images?|fotos?|padam|padan
 # "other room photos" / "vere room" / "dusra room": the next free room type by the owner's priority
 OTHER_ROOM = re.compile(r"\b(?:other|another|different|next|vere|veroru|matte|mattu|innoru|vera|dusra|doosra|aur)\b",
                         re.IGNORECASE)
+# 'any other rooms?' / 'multiple rooms' / 'rooms that are available': a request to SEE more rooms
+ROOM_OPTIONS_ASK = re.compile(r"\b(?:other|another|different|more|multiple|vere|veroru|matte|innoru|vera|dusra|aur)\s+"
+                              r"(?:rooms?|room types?|options?|cottages?|types?)\b", re.IGNORECASE)
+ALL_ROOMS = re.compile(r"\b(?:all|multiple|every|available|ellam|ella|ellaa|saare|sab|sabhi)\b", re.IGNORECASE)
+GENERAL_PHOTO_ASK = re.compile(r"\b(?:resort|property|outside|outdoor|beach|place|area|surroundings?|campus|building|"
+                               r"common|sea|view of the)\b", re.IGNORECASE)
+ROOM_WORD = re.compile(r"\b(?:rooms?|cottages?|bed\s*rooms?|suites?)\b", re.IGNORECASE)
 ROOM_NAME_FILLER = {"room", "rooms", "view", "the", "with", "and", "type", "suite", "cottage", "villa"}
 WISH_CORE = {"room", "rooms", "resort", "resorts", "booking", "book", "stay", "availability", "available", "cottage",
              "kamra", "accommodation"}
@@ -397,7 +406,7 @@ WISH_WORDS = WISH_CORE | {"a", "an", "any", "is", "are", "there", "i", "we", "ne
 RESTART = re.compile(r"^\s*(?:restart|reset|start again|start over|new chat)\s*[.!]*\s*$", re.IGNORECASE)
 RESTART_MARK = "[restart]"  # stored in the chat; the AI's view of the conversation begins after it
 SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE)
-MAX_ROOM_PHOTOS = 6  # photos of the offered room type, sent right after the general photos
+MAX_ROOM_PHOTOS = None  # no limit (client, 2026-11-19): every photo uploaded for the room in the dashboard goes
 
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
 MAX_CHAT_WORDS = 15  # "reply in so few words" (client, 2026-11-18; was 30)
@@ -673,7 +682,7 @@ class ChatMixin:
 
     def _general_photos(self, phone: str, prop: Property) -> list[str]:
         """The property's general photos (outside, beach, common areas) not yet sent: they go to EVERY guest right
-        after the glimpse (client, 2026-11-17), in the owner's order, at most MAX_GENERAL_PHOTOS."""
+        after the glimpse (client, 2026-11-17), in the owner's order, all of them."""
         sent = self._sent_photos(phone)
         return [r for r in prop.photo_urls if r not in sent][:MAX_GENERAL_PHOTOS]
 
@@ -689,34 +698,50 @@ class ChatMixin:
                 best, score = rt, hits
         return best
 
-    def _photo_room(self, phone: str, st: dict[str, Any], prop: Property, text: str,
-                    wanted: str = "") -> tuple[RoomType | None, str]:
-        """Whose photos to send (owner, 2026-11-19): the room the guest is being offered, by the owner's priority AND
-        availability on their dates. A named room type: its photos only if it is free, else 'room_not_free'.
-        'Other room': the next free room type by priority, else 'no_other_room'."""
+    def _photo_plan(self, phone: str, st: dict[str, Any], prop: Property, text: str,
+                    wanted: str = "") -> tuple[list[tuple[RoomType | None, list[str]]], str, str]:
+        """Which photos answer a photo request (owner, 2026-11-19), in code, never mixed:
+        - a named room type: ALL its photos if it is free on the guest's dates, else 'room_not_free';
+        - resort / beach / outside photos: the GENERAL photos only;
+        - 'other room' / 'any other rooms': the next FREE room by priority not shown yet, else 'no_other_room';
+        - 'all / available rooms': every free room not shown yet, one room after another;
+        - plain 'photos': the offered room (top priority and free), else the next free room not shown yet.
+        Returns ([(room or None for general, photos)], problem key, room name for the problem)."""
         rooms = self.repo.list_room_types(prop.id)  # the owner's priority order
         bk = st.get("bk") or {}
         dated = bk.get("property_id") == prop.id and bk.get("check_in") and bk.get("check_out")
         free = [rt for rt, _ in self._fits(prop, bk)] if dated else rooms
+        sent = self._sent_photos(phone)
+
+        def unsent(refs: list[str]) -> list[str]:
+            return [r for r in dict.fromkeys(refs) if r not in sent][:MAX_ROOM_PHOTOS]
+
         named = self._room_named(wanted, rooms) or self._room_named(text, rooms)
         if named:
-            return (named, "") if named in free else (named, "room_not_free")
+            if named not in free:
+                return [], "room_not_free", named.name
+            return ([(named, unsent(named.photo_urls))] if unsent(named.photo_urls) else []), \
+                ("" if unsent(named.photo_urls) else "photos_sent"), ""
+        if GENERAL_PHOTO_ASK.search(text or "") and not ROOM_WORD.search(text or ""):
+            refs = unsent(prop.photo_urls)
+            return ([(None, refs)], "", "") if refs else ([], "photos_sent", "")
         if not free:
-            return None, "room_not_free" if dated else ""
+            return [], "no_other_room", ""
         chosen_id = (bk.get("chosen") or {}).get("room_type_id")
         current = next((rt for rt in free if rt.id == chosen_id), free[0])
+        others = [rt for rt in free if rt is not current and unsent(rt.photo_urls)]
+        if ALL_ROOMS.search(text or ""):
+            todo = [rt for rt in [current, *others] if unsent(rt.photo_urls)]
+            return ([(rt, unsent(rt.photo_urls)) for rt in todo], "", "") if todo else ([], "no_other_room", "")
         if OTHER_ROOM.search(text or ""):
-            sent = self._sent_photos(phone)
-            others = [rt for rt in free if rt is not current]
-            fresh = [rt for rt in others if any(r not in sent for r in rt.photo_urls)]
-            # every other free room was already shown: say so, never the same photos again or silence
-            return (fresh[0], "") if fresh else (None, "no_other_room")
-        return current, ""
+            return ([(others[0], unsent(others[0].photo_urls))], "", "") if others else ([], "no_other_room", "")
+        if unsent(current.photo_urls):
+            return [(current, unsent(current.photo_urls))], "", ""
+        if others:
+            return [(others[0], unsent(others[0].photo_urls))], "", ""
+        return [], "photos_sent", ""
 
-    def _photos_now(self, phone: str, st: dict[str, Any], text: str) -> str | None:
-        """'room photos' / 'deluxe photos' / 'other room pics' once the rooms were checked: the free room's photos by
-        the owner's priority, then the open step so the chat moves on to the booking. None = let the AI answer
-        (another resort named, or every photo already sent)."""
+    def _photo_place(self, st: dict[str, Any], text: str) -> Property | None:
         bk = st.get("bk") or {}
         named = self._named_place(text)
         place_id = bk.get("property_id") or st.get("form_place")
@@ -726,42 +751,46 @@ class ChatMixin:
             prop = named or (places[0] if len(places) == 1 else None)
         if prop is None or (named and named.id != prop.id):
             return None
-        room, problem = self._photo_room(phone, st, prop, text)
-        lang = st.get("lang", "en")
-        if problem:
-            self._text(phone, t(problem, lang, room=room.name if room else ""), repeat_ok=True)
-            return "photos"
-        sent = self._sent_photos(phone)
-        # the free room's own photos only (owner, 2026-11-19); the resort's general photos only if it has no rooms
-        refs = list(room.photo_urls) if room else list(prop.photo_urls)
-        fresh = [r for r in dict.fromkeys(refs) if r not in sent][:MAX_ROOM_PHOTOS]
-        if not fresh or not self._send_photos(phone, fresh):
+        return prop
+
+    def _send_plan(self, phone: str, plan: list[tuple[RoomType | None, list[str]]]) -> int:
+        """Each room's photos together, the room's name on its first photo (a guest seeing two rooms knows which is
+        which). General photos go without a caption."""
+        return sum(self._send_photos(phone, refs, rt.name if rt else "") for rt, refs in plan)
+
+    def _photos_now(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """A photo request at any stage, answered in code (never the AI): the photos by _photo_plan, then the open
+        booking step. None = another resort was named (the AI answers)."""
+        prop = self._photo_place(st, text)
+        if prop is None:
             return None
+        lang = st.get("lang", "en")
+        plan, problem, room = self._photo_plan(phone, st, prop, text)
+        if problem:
+            self._text(phone, t(problem, lang, room=room), repeat_ok=True)
+            return "photos"
+        if not self._send_plan(phone, plan):
+            self._text(phone, t("photos_sent", lang), repeat_ok=True)
+            return "photos"
         step = self.next_step(phone, st) or t("ask_location", lang, towns=" or ".join(self._towns()))
         self._text(phone, step, repeat_ok=True)  # back to the booking: the open step (location, form, name)
         return "photos"
 
     def _tool_photos(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
-        """Up to 4 photos on request: the room picked by the owner's priority and the guest's dates (or the room they
-        named, when free), then any general photo not yet sent. Never one already sent."""
-        prop = self._find_property(a.get("place", ""))
+        """The AI's photo tool follows exactly the same rules as the code path (_photo_plan)."""
+        prop = self._find_property(a.get("place", "")) or self._photo_place(ctx.st, ctx.text)
         if prop is None:
             return {"error": "unknown place", "places": [self._place_label(p) for p in self._places()]}
-        room, problem = self._photo_room(ctx.phone, ctx.st, prop, ctx.text, str(a.get("room_type") or ""))
+        plan, problem, room = self._photo_plan(ctx.phone, ctx.st, prop, ctx.text, str(a.get("room_type") or ""))
+        lang = ctx.st.get("lang", "en")
         if problem:
-            ctx.after.append(t(problem, ctx.st.get("lang", "en"), room=room.name if room else ""))
+            ctx.after.append(t(problem, lang, room=room))
             ctx.silent = True
-            return {"error": "that room is not free on the guest's dates; the guest is told automatically. Reply "
-                             "exactly [no reply]."}
-        refs = list(room.photo_urls) if room else list(prop.photo_urls)  # the free room's own photos only
-        sent = self._sent_photos(ctx.phone)
-        fresh = [r for r in dict.fromkeys(refs) if r not in sent][:MAX_ROOM_PHOTOS]
-        if not fresh:
-            numbers = ", ".join(display_phone(n) for n in prop.contact_numbers) or "the owner"
-            return {"error": ("all photos were already sent" if refs else "no photos uploaded yet") +
-                    f"; say so in one short line and that the owner can share more on {numbers}"}
-        ctx.photos = fresh
-        return {"ok": True, "sending": len(fresh), "note": "the photos are sent automatically; reply exactly [no reply]"}
+            return {"error": "the guest is told automatically. Reply exactly [no reply]."}
+        for rt, refs in plan:  # queued, so the turn knows something was sent (never a stray extra question)
+            ctx.after.append((rt.name if rt else "", refs))
+        ctx.silent = True
+        return {"ok": True, "note": "the photos are sent automatically; reply exactly [no reply]"}
 
     def _send_photos(self, phone: str, refs: list[str], caption: str = "") -> int:
         from app.resort import photos as ph
@@ -1689,6 +1718,9 @@ class ChatMixin:
             self._send_photos(phone, ctx.photos)
         asked = {t("ask_contact", lang) for lang in ("en", "mn")}
         for message in ctx.after:
+            if isinstance(message, tuple):  # (caption, photos): one room's photos, its name on the first
+                self._send_photos(phone, message[1], message[0])
+                continue
             if isinstance(message, list):  # a batch of photos in its place in the order
                 self._send_photos(phone, message)
                 continue

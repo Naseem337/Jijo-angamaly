@@ -22,7 +22,7 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import CHANGE_ASK, GREETING, PHOTO_ASK, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
+from app.resort.chat import CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
@@ -288,7 +288,8 @@ class BookingBot(IdProofMixin, ChatMixin):
                 return "next_step"
             if not self._bot_asked_something(phone, st):
                 return self._final_ok(phone, st, in_id)
-        if PHOTO_ASK.search(text) and (outcome := self._photos_now(phone, st, text)):
+        if (PHOTO_ASK.search(text) or (st.get("checked") and ROOM_OPTIONS_ASK.search(text))) \
+                and (outcome := self._photos_now(phone, st, text)):
             return outcome  # photos at any stage (owner, 2026-11-19): the free room by priority, else the top one
         if PHOTO_ASK.search(text) and not st.get("checked"):
             # photos come with the glimpse once rooms are found (owner's flow); before that, the next step

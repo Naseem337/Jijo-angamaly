@@ -249,7 +249,8 @@ def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_t
     images = [p for _, k, p in w.wa.to(GUEST) if k == "image"]
     assert images and len(images) == 2 and w.wa.texts() == []  # the room's own photos only, never the general ones
     say(w, "more?", GUEST, tool("send_photos", place="Pozhiyoram"), reply("That's all the photos we have sir."))
-    assert "already sent" in last_tool(w)["error"] and len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 2
+    assert w.wa.texts()[-1] == "All the photos are sent above."  # fixed line, never the AI's own
+    assert len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 2
 
 
 def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then_name(world, tmp_path, monkeypatch):
@@ -271,12 +272,12 @@ def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then
         tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-15", adults=2),
         reply("[no reply]"))
     sent = [(k, p) for _, k, p in w.wa.to(GUEST)][start:]
-    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 8 + ["text"]
+    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 10 + ["text"]  # ALL 8 general + the room's 2
     assert sent[0][1] == "Yes, rooms are available for your dates."
     assert sent[1][1] == "Your Beachfront Hideout Awaits!\nDeluxe - ₹4,000/Night/Room"
     assert sent[-1][1] == "Please share your name and mobile number to proceed."
     logged = [m.text[len("[photo] "):] for m in w.repo.list_chat(GUEST, limit=100) if m.text.startswith("[photo] ")]
-    assert logged == general[:6] + room  # the first 6 general photos, then ONLY the offered room's own
+    assert logged == general + room  # all general photos in the owner's order, then ONLY the offered room's own
 
 
 @pytest.mark.parametrize("answer, place", [("allepy", "p1"), ("Aleppey pls", "p1"), ("alappuzha", "p1"),
@@ -1288,7 +1289,7 @@ def test_a_quick_second_message_is_answered_once_with_both_in_view(world, monkey
 
 def test_the_prompt_carries_the_language_summary_and_payment_rules(world):
     w = world
-    say(w, "hello there", GUEST, reply("Hi, what are you looking for?"))
+    say(w, "I need some information", GUEST, reply("Sure, what would you like to know?"))
     system = w.llm.calls[0].system
     assert "ONE language per reply" in system and "NEVER in Malayalam script" in system
     assert "sent automatically, always in English" in system
@@ -1616,8 +1617,8 @@ def test_the_guest_is_never_called_by_name(world):
     assert clean("Hello sir", "") == "Hello sir" and clean("Rahul is the owner", "") == "Rahul is the owner"
     w = world
     w.repo.touch_guest(GUEST, w.clock.now(), name="Rahul")
-    say(w, "hello there", GUEST, reply("Hi Rahul sir, how can I help?"))
-    assert w.wa.texts()[-1] == "Hi sir, how can I help?"
+    say(w, "is there parking?", GUEST, reply("Yes Rahul sir, parking is free."))
+    assert w.wa.texts()[-1] == "Yes sir, parking is free."
 
 
 def test_the_guests_own_script_decides_the_fixed_language_whatever_the_ai_calls_it(world):

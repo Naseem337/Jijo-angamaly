@@ -210,16 +210,16 @@ def _png() -> bytes:
     return (Path(__file__).resolve().parents[2] / "app" / "resort" / "dashboard" / "static" / "icon-192.png").read_bytes()
 
 
-def test_photos_stop_at_the_limit_and_say_so(env, monkeypatch):
+def test_photos_have_no_limit(env):
+    """Client, 2026-11-19: no fixed number, every photo the owner uploads is kept (and the bot sends them all)."""
     repo, app, (p1, _, _, _) = env
-    monkeypatch.setattr(dash_routes, "MAX_PHOTOS", 3)
     client, token = login(app)
     url = f"{BASE}/properties/{p1.id}/photos"
-    files = [("photos", (f"{i}.png", _png(), "image/png")) for i in range(5)]
+    files = [("photos", (f"{i}.png", _png(), "image/png")) for i in range(25)]
     first = client.post(url, data={"csrf": token, "action": "upload"}, files=files, follow_redirects=False)
-    assert len(repo.get_property(p1.id).photo_urls) == 3 and "only 3 could be added" in toast(first)
-    full = client.post(url, data={"csrf": token, "action": "upload"}, files=files[:1], follow_redirects=False)
-    assert "already has 3 photos" in toast(full) and len(repo.get_property(p1.id).photo_urls) == 3
+    assert len(repo.get_property(p1.id).photo_urls) == 25 and "25 photos added" in toast(first)
+    client.post(url, data={"csrf": token, "action": "upload"}, files=files[:5], follow_redirects=False)
+    assert len(repo.get_property(p1.id).photo_urls) == 30
 
 
 # --------------------------------------------------------------------------- exports, safety, chats
