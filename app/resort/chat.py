@@ -110,7 +110,8 @@ DATES_QUESTION = re.compile(
     r"|kitni raat|kab se|\bta?reekh|\btarikh|\bthethi|\bthedhi", re.IGNORECASE)
 BOOKING_WISH = re.compile(r"\b(?:rooms?|resorts?|stay|book\w*|cottages?|accommodation|vacancy|availab\w*|kamra)\b|"
                           r"റൂം|മുറി|റിസോർട്ട്|ബുക്ക്|ரூம்|அறை|ரிசார்ட்|புக்|रूम|कमरा|रिसॉर्ट|बुक", re.IGNORECASE)
-NOT_NOW = re.compile(r"\b(?:later|will|thanks|thank|pinne|sheri|ok|okay|nice|good|was|were|cancel\w*)\b", re.IGNORECASE)
+NOT_NOW = re.compile(r"\b(?:later|will|thanks|thank|pinne|sheri|ok|okay|nice|good|was|were|cancel\w*|super|great|"
+                     r"beautiful|lovely|awesome|amazing|wow|adipoli|kollam|kidu|semma|mast|badhiya)\b", re.IGNORECASE)
 ASKING = re.compile(r"\b(?:share|tell|send|give|let me know|please|pls|kindly|confirm|need|needed|require|venam|"
                     r"parayamo|parayu|parayoo|ariyikk"
                     r"\w*|batao|bataiye|bataye|batayein|bataiyega|sollunga|sollungal|sollu|anuppunga|kodunga|"
@@ -130,17 +131,21 @@ _DAY_ONLY = re.compile(r"\b(?:till|to|until|upto|up to|-|thru|through)\s*(\d{1,2
 _PERSONS_LOOSE = re.compile(r"\b(?:for|of|we are|we're|total)\s+(\d{1,2})\b(?!\s*(?:nights?|days?|rooms?|dec|jan|feb|"
                             r"mar|apr|may|jun|jul|aug|sep|oct|nov|th|st|nd|rd))|\b(\d{1,2})\s*(?:of us|members)\b",
                             re.IGNORECASE)
-CLOSING = re.compile(r"^(?:anything else|is there anything else|vere enthengilum|vere entha|let me know|feel free|"
-                     r"enthengilum|any (?:other )?(?:doubts?|questions?)|do you have any|kuch aur|"
+CLOSING = re.compile(r"^(?:anything else|is there anything else|vere enth[ae]n?[gk]?[ie]lum|vere entha|let me know|"
+                     r"feel free|enth[ae]n?[gk]?[ie]lum|any (?:other )?(?:doubts?|questions?)|do you have any|kuch aur|"
                      r"aur kuch|vera edhavadhu|hope this helps)[^.?!]*[.?!]*$", re.IGNORECASE)
+OWNER_ASK = re.compile(r"\b(?:owner|manager|talk to (?:a |the )?(?:person|human|someone|staff)|call me|"
+                       r"vilikk\w*|phone cheyy\w*|baat karni|pesanum)\b", re.IGNORECASE)
 CHANGE_ASK = re.compile(r"\b(?:change|modify|postpone|prepone|reschedule|shift|cancel\w*|refund|maatt\w*|matt\w*|"
                         r"cancel cheyy\w*|badal\w*)\b", re.IGNORECASE)
-_UNTIL = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:vare|vareyum|varey|tak|tk|varai|varaikkum|varaikum)\b",
+_UNTIL = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:vare|vareyum|varey|tak|tk|varai|varaikkum|varaikum|"
+                    r"(?:nu|nn|ku|kku|ke|la)\s+(?:pokum|pogum|pokunnu|po|checkout|check out|leave|leaving|return|thirichu|kilambum|"
+                    r"jayenge|niklenge))\b",
                     re.IGNORECASE)  # '22 vare'
-_STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|divas\w*|ra+thri\w*|din|raat\w*|iravu|naal)\b|\bone night\b|\bovernight\b|"
+_STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|d?h?ivas\w*|disam|dhisam|ra+thri\w*|din|raat\w*|iravu|naal\w*)\b|\bone night\b|\bovernight\b|"
                           r"\b(?:a|one|two|three)\s+(?:nights?|days?)\b", re.IGNORECASE)
-_NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|ra+thri|raat|raatein|iravu)\b", re.IGNORECASE)
-_PERSONS = re.compile(r"(?:number of persons|persons|pax|guests|people)\s*[:=-]\s*(\d{1,2})\b|\b(\d{1,2})\s*(?:persons?|"
+_NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|ra+thri|raat|raatein|iravu|days?|d?h?ivas\w*|disam|dhisam|din|naal\w*)\b", re.IGNORECASE)
+_PERSONS = re.compile(r"(?:number of persons|persons|pax|guests|people)\s*[:=-]\s*(\d{1,2})\b|(?:we are|we're|we r|njangal|njmal|nangal|hum)\s+(\d{1,2})\b|\b(\d{1,2})\s*(?:persons?|"
                       r"people|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b", re.IGNORECASE)
 
 
@@ -206,8 +211,8 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
         later = [d for d in dates[1:] if d > dates[0]]
         if later:
             out["check_out"] = later[0]
-        elif ((m := _DAY_ONLY.search(text[found[0][0]:]) or _UNTIL.search(text[found[0][0]:]))
-              and int(m.group(1)) != dates[0].day):  # 'dec 12 ... till 15', 'dec 20 ... 22 vare'
+        elif m := next((x for rx in (_DAY_ONLY, _UNTIL) for x in rx.finditer(text[found[0][0]:])
+                        if int(x.group(1)) != dates[0].day), None):  # 'dec 12 ... till 15', '22 vare', '14 nu pokum'
             ci, day = dates[0], int(m.group(1))
             month, year = (ci.month, ci.year) if day > ci.day else ((ci.month % 12) + 1, ci.year + (ci.month == 12))
             try:
@@ -216,7 +221,7 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
                 pass
         elif m := _NIGHTS.search(text):
             out["check_out"] = dates[0] + timedelta(days=int(m.group(1)))
-    persons = [int(m.group(1) or m.group(2)) for m in _PERSONS.finditer(text)]
+    persons = [int(next(g for g in m.groups() if g)) for m in _PERSONS.finditer(text)]
     if persons and 0 < persons[-1] <= 40:
         out["persons"] = persons[-1]  # the latest number they gave
     return out
@@ -259,7 +264,8 @@ def contact_in(text: str) -> tuple[str, str] | None:
     return name, mobile
 
 
-_MONEY = re.compile(r"₹|\brs\.?\s?\d|\brupees?\b|\binr\b|\badvance\b|\d{1,3},\d{3}", re.IGNORECASE)
+_MONEY = re.compile(r"₹|\brs\.?\s?\d|\brupees?\b|\binr\b|\badvance\b|\d{1,3},\d{3}|\bbalance\b|\bbakki\b|"
+                    r"\bbaaki\b|\bpending\b|\bmeedhi\b", re.IGNORECASE)  # balance talk only when asked (2026-11-19)
 _PRICE_ASK = re.compile(r"price|rate|cost|how much|charge|amount|advance|total|tariff|ethra|ethrayaa|evlo|kitna|"
                         r"kitne|kimat|keemat|daam|kiraya|vila|vilai|kaasu|rupee|₹|budget|cheap|discount|offer|reduce|pay|"
                         r"എത്ര|വില|റേറ്റ്|ചാർജ്|எவ்வளவு|விலை|கட்டணம்|ரேட்|कितना|कितने|दाम|किराया|कीमत|रेट|पैसे",
@@ -644,6 +650,11 @@ class ChatMixin:
                       and not (MANGLISH_WORDS.search(text) or TANGLISH_WORDS.search(text) or HINGLISH_WORDS.search(text))
                       and not _classify_latin(_words(text))[0])  # 'confirm' / 'book' are words, not a misspelt town
         prop = self._named_place(text) or (self._place_by_start(text) if place_like else None)
+        if prop is None and (closed := self._closed_place(text, place_like)):
+            # a resort that is switched off in the dashboard (Kanthalloor today): bookings by phone, never a re-ask
+            numbers = ", ".join(display_phone(n) for n in (closed.contact_numbers or self._all_contact_numbers()))
+            self._text(phone, t("closed_place", st.get("lang", "en"), place=self._place_label(closed), numbers=numbers))
+            return "closed_place"
         if prop is None:
             if not place_like or PHOTO_ASK.search(text) or re.search(r"\d", text) or GREETING.match(text) \
                     or is_ack(text) or NOT_NOW.search(text) or RESTART.match(text):
@@ -678,6 +689,71 @@ class ChatMixin:
             if re.search(r"\d{6,}", m.text) and 1 <= len(words) <= 3:
                 return " ".join(words)
         return ""
+
+    def _never_silent(self, ctx: _Turn, text: str) -> str | None:
+        """The AI said nothing to a REAL message (a question, a request, booking details). Free models sometimes stay
+        silent; the owner wants every real message answered (2026-11-19). The next fixed step goes, chosen in code.
+        Casual messages ('ok', 'thanks', 'will tell my family') may stay quiet: returns None for them."""
+        phone, st = ctx.phone, ctx.st
+        lang = st.get("lang", "en")
+        if ((is_ack(text) and "?" not in text) or (NOT_NOW.search(text) and "?" not in text)) \
+                and not CHANGE_ASK.search(text):
+            return None
+        wish = (BOOKING_WISH.search(text) or PHOTO_ASK.search(text) or contact_in(text) is not None
+                or bool(parse_stay(text, self._today())) or self._named_place(text) is not None)
+        # a question, a request, booking details, or one unclear word ('asdfgh'); remarks like 'nice place' may stay quiet
+        real = wish or "?" in text or bool(QUESTION_WORD.search(text)) or bool(OWNER_ASK.search(text)) \
+            or bool(CHANGE_ASK.search(text)) or len(text.split()) == 1
+        if not real:
+            return None
+        last = self.repo.last_outbound_text(phone) or ""
+        if OWNER_ASK.search(text):
+            self.handoff(phone, st, f"guest asked: {text[:120]}")
+            return "handoff"
+        if CHANGE_ASK.search(text) and any(b.status in ("paid", "checked_in", "hold")
+                                           for b in self.repo.list_bookings(phone=phone, limit=5)):
+            msg = t("owner_will_help", lang)  # the owner was alerted when the message came in
+        elif closed := self._closed_place(text, True):
+            numbers = ", ".join(display_phone(n) for n in (closed.contact_numbers or self._all_contact_numbers()))
+            msg = t("closed_place", lang, place=self._place_label(closed), numbers=numbers)
+        elif step := self.next_step(phone, st):
+            msg = step if step != last else (t("fill_form", lang) if step == t("form", lang) else t("say_again", lang))
+        elif wish and not (st.get("bk") or {}).get("check_in"):
+            if prop := self._named_place(text):
+                st["form_place"] = prop.id
+                self._save(phone, st)
+                msg = self._missing_form(lang, parse_stay(text, self._today()))
+            else:
+                msg = t("ask_location", lang, towns=" or ".join(self._towns()))
+        else:
+            msg = t("say_again", lang)
+        if msg == last:
+            msg = t("say_again", lang) if msg != t("say_again", lang) else ""
+        if msg:
+            self._text(phone, msg, repeat_ok=True)
+        return "answered"
+
+    def _ask_missing(self, ctx: _Turn, got: dict[str, Any]) -> None:
+        """The form with only the missing lines; if that exact form is already the last message, 'Please share the
+        details above.' instead. Never nothing: the 'never twice in a row' rule once turned this into silence."""
+        lang = ctx.st.get("lang", "en")
+        msg = self._missing_form(lang, got)
+        if msg == (self.repo.last_outbound_text(ctx.phone) or ""):
+            msg = t("fill_form", lang)
+        if msg not in ctx.after:
+            ctx.after.append(msg)
+        ctx.silent = True
+
+    def _closed_place(self, text: str, place_like: bool) -> Property | None:
+        """A resort switched off in the dashboard that the guest named ('Kanthalloor', 'kanthaloor', 'kanth')."""
+        closed = [p for p in self.repo.list_properties(active_only=False) if not p.active]
+        words = set(re.findall(r"[a-z]{3,}", text.lower()))
+        hits = [p for p in closed if any(close_word(w, n) or (place_like and len(w) >= 3 and n.startswith(w[:3]))
+                                         for w in words for n in self._place_words(p))]
+        return hits[0] if len(hits) == 1 else None
+
+    def _all_contact_numbers(self) -> list[str]:
+        return [n for p in self.repo.list_properties(active_only=False) for n in p.contact_numbers][:2]
 
     def _place_by_start(self, text: str) -> Property | None:
         """An answer to the location question that starts like one of our towns ('alloy', 'allep', 'kanth'): that one,
@@ -1341,6 +1417,24 @@ class ChatMixin:
             elif "ONLY the guest's name" in done["error"]:
                 reply = t("ask_name", st.get("lang", "en"))
             self._save(phone, st)
+        if (not (ctx.after or ctx.summary_message or ctx.pay_message or ctx.photos) and (not reply or NO_REPLY in reply.lower())
+                and st.get("form_place") and not (st.get("bk") or {}).get("check_in") and not (is_ack(text) and "?" not in text)):
+            # The form is open and the AI did nothing (free models sometimes stay silent; a guest once got no reply to
+            # 'dec12 nn verum pinne 2 disam ... 3 per und', 2026-11-19). The code carries on: complete details ->
+            # rooms are checked; anything else -> the form with only the missing lines. Never silence.
+            got = parse_stay(self._recent_guest_text(phone), self._today())
+            prop = self.repo.get_property(st["form_place"])
+            if prop and got.get("check_in") and got.get("check_out") and got.get("persons"):
+                self._tool_check(ctx, {"place": self._place_label(prop), "check_in": got["check_in"].isoformat(),
+                                       "check_out": got["check_out"].isoformat(), "adults": got["persons"],
+                                       "language": st.get("style")})
+            else:
+                self._ask_missing(ctx, got)
+            reply = NO_REPLY
+            self._save(phone, st)
+        if (not (ctx.after or ctx.summary_message or ctx.pay_message or ctx.photos) and reply and NO_REPLY in reply.lower()
+                and (outcome := self._never_silent(ctx, text))):  # the AI works but chose silence (an outage gets the apology)
+            return outcome
         queued = bool(ctx.after or ctx.summary_message or ctx.pay_message or ctx.photos)
         if not queued and not ctx.handed_off and NO_REPLY in reply.lower() and (self.repo.last_outbound_text(phone) or "") \
                 in {t("rooms_none", lg) for lg in ("en", "mn", "tn", "hn")}:
@@ -1562,15 +1656,13 @@ class ChatMixin:
         got = parse_stay(said, today)
         if "persons" not in got and not re.search(r"\d", ctx.text or "") and not _PERSONS_LOOSE.search(said):
             # the number of persons is never assumed (it once took 2 for 'one more room for my friends')
-            ctx.after.append(self._missing_form(st.get("lang", "en"), got))
-            ctx.silent = True
+            self._ask_missing(ctx, got)
             return {"error": "the guest has not said how many persons; the form was sent to ask it. Reply exactly "
                              "[no reply]."}
         if got.get("check_in") == ci and "check_out" not in got and not _STAY_LENGTH.search(said):
-            # 'dec 20 nu 2 per': the AI made up a one-night stay once. The check-out is never assumed: the form asks it
-            if not any(m in ctx.after for m in (t("form", "en"), t("form", "mn"))):
-                ctx.after.append(t("form", st.get("lang", "en")))
-            ctx.silent = True
+            # 'dec 20 nu 2 per': the AI made up a one-night stay once. The check-out is never assumed: the form asks
+            # only for what is missing, and something always goes out (a guest once got silence, 2026-11-19)
+            self._ask_missing(ctx, got)
             return {"error": "the guest has not given the check-out date; the form was sent to ask it. Reply exactly "
                              "[no reply]."}
         adults, children = self._int(a, "adults"), self._int(a, "children")

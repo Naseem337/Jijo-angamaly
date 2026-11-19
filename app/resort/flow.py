@@ -268,7 +268,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             return outcome
         if st.get("fb") and (outcome := self._fb_step(phone, st, text)):
             return outcome
-        if is_ack(text):  # "ok" mid-chat (owner, 2026-11-18): carry on to the step still open, else stay quiet
+        if is_ack(text) and "?" not in text:  # "ok" mid-chat ("?" is a question, not an ok) (owner, 2026-11-18): carry on to the step still open, else stay quiet
             if step := self.next_step(phone, st):
                 if step == (self.repo.last_outbound_text(phone) or ""):
                     return "quiet"  # the open step is the last thing we said: wait for their answer

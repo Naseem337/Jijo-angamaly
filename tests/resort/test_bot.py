@@ -780,6 +780,24 @@ def test_after_not_available_the_guest_writing_on_gets_the_form_for_other_dates(
     assert w.wa.texts()[-1].startswith("Please share these details")
 
 
+@pytest.mark.parametrize("answer", ["Kanthalloor", "kanthaloor", "munnar"])
+def test_a_resort_switched_off_in_the_dashboard_gets_the_phone_numbers_not_a_re_ask(world, answer):
+    w = world
+    w.repo.save_property(Property(**{**w.p2.__dict__, "active": False, "contact_numbers": ["+919497861924"]}))
+    assert say(w, "Rooms?") == "location"
+    assert say(w, answer) == "closed_place"
+    assert w.wa.texts()[-1] == "For Kanthalloor, Munnar, please call 9497861924 to book."
+
+
+def test_a_status_question_gets_no_unasked_money_talk(world):
+    w = world
+    hold(w, rooms=1)
+    w.bot.mark_paid(booking_id=w.repo.list_bookings(phone=GUEST)[0].id)
+    say(w, "Booking confirm alle", GUEST, tool("my_bookings"),
+        reply("Sir, booking confirmed aanu. Balance 4000 property il kodukkanam. Vere enthenkilum ariyanamundo?"))
+    assert w.wa.texts()[-1] == "Sir, booking confirmed aanu."
+
+
 def test_talk_to_owner_pauses_the_bot_and_sends_the_owner_a_summary(world):
     w = world
     say(w, "I want to talk to the owner", GUEST, tool("talk_to_owner", reason="guest asked for the owner"),
