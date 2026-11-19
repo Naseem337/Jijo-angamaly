@@ -821,6 +821,15 @@ def properties_list(request: Request, auth: Auth = Depends(require_user)):
     return page(request, "properties.html", auth, nav="properties", rows=rows)
 
 
+@router.post("/delete-all-bookings")
+async def delete_all_bookings(request: Request, auth: Auth = Depends(require_owner)):
+    """Owner only: delete every booking (chats, guests, rooms and settings stay). Needs confirm=DELETE."""
+    f = await request.form()
+    if str(f.get("confirm", "")) != "DELETE":
+        raise HTTPException(400, "Type DELETE to confirm")
+    return JSONResponse({"deleted": get_repo().clear_bookings()})
+
+
 @router.post("/reset-test-data")
 async def reset_test_data(request: Request, auth: Auth = Depends(require_owner)):
     """Owner only: delete all bookings and chats (test data) before a client starts. Needs confirm=DELETE."""

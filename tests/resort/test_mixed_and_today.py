@@ -211,3 +211,13 @@ def test_two_room_types_free_only_the_top_priority_rooms_photos_go(world, tmp_pa
     say(w, "dec 12 to dec 14, 2 people")  # both Deluxe and Family Suite are free and fit 2
     logged = [m.text[len("[photo] "):] for m in w.repo.list_chat(GUEST, limit=100) if m.text.startswith("[photo] ")]
     assert logged == general + deluxe  # never the Family Suite's photos
+
+
+def test_deleting_all_bookings_keeps_chats_guests_and_rooms(world):
+    from test_bot import hold
+    w = world
+    hold(w)
+    chats = len(w.repo.list_chat(GUEST))
+    assert w.repo.clear_bookings()["bookings"] == 1
+    assert w.repo.list_bookings() == [] and len(w.repo.list_chat(GUEST)) == chats
+    assert w.repo.list_room_types(w.p1.id) and w.repo.get_guest(GUEST) is not None
