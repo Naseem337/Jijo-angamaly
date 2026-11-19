@@ -42,7 +42,8 @@
 <div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties/{{ prop.id }}">Back</a><button class="btn primary">Save</button></div>
 </form>
 {% if not is_new %}
-{{ photo_gallery(rt.photo_urls, BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/photos", csrf, "", "Room type photos", "Used when a room has no photos of its own") }}
+{% if rt.photo_urls and not rt.room_list %}{{ photo_gallery(rt.photo_urls, BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/photos", csrf, "Add room numbers above to give each room its own photos.", "Room photos") }}{% endif %}
+{% if not rt.room_list %}<section class="card"><h3>Room photos</h3><p class="muted">Add the room numbers above, then each room gets its own photos here.</p></section>{% endif %}
 {% for num in rt.room_list %}
 {{ photo_gallery(rt.number_photos.get(num, []), BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/numbers/" ~ num|urlq ~ "/photos", csrf, "", "Room " ~ num ~ " photos", "Sent when the guest gets room " ~ num, "room-" ~ num) }}
 {% endfor %}

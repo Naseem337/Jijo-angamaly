@@ -234,3 +234,12 @@ def test_a_room_without_its_own_photos_falls_back_to_the_room_type_photos(live):
     w.repo.save_room_type(RoomType(**{**rt.__dict__, "number_photos": {"102": own}}))
     chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people")
     assert _logged(w) == w.general + rt.photo_urls  # 101 has none of its own: the room type's photos
+
+
+def test_old_room_type_photos_move_to_each_room_number(tmp_path):
+    """Owner, 2026-11-19: no photos on the room type; its old photos are copied to each room number, nothing lost."""
+    repo = ResortRepo(tmp_path / "m.sqlite3")
+    rt = repo.save_room_type(RoomType("P", "Standard", units=2, photo_urls=["a.jpg", "b.jpg"], room_list=["108", "109"],
+                                      number_photos={"109": ["own.jpg"]}))
+    moved = ResortRepo(tmp_path / "m.sqlite3").get_room_type(rt.id)  # the move runs when the app starts
+    assert moved.photo_urls == [] and moved.number_photos == {"108": ["a.jpg", "b.jpg"], "109": ["own.jpg"]}

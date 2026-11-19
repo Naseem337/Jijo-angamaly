@@ -120,6 +120,22 @@ class ResortRepo:
         if "wamid" not in {r["name"] for r in self._db.execute("PRAGMA table_info(chat)")}:
             self._db.execute("ALTER TABLE chat ADD COLUMN wamid TEXT NOT NULL DEFAULT ''")
         self._db.execute("CREATE INDEX IF NOT EXISTS chat_wamid ON chat(wamid)")
+        self._move_room_type_photos()
+
+    def _move_room_type_photos(self) -> None:
+        """Photos live on each room number now, not on the room type (owner, 2026-11-19). A room type's old photos
+        are copied to each of its room numbers that has none, then cleared, so nothing is lost."""
+        for row in self._db.execute("SELECT id, data FROM room_types").fetchall():
+            data = json.loads(row["data"])
+            photos, numbers = data.get("photo_urls") or [], data.get("room_list") or []
+            if not photos or not numbers:
+                continue
+            own = dict(data.get("number_photos") or {})
+            for n in numbers:
+                if not own.get(n):
+                    own[n] = list(photos)
+            data["number_photos"], data["photo_urls"] = own, []
+            self._db.execute("UPDATE room_types SET data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), row["id"]))
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
