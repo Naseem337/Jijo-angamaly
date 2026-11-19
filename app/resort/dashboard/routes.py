@@ -916,6 +916,20 @@ async def room_photos(property_id: str, room_id: str, request: Request, auth: Au
     raise redirect(toast_url(f"{BASE}/properties/{prop.id}/rooms/{rt.id}#photos", message))
 
 
+@router.post("/properties/{property_id}/rooms/{room_id}/numbers/{number}/photos")
+async def room_number_photos(property_id: str, room_id: str, number: str, request: Request,
+                             auth: Auth = Depends(require_user)):
+    """One room number's own photos (owner, 2026-11-19): the bot sends these when it gives this room."""
+    repo = get_repo()
+    prop, rt = _room(repo, auth, property_id, room_id)
+    if rt is None or number not in rt.room_list:
+        raise HTTPException(404, "Add this room number first")
+    photos, message = await _apply_photos(request, auth, list(rt.number_photos.get(number, [])))
+    rt.number_photos = {**rt.number_photos, number: photos}
+    repo.save_room_type(rt)
+    raise redirect(toast_url(f"{BASE}/properties/{prop.id}/rooms/{rt.id}#room-{number}", message))
+
+
 @public_router.get("/media/{name}")
 def media(name: str):
     """Uploaded property/room photos (public: they are the resort's marketing pictures)."""

@@ -203,3 +203,34 @@ def test_every_uploaded_photo_is_sent_no_limit(live):
     w.repo.save_room_type(RoomType(**{**rt.__dict__, "photo_urls": rt.photo_urls + extra}))
     chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people")
     assert photos(transcript(w)) == ["general"] * 30 + ["Basic"] * 25
+
+
+def _logged(w):
+    return [m.text[len("[photo] "):] for m in w.repo.list_chat(PHONE, limit=500) if m.text.startswith("[photo] ")]
+
+
+def test_each_room_number_has_its_own_photos_and_the_guest_gets_the_rooms_they_will_get(live):
+    """Owner, 2026-11-19: photos per room number; the bot sends the photos of the exact room it will give."""
+    w = live
+    rt = w.repo.get_room_type(w.rooms["Basic"].id)  # top priority, rooms '101', '102'
+    own = {n: [ph.save_photo(PNG + b"room" + n.encode() + bytes([i])) for i in range(2)] for n in rt.room_list}
+    w.repo.save_room_type(RoomType(**{**rt.__dict__, "number_photos": own}))
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people")
+    assert _logged(w) == w.general + own["101"]  # room 101's own photos: not 102's, not the room type's
+    chat(w, "room photos")
+    assert not set(own["102"]) & set(_logged(w))  # never room 102's photos: this guest would not get 102
+    b = Booking(w.prop.id, rt.id, "+919000000009", date(2026, 12, 12), date(2026, 12, 14), 2, 0, 1, 6000, 3000,
+                w.clock.now(), status="paid")
+    w.repo.create_hold(b, w.clock.now())  # 101 is now taken on those dates
+    assert w.repo.get_booking(b.id).room_numbers == "101"
+    chat(w, "restart", "Rooms", "Alleppey", "dec 12 to dec 14, 2 people")
+    assert _logged(w)[-2:] == own["102"]  # the next guest gets room 102, so 102's photos
+
+
+def test_a_room_without_its_own_photos_falls_back_to_the_room_type_photos(live):
+    w = live
+    rt = w.repo.get_room_type(w.rooms["Basic"].id)
+    own = [ph.save_photo(PNG + b"only102" + bytes([i])) for i in range(2)]
+    w.repo.save_room_type(RoomType(**{**rt.__dict__, "number_photos": {"102": own}}))
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people")
+    assert _logged(w) == w.general + rt.photo_urls  # 101 has none of its own: the room type's photos

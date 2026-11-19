@@ -67,6 +67,7 @@ class RoomType:
     photo_urls: list[str] = field(default_factory=list)
     priority: int = 1  # 1 = offered first; the bot offers only the top-priority room type that is free and fits
     room_list: list[str] = field(default_factory=list)  # room numbers in priority order: the first free one is given first
+    number_photos: dict[str, list[str]] = field(default_factory=dict)  # room number -> that room's own photos
     active: bool = True
     id: str = field(default_factory=lambda: new_id("RT"))
 

@@ -570,7 +570,7 @@ def test_dates_in_the_past_are_refused(world):
 def test_season_rates_and_extra_bed(world):
     w = world
     w.repo.save_rate_rule(RateRule(w.deluxe.id, date(2026, 11, 11), date(2026, 11, 20), 5000, "season"))
-    say(w, "3 nights from 10 Nov", GUEST,
+    say(w, "3 nights from 10 Nov, 2 people", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=3, adults=2), reply("ok"))
     deluxe = next(o for o in last_tool(w)["options"] if o["room_type"] == "Deluxe")
     assert "price_per_night" not in deluxe and "rate_per_room_per_night" not in deluxe  # nights differ: only the total is given
@@ -1177,7 +1177,7 @@ def test_the_chat_saves_a_lead_at_every_step(world):
     booking = w.repo.list_bookings(phone=GUEST)[0]
     lead = leads.get_lead(w.repo, GUEST)
     assert (lead["stage"], lead["booking_id"], lead["from_city"]) == ("held", booking.id, "Kochi")
-    say(w, "another stay 1 Dec 1 night", GUEST,
+    say(w, "another stay 1 Dec 1 night, 2 people", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-12-01", nights=1, adults=2), reply("ok"))
     lead = leads.get_lead(w.repo, GUEST)
     assert (lead["stage"], lead["booking_id"], lead["check_in"], lead["from_city"]) == ("asked", "", "2026-12-01", "Kochi")
@@ -1572,7 +1572,7 @@ def test_the_form_then_glimpse_then_ask_name_in_the_clients_order(world):
 
 def test_a_per_night_price_is_given_only_when_every_night_costs_the_same(world):
     w = world
-    say(w, "2 nights from 10 Nov", GUEST,
+    say(w, "2 nights from 10 Nov, 2 people", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2), reply("ok"))
     deluxe = next(o for o in last_tool(w)["options"] if o["room_type"] == "Deluxe")
     assert deluxe["price_per_night"] == 4000 and deluxe["total_for_stay"] == 8000
@@ -1593,7 +1593,7 @@ def test_the_prompt_hides_rates_and_forbids_a_price_hike_story(world):
 
 def test_a_date_with_a_year_that_has_passed_rolls_to_the_next_time_it_comes(world):
     w = world  # today in these tests is 2 Nov 2026
-    say(w, "25 December, 2 nights", GUEST,
+    say(w, "25 December, 2 nights, 2 people", GUEST,
         tool("check_availability", place="Alleppey", check_in="2025-12-25", nights=2, adults=2), reply("ok"))
     res = last_tool(w)
     assert (res["check_in"], res["check_out"]) == ("2026-12-25", "2026-12-27") and "error" not in res

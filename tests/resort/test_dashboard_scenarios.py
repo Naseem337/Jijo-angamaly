@@ -274,3 +274,21 @@ def test_a_long_chat_and_search_still_render(env):
     client, _ = login(app)
     assert client.get(f"{BASE}/conversations/{PHONE.replace('+', '%2B')}").status_code == 200
     assert "Searchable Name" in client.get(f"{BASE}/search?q=searchable").text
+
+
+def test_each_room_number_gets_its_own_photo_upload(env):
+    repo, app, (p1, _, rt1, _) = env
+    from app.resort.models import RoomType
+    repo.save_room_type(RoomType(**{**repo.get_room_type(rt1.id).__dict__, "room_list": ["108", "109"]}))
+    client, token = login(app)
+    page = client.get(f"{BASE}/properties/{p1.id}/rooms/{rt1.id}").text
+    assert "Room 108 photos" in page and "Room 109 photos" in page
+    url = f"{BASE}/properties/{p1.id}/rooms/{rt1.id}/numbers/108/photos"
+    files = [("photos", (f"{i}.png", _png(), "image/png")) for i in range(3)]
+    r = client.post(url, data={"csrf": token, "action": "upload"}, files=files, follow_redirects=False)
+    assert "3 photos added" in toast(r)
+    rt = repo.get_room_type(rt1.id)
+    assert len(rt.number_photos["108"]) == 3 and rt.number_photos.get("109", []) == [] and rt.photo_urls == rt1.photo_urls
+    bad = client.post(f"{BASE}/properties/{p1.id}/rooms/{rt1.id}/numbers/999/photos",
+                      data={"csrf": token, "action": "upload"}, files=files[:1], follow_redirects=False)
+    assert bad.status_code == 404

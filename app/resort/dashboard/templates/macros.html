@@ -46,8 +46,8 @@
 </svg>
 {%- endmacro %}
 
-{% macro photo_gallery(photos, action, csrf, hint='', title='Photos', badge='') -%}
-<section class="card" id="photos">
+{% macro photo_gallery(photos, action, csrf, hint='', title='Photos', badge='', anchor='photos') -%}
+<section class="card" id="{{ anchor }}">
   <div class="card-head"><h3>{{ icon('image') }} {{ title }}{% if badge %} <span class="pill paid">{{ badge }}</span>{% endif %}</h3>
     {# one click: pick photos and they upload at once (owner, 2026-11-18) #}
     <form method="post" action="{{ action }}" enctype="multipart/form-data" class="uploader-mini">

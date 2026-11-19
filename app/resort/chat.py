@@ -148,8 +148,12 @@ _STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|d?h?ivas\w*|disam|dhisam|ra+t
                           r"\b(?:a|one|oru|ek|single|two|randu|rendu|do|three|moonu|moonnu|teen)\s+(?:nights?|days?|d?h?ivas\w*|disam|raat\w*|din|naal\w*)\b",
                           re.IGNORECASE)
 _NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|ra+thri|raat|raatein|iravu|days?|d?h?ivas\w*|disam|dhisam|din|naal\w*)\b", re.IGNORECASE)
-_PERSONS = re.compile(r"(?:number of persons|persons|pax|guests|people)\s*[:=-]\s*(\d{1,2})\b|(?:we are|we're|we r|njangal|njmal|nangal|hum)\s+(\d{1,2})\b|\b(\d{1,2})\s*(?:persons?|"
-                      r"people|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b", re.IGNORECASE)
+# 'Person 3' at the start of a line, '3 persons', 'persons : 3'. Never across a line break: 'To 23\nPerson 3' was once
+# read as 23 persons (live chat, 2026-11-19).
+_PERSONS = re.compile(r"(?:number of persons|persons|pax|guests|people)[ \t]*[:=-][ \t]*(\d{1,2})\b|(?:we are|we're|we r|njangal|njmal|nangal|hum)[ \t]+(\d{1,2})\b|\b(\d{1,2})[ \t]*(?:persons?|"
+                      r"people|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b|"
+                      r"(?:^|\n)[ \t]*(?:persons?|people|pax|guests?|adults?|members)[ \t]*[:=-]?[ \t]*(\d{1,2})[ \t]*(?:$|\n)",
+                      re.IGNORECASE)
 
 
 def _upcoming(day: int, month: int, today: date, year: int | None = None) -> date | None:
@@ -180,10 +184,39 @@ _NATIVE_STAY_WORDS = [
 _NATIVE_STAY = [(word, re.compile(pattern)) for word, pattern in _NATIVE_STAY_WORDS]
 
 
+_MONTH_NAMES = {"jan": "january", "feb": "february", "mar": "march", "apr": "april", "may": "may", "jun": "june",
+                "jul": "july", "aug": "august", "sep": "september", "oct": "october", "nov": "november",
+                "dec": "december"}
+_NOT_MONTH = {"now", "new", "nor", "not", "noon", "dev", "den", "day", "max", "man", "mat", "jam", "fan", "fed",
+              "few", "per", "pax", "out", "apt", "art", "sea", "set", "see", "son", "sun", "mon", "may", "jun", "jul",
+              "aug", "the", "and", "for", "two", "one", "six", "ten", "can", "nil", "nos", "dey", "dear", "dec"}
+_NEAR_DAY = re.compile(r"\b([a-z]{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?\b|\b(\d{1,2})(?:st|nd|rd|th)?\s*([a-z]{3,9})\b",
+                       re.IGNORECASE)
+
+
+def _month_typo(word: str) -> str | None:
+    """'niv' -> 'nov', 'decmber' -> 'dec', 'jnuary' -> 'jan' (one letter off a month name), else None."""
+    w = word.lower()
+    if w in _NOT_MONTH or w[:3] in _MONTHS:
+        return None
+    for abbr, full in _MONTH_NAMES.items():
+        if len(w) == 3 and w[0] == abbr[0] and sum(a != b for a, b in zip(w, abbr)) == 1:
+            return abbr  # 'niv' -> 'nov', 'dex' -> 'dec'
+        if len(w) >= 5 and w[0] == full[0] and difflib.SequenceMatcher(None, w, full).ratio() >= 0.8:
+            return abbr  # 'decmber', 'jnuary', 'novemebr'
+    return None
+
+
 def _latin_stay(text: str) -> str:
     for word, rx in _NATIVE_STAY:
         text = rx.sub(f" {word} ", text)
-    return text
+
+    def fix(m: re.Match) -> str:  # a month misspelt next to a day number ('Niv 22', '22 decmber')
+        word = m.group(1) or m.group(4)
+        abbr = _month_typo(word)
+        return m.group(0).replace(word, abbr, 1) if abbr else m.group(0)
+
+    return _NEAR_DAY.sub(fix, text)
 
 
 MSG_SEP = "\x1e"  # between the guest's messages in _recent_guest_text
@@ -198,6 +231,7 @@ _WORD_NUM = {"a": 1, "one": 1, "oru": 1, "ek": 1, "single": 1, "two": 2, "randu"
 _WORD_NIGHTS = re.compile(r"\b(a|one|oru|ek|single|two|randu|rendu|do|three|moonu|moonnu|munnu|teen)\s+"
                           r"(?:nights?|days?|d?h?ivas\w*|disam|dhisam|raat\w*|din|naal\w*|ra+thri\w*)\b|\b(overnight)\b",
                           re.IGNORECASE)
+FORM_START = "Please share these details"
 _OUT_CUE = re.compile(r"(?:till|until|upto|up to|to|check[\s-]?out\s*:?|vare|tak|varai|-)\s*$", re.IGNORECASE)
 
 
@@ -303,6 +337,8 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
     elif m := next((x for rx in (_DAY_ONLY, _UNTIL) for x in rx.finditer(text)), None):
         out["until_day"] = int(m.group(1))
     persons = [int(next(g for g in m.groups() if g)) for m in _PERSONS.finditer(text)]
+    if not persons and re.fullmatch(r"\s*(\d{1,2})\s*", text):
+        persons = [int(text.strip())]  # '3' on its own, answering 'Number of persons :'
     if persons and 0 < persons[-1] <= 40:
         out["persons"] = persons[-1]  # the latest number they gave
     if kids := _kids_in(text):
@@ -720,8 +756,8 @@ class ChatMixin:
         if named:
             if named not in free:
                 return [], "room_not_free", named.name
-            return ([(named, unsent(named.photo_urls))] if unsent(named.photo_urls) else []), \
-                ("" if unsent(named.photo_urls) else "photos_sent"), ""
+            refs = unsent(self._room_refs(named, st))
+            return ([(named, refs)] if refs else []), ("" if refs else "photos_sent"), ""
         if GENERAL_PHOTO_ASK.search(text or "") and not ROOM_WORD.search(text or ""):
             refs = unsent(prop.photo_urls)
             return ([(None, refs)], "", "") if refs else ([], "photos_sent", "")
@@ -729,17 +765,40 @@ class ChatMixin:
             return [], "no_other_room", ""
         chosen_id = (bk.get("chosen") or {}).get("room_type_id")
         current = next((rt for rt in free if rt.id == chosen_id), free[0])
-        others = [rt for rt in free if rt is not current and unsent(rt.photo_urls)]
+        refs_of = {rt.id: self._room_refs(rt, st) for rt in free}
+        others = [rt for rt in free if rt is not current and unsent(refs_of[rt.id])]
         if ALL_ROOMS.search(text or ""):
-            todo = [rt for rt in [current, *others] if unsent(rt.photo_urls)]
-            return ([(rt, unsent(rt.photo_urls)) for rt in todo], "", "") if todo else ([], "no_other_room", "")
+            todo = [rt for rt in [current, *others] if unsent(refs_of[rt.id])]
+            return ([(rt, unsent(refs_of[rt.id])) for rt in todo], "", "") if todo else ([], "no_other_room", "")
         if OTHER_ROOM.search(text or ""):
-            return ([(others[0], unsent(others[0].photo_urls))], "", "") if others else ([], "no_other_room", "")
-        if unsent(current.photo_urls):
-            return [(current, unsent(current.photo_urls))], "", ""
+            return ([(others[0], unsent(refs_of[others[0].id]))], "", "") if others else ([], "no_other_room", "")
+        if unsent(refs_of[current.id]):
+            return [(current, unsent(refs_of[current.id]))], "", ""
         if others:
-            return [(others[0], unsent(others[0].photo_urls))], "", ""
+            return [(others[0], unsent(refs_of[others[0].id]))], "", ""
         return [], "photos_sent", ""
+
+    def _next_numbers(self, rt: RoomType, st: dict[str, Any], rooms: int = 1) -> list[str]:
+        """The room numbers the guest would get: the first free ones by the owner's order on their dates (the same rule
+        as when they pay). Without dates: the first numbers in the list."""
+        if not rt.room_list:
+            return []
+        bk = st.get("bk") or {}
+        if not (bk.get("check_in") and bk.get("check_out")):
+            return rt.room_list[:rooms]
+        ci, co, now = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"]), self.clock.now()
+        probe = Booking(rt.property_id, rt.id, "", ci, co, 1, 0, rooms, 0, 0, now)
+        return av.allocate_rooms(rt, probe, self.repo.blocking_bookings(rt.id, ci, co), now) or rt.room_list[:rooms]
+
+    def _room_refs(self, rt: RoomType, st: dict[str, Any], rooms: int = 1) -> list[str]:
+        """Photos of the exact room the guest would get (owner, 2026-11-19: 108 and 109 can look different), else the
+        room type's photos, else any room number's photos."""
+        own = [r for n in self._next_numbers(rt, st, rooms) for r in rt.number_photos.get(n, [])]
+        if own:
+            return list(dict.fromkeys(own))
+        if rt.photo_urls:
+            return list(rt.photo_urls)
+        return list(dict.fromkeys(r for n in rt.room_list for r in rt.number_photos.get(n, [])))
 
     def _photo_place(self, st: dict[str, Any], text: str) -> Property | None:
         bk = st.get("bk") or {}
@@ -1029,7 +1088,7 @@ class ChatMixin:
             self._text(phone, t("ask_location", lang, towns=" or ".join(self._towns())))
             return
         st["form_place"] = prop.id
-        got = parse_stay(self._recent_guest_text(phone), self._today())
+        got = self._stay_known(phone, st)
         if got.get("check_in") and got.get("check_out") and got.get("persons"):
             self._tool_check(ctx, {"place": self._place_label(prop), "check_in": got["check_in"].isoformat(),
                                    "check_out": got["check_out"].isoformat(), "adults": got["persons"],
@@ -1127,10 +1186,28 @@ class ChatMixin:
     def _recent_guest_text(self, phone: str) -> str:
         """The guest's messages in this conversation, oldest first (their stay details may be spread over several)."""
         rows = self._session_rows(phone)
-        forms = {t("form", lg) for lg in ("en", "mn", "tn", "hn")}
-        start = max((i for i, m in enumerate(rows) if m.direction == "out" and m.text in forms), default=-1)
-        rows = [m for m in rows[start + 1:] if m.direction == "in"][-HISTORY:]  # a new full form = a fresh enquiry
+        # a fresh enquiry starts after the last room check / summary (a form re-sent in between must never lose
+        # 'Person 3' given just before it, live chat 2026-11-19)
+        marks = {t(k, lg) for k in ("rooms_ok", "rooms_none") for lg in ("en", "mn", "tn", "hn")}
+        start = max((i for i, m in enumerate(rows) if m.direction == "out" and (
+            m.text in marks or m.text.startswith("Following are the glimpse of your enquiry"))), default=-1)
+        rows = [m for m in rows[start + 1:] if m.direction == "in"][-HISTORY:]
         return f"\n{MSG_SEP}\n".join(m.text for m in rows)[-1500:]
+
+    def _stay_known(self, phone: str, st: dict[str, Any]) -> dict[str, Any]:
+        """What the guest has told us about the stay: the messages since the last room check, on top of the details
+        that check used (a child added later keeps the dates; new dates keep the persons)."""
+        got = parse_stay(self._recent_guest_text(phone), self._today())
+        bk = st.get("bk") or {}
+        if bk.get("check_in") and "check_in" not in got:
+            got["check_in"] = date.fromisoformat(bk["check_in"])
+            if bk.get("check_out") and "check_out" not in got:
+                got["check_out"] = date.fromisoformat(bk["check_out"])
+        if bk.get("adults") and "persons" not in got:
+            got["persons"] = bk["adults"]
+        if bk.get("children") and "children" not in got:
+            got["children"] = bk["children"]
+        return got
 
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         if prop := self._named_place(ctx.text):  # 'rooms available in allepy?': the place is known, the form follows
@@ -1566,7 +1643,7 @@ class ChatMixin:
         prop = self.repo.get_property(place_id)
         if prop is None:
             return False
-        got = parse_stay(self._recent_guest_text(phone), self._today())
+        got = self._stay_known(phone, st)
         if got.get("check_in") and got.get("check_out") and got.get("persons"):
             self._tool_check(ctx, {"place": self._place_label(prop), "check_in": got["check_in"].isoformat(),
                                    "check_out": got["check_out"].isoformat(), "adults": got["persons"],
@@ -1648,7 +1725,7 @@ class ChatMixin:
             # The form is open and the AI did nothing (free models sometimes stay silent; a guest once got no reply to
             # 'dec12 nn verum pinne 2 disam ... 3 per und', 2026-11-19). The code carries on: complete details ->
             # rooms are checked; anything else -> the form with only the missing lines. Never silence.
-            got = parse_stay(self._recent_guest_text(phone), self._today())
+            got = self._stay_known(phone, st)
             prop = self.repo.get_property(st["form_place"])
             if prop and got.get("check_in") and got.get("check_out") and got.get("persons"):
                 self._tool_check(ctx, {"place": self._place_label(prop), "check_in": got["check_in"].isoformat(),
@@ -1694,8 +1771,8 @@ class ChatMixin:
             return "ai_down"
         # the client's order: the AI's short line, then the fixed messages (form / glimpse / ask name), then the
         # enquiry summary, then the payment link
-        if ctx.silent:  # a fixed step (location, form, rooms available) was sent: the AI's own line would repeat
-            quiet = True  # it or add prices (client, 2026-11-17)
+        if ctx.silent or any(isinstance(m, str) and m.startswith(FORM_START) for m in ctx.after):
+            quiet = True  # a fixed step (location, form, rooms available) goes: never the AI's own line beside it
         if reply and not quiet:
             guest = self.repo.get_guest(phone)
             clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")
@@ -1713,7 +1790,12 @@ class ChatMixin:
         if ctx.photos:
             self._send_photos(phone, ctx.photos)
         asked = {t("ask_contact", lang) for lang in ("en", "mn")}
+        form_sent = False
         for message in ctx.after:
+            if isinstance(message, str) and message.startswith(FORM_START):
+                if form_sent:
+                    continue  # one form per turn: never the full form and then the short one (live chat, 2026-11-19)
+                form_sent = True
             if isinstance(message, tuple):  # (caption, photos): one room's photos, its name on the first
                 self._send_photos(phone, message[1], message[0])
                 continue
@@ -1789,6 +1871,14 @@ class ChatMixin:
         if fits and not wanted and fits[0][1][0] < sum(n for _, n in mix):
             return None  # one room type needs fewer rooms (10 guests: 3 Family Suites, not 2 Deluxe + 2 Family)
         return mix
+
+    @staticmethod
+    def _rooms_of(rt: RoomType, bk: dict[str, Any], options: list[dict[str, Any]]) -> int:
+        """How many rooms of this type the guest is offered (a split group: its share; else the quoted count)."""
+        for part in bk.get("mix") or []:
+            if part["room_type_id"] == rt.id:
+                return part["rooms"]
+        return int(options[0].get("quoted_for_rooms") or 1) if options else 1
 
     @staticmethod
     def _mix_label(mix: list[tuple[RoomType, int]]) -> str:
@@ -1900,8 +1990,8 @@ class ChatMixin:
         if problem := av.check_dates(ci, co, today):
             return {"error": problem}
         said = self._recent_guest_text(ctx.phone)
-        got = parse_stay(said, today)
-        if "persons" not in got and not re.search(r"\d", ctx.text or "") and not _PERSONS_LOOSE.search(said):
+        got = self._stay_known(ctx.phone, st)
+        if "persons" not in got and not _PERSONS_LOOSE.search(said):
             # the number of persons is never assumed (it once took 2 for 'one more room for my friends')
             self._ask_missing(ctx, got)
             return {"error": "the guest has not said how many persons; the form was sent to ask it. Reply exactly "
@@ -1985,7 +2075,7 @@ class ChatMixin:
             st["checked"] = key
             ctx.silent = True
             sent = self._sent_photos(ctx.phone)
-            fresh = [r for rt in shown for r in [x for x in dict.fromkeys(rt.photo_urls)
+            fresh = [r for rt in shown for r in [x for x in self._room_refs(rt, st, self._rooms_of(rt, bk, options))
                                                  if x not in sent][:MAX_ROOM_PHOTOS]]
             if fresh:
                 ctx.after.append(fresh)
@@ -2007,7 +2097,7 @@ class ChatMixin:
             # the owner's order (2026-11-19): rooms available -> glimpse -> general photos -> the offered room's photos
             general = self._general_photos(ctx.phone, prop)
             sent = self._sent_photos(ctx.phone) | set(general)
-            room_photos = [r for rt in shown for r in [x for x in dict.fromkeys(rt.photo_urls)
+            room_photos = [r for rt in shown for r in [x for x in self._room_refs(rt, st, self._rooms_of(rt, bk, options))
                                                        if x not in sent][:MAX_ROOM_PHOTOS]]
             if general + room_photos:
                 ctx.after.append(general + room_photos)
