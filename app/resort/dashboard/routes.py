@@ -1238,9 +1238,21 @@ async def guest_save(phone: str, request: Request, auth: Auth = Depends(require_
 # --------------------------------------------------------------------------- conversations
 
 
+def _convos(repo) -> list[dict]:
+    """The inbox rows, with the last message time as a datetime (shown in IST)."""
+    rows = repo.list_conversations()
+    for r in rows:
+        try:
+            at = datetime.fromisoformat(str(r.get("at") or ""))
+            r["at"] = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+        except ValueError:
+            r["at"] = None
+    return rows
+
+
 @router.get("/conversations")
 def conversations(request: Request, auth: Auth = Depends(require_user)):
-    return page(request, "conversations.html", auth, nav="chats", convos=get_repo().list_conversations(),
+    return page(request, "conversations.html", auth, nav="chats", convos=_convos(get_repo()),
                 current=None, chat=[], paused=False)
 
 
@@ -1248,7 +1260,7 @@ def conversations(request: Request, auth: Auth = Depends(require_user)):
 def conversation(phone: str, request: Request, auth: Auth = Depends(require_user)):
     repo = get_repo()
     paused, _ = repo.is_paused(phone)
-    return page(request, "conversations.html", auth, nav="chats", convos=repo.list_conversations(), current=phone,
+    return page(request, "conversations.html", auth, nav="chats", convos=_convos(repo), current=phone,
                 chat=repo.list_chat(phone, 200), paused=paused, guest=repo.get_guest(phone))
 
 

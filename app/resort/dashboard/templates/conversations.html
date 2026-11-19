@@ -2,22 +2,65 @@
 {% from "macros.html" import page_head, csrf_field, empty %}
 {% block title %}Conversations · Resort Desk{% endblock %}
 {% block content %}
-{% call page_head("Conversations", "WhatsApp chats with guests") %}{% endcall %}
+<style>
+  .live-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#16a34a;margin-left:8px}
+  .live-badge i{width:8px;height:8px;border-radius:50%;background:#16a34a;animation:livepulse 1.6s infinite}
+  .live-badge.off{color:#9ca3af}.live-badge.off i{background:#9ca3af;animation:none}
+  @keyframes livepulse{0%{box-shadow:0 0 0 0 rgba(22,163,74,.5)}70%{box-shadow:0 0 0 7px rgba(22,163,74,0)}100%{box-shadow:0 0 0 0 rgba(22,163,74,0)}}
+  .bubble img{display:block;max-width:220px;max-height:220px;border-radius:8px}
+  .sysline{align-self:center;font-size:11px;color:#6b7280;background:#eef0f3;border-radius:10px;padding:2px 10px;margin:4px 0}
+  .who{font-weight:600;margin-right:4px}
+  .convo .when{font-size:11px;color:#6b7280;white-space:nowrap;align-self:flex-start}
+  .convo.fresh{background:#f0fdf4}
+</style>
+{% call page_head("Conversations", "Live WhatsApp chats between the AI and guests") %}<span class="live-badge" id="live"><i></i>Live</span>{% endcall %}
 <div class="inbox {{ 'open' if current }}">
-  <section class="card list-pane">
+  <section class="card list-pane" id="list">
     {% for c in convos %}<a class="convo {{ 'active' if c.phone == current }}" href="{{ BASE }}/conversations/{{ c.phone|urlq }}">
       <span class="avatar">{{ (c.name or c.phone[-2:])[:1]|upper }}</span>
-      <span class="meta"><b>{{ c.name or c.phone }}</b>{% if c.paused %}<em class="flag">Human</em>{% endif %}<small>{{ ('You: ' if c.direction == 'out' else '') ~ c.text }}</small></span></a>
+      <span class="meta"><b>{{ c.name or c.phone }}</b>{% if c.paused %}<em class="flag">Human</em>{% endif %}<small>{{ ('AI: ' if c.direction == 'out' else '') ~ ('Photo' if c.text.startswith('[photo]') else c.text) }}</small></span>
+      {% if c.at %}<span class="when">{{ c.at|ist('%I:%M %p') }}</span>{% endif %}</a>
     {% else %}{{ empty("No conversations yet") }}{% endfor %}
   </section>
   <section class="card chat-pane">
     {% if current %}
     <div class="chat-head"><a class="back" href="{{ BASE }}/conversations">‹</a><b>{{ (guest.name if guest and guest.name else current) }}</b><small>{{ current }}</small>
       <form method="post" action="{{ BASE }}/conversations/{{ current|urlq }}/pause">{{ csrf_field(csrf) }}<input type="hidden" name="pause" value="{{ 0 if paused else 1 }}"><button class="btn {{ 'primary' if paused else '' }} sm">{{ 'Resume bot' if paused else 'Pause bot' }}</button></form></div>
-    <div class="chat" id="chat">{% for m in chat %}<div class="bubble {{ 'in' if m.direction == 'in' else 'out' }}">{{ m.text }}<small>{{ m.at.strftime('%d %b %H:%M') }}{% if m.source == 'staff' %} · staff{% elif m.source == 'voice' %} · voice{% endif %}</small></div>{% endfor %}</div>
+    <div class="chat" id="chat">{% for m in chat %}{% if m.text == '[restart]' %}<div class="sysline">New conversation</div>{% elif m.text.startswith('[photo] ') %}<div class="bubble out"><img src="{{ m.text[8:] }}" alt="Photo" loading="lazy"><small>{{ m.at|ist('%d %b, %I:%M %p') }}</small></div>{% elif m.text.startswith('[') and m.direction != 'in' and ']' in m.text[:20] %}<div class="sysline">{{ m.text }}</div>{% else %}<div class="bubble {{ 'in' if m.direction == 'in' else 'out' }}">{{ m.text }}<small>{% if m.direction == 'out' %}<span class="who">{{ 'Staff' if m.source == 'staff' else 'AI' }}</span>{% endif %}{{ m.at|ist('%d %b, %I:%M %p') }}{% if m.source == 'voice' %} · voice note{% endif %}</small></div>{% endif %}{% endfor %}</div>
     <form method="post" action="{{ BASE }}/conversations/{{ current|urlq }}/send" class="composer">{{ csrf_field(csrf) }}<input name="text" placeholder="Reply as staff (pause the bot first)" autocomplete="off"><button class="btn primary">Send</button></form>
     {% else %}{{ empty("Select a conversation") }}{% endif %}
   </section>
 </div>
 {% endblock %}
-{% block scripts %}<script>const c=document.getElementById('chat');if(c)c.scrollTop=c.scrollHeight;</script>{% endblock %}
+{% block scripts %}<script>
+(function () {
+  const chat = () => document.getElementById('chat');
+  const atBottom = el => el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  if (chat()) chat().scrollTop = chat().scrollHeight;
+  const badge = document.getElementById('live');
+  let busy = false;
+  async function refresh() {  // the live monitor: new messages appear without reloading the page
+    if (busy || document.hidden) return;
+    busy = true;
+    try {
+      const res = await fetch(location.href, {headers: {'X-Live': '1'}, cache: 'no-store'});
+      if (!res.ok) throw new Error(res.status);
+      const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+      const list = document.getElementById('list'), newList = doc.getElementById('list');
+      if (list && newList && list.innerHTML !== newList.innerHTML) list.innerHTML = newList.innerHTML;
+      const c = chat(), nc = doc.getElementById('chat');
+      if (c && nc && c.innerHTML !== nc.innerHTML) {
+        const stick = atBottom(c);
+        c.innerHTML = nc.innerHTML;
+        if (stick) c.scrollTop = c.scrollHeight;
+      }
+      badge.classList.remove('off');
+    } catch (e) {
+      badge.classList.add('off');
+    } finally {
+      busy = false;
+    }
+  }
+  setInterval(refresh, 4000);
+})();
+</script>{% endblock %}
