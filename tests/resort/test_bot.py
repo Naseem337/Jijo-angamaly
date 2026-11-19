@@ -449,7 +449,7 @@ def test_booking_chat_end_to_end_with_payment_link(world):
     assert res["place"] == "Pozhiyoram, Alleppey" and res["check_out"] == "2026-11-12"
     [deluxe] = res["options"]  # only the owner's top-priority room type is offered; the guest is never asked to pick
     assert deluxe["room_type"] == "Deluxe"
-    assert deluxe["total_for_stay"] == 8000 and deluxe["advance_now"] == 4000 and deluxe["rooms_possible"] == [1, 2]
+    assert deluxe["total_for_stay"] == 8000 and deluxe["advance_now"] == 4000 and deluxe["rooms_possible"] == [1]  # 2 persons: 1 room
     assert w.wa.texts()[-1] == "Please share your name and mobile number to proceed."
     say(w, "1 room", GUEST, tool("prepare_booking", rooms=1), reply("Name and mobile please."))
     summary = last_tool(w)
@@ -548,8 +548,8 @@ def test_ten_guests_never_one_room(world):
     options = last_tool(w)["options"]
     # Family Suite fits 4 adults: 10 people need 3 rooms (3 free), never 1 or 2. Deluxe can't take them.
     assert [(o["room_type"], o["rooms_possible"]) for o in options] == [("Family Suite", [3])]
-    say(w, "1 room", GUEST, tool("prepare_booking", room_type="Family Suite", rooms=1), reply("not possible"))
-    assert "not possible" in last_tool(w)["error"]
+    say(w, "1 room", GUEST)  # too few rooms: the fixed line with the minimum, never the AI (owner, 2026-11-19)
+    assert w.wa.texts()[-1] == "Max 3 persons per room (2 + 1 extra bed), so 10 persons need at least 3 rooms."
 
 
 def test_no_room_fits_says_so(world):

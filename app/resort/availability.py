@@ -42,22 +42,61 @@ def room_options(rt: RoomType, adults: int, children: int, available_units: int)
     return list(range(low, high + 1)) if low <= high else []
 
 
-def party_fits(rooms: list[RoomType], adults: int, children: int) -> bool:
-    """Can these rooms (one entry per room) hold the party, with at least one adult in each room?"""
+def base_per_room(rt: RoomType, beds_ok: bool = True) -> int:
+    """Guests a room takes WITHOUT an extra bed (owner, 2026-11-19: 2 per room; the 3rd needs an extra bed). With
+    extra beds offered, 'max guests per room' in the dashboard is the normal guests + 1 extra bed."""
+    return max(1, rt.max_occupancy - 1) if beds_ok and rt.max_occupancy >= 2 else max(1, rt.max_occupancy)
+
+
+def plan_rooms(rt: RoomType, adults: int, children: int, free: int, wanted: int = 0,
+               beds_ok: bool = True) -> tuple[int, int] | None:
+    """(rooms, extra beds) for the party in this room type, or None if it can't (owner, 2026-11-19):
+    - normally enough rooms for the normal guests per room (8 persons -> 4 rooms), no extra beds;
+    - FEWER rooms only when the guest asks for that number: then up to 'max guests per room' each, the extra persons
+      on extra beds (8 persons in 3 rooms -> 2 extra beds)."""
+    total = adults + children
+    if adults < 1 or children < 0 or rt.max_adults < 1 or rt.max_occupancy < 1:
+        return None
+    if children and rt.max_children < 1:
+        return None
+    base = base_per_room(rt, beds_ok)
+    need = max(-(-adults // rt.max_adults), -(-children // rt.max_children) if children else 1)
+    if wanted:
+        lowest = max(need, -(-total // rt.max_occupancy))
+        if not (lowest <= wanted <= min(free, adults)):
+            return None
+        return wanted, max(0, total - base * wanted) if beds_ok else 0
+    rooms = min(max(need, -(-total // base)), adults)
+    if rooms > free or total > rooms * rt.max_occupancy:
+        return None
+    return rooms, max(0, total - base * rooms) if beds_ok else 0
+
+
+def fewest_rooms(rts: list[RoomType], adults: int, children: int) -> int:
+    """The fewest rooms any room type could take the party in, with extra beds (for 'at least N rooms')."""
+    total = adults + children
+    return min((max(-(-total // rt.max_occupancy), -(-adults // max(rt.max_adults, 1))) for rt in rts), default=0)
+
+
+def party_fits(rooms: list[RoomType], adults: int, children: int, beds_ok: bool = True) -> bool:
+    """Can these rooms (one entry per room) hold the party at the normal guests per room (no extra beds), with at
+    least one adult in each room?"""
     return (len(rooms) <= adults and adults <= sum(r.max_adults for r in rooms)
-            and adults + children <= sum(r.max_occupancy for r in rooms)
+            and adults + children <= sum(base_per_room(r, beds_ok) for r in rooms)
             and children <= sum(r.max_children for r in rooms))
 
 
 def mixed_rooms(free: list[tuple[RoomType, int]], adults: int, children: int,
-                wanted: int = 0) -> list[tuple[RoomType, int]] | None:
+                wanted: int = 0, beds_ok: bool = True) -> list[tuple[RoomType, int]] | None:
     """The owner's priority across room types (2026-11-19): the fewest rooms (or `wanted` rooms) taken from the top of
     the priority list, e.g. 1 Basic View (the last one free) + 1 Standard for 4 guests. `free` is (room type, free
     rooms) in priority order. Returns [(room type, rooms), ...] or None if no set of rooms fits."""
     units = [rt for rt, n in free for _ in range(max(n, 0)) if rt.max_adults >= 1 and rt.max_occupancy >= 1]
     for n in ([wanted] if wanted else range(1, min(len(units), adults) + 1)):
         pick = units[:n]
-        if len(pick) == n and party_fits(pick, adults, children):
+        # the guest asked for this number of rooms: extra beds may take the 3rd person (owner, 2026-11-19)
+        if len(pick) == n and (party_fits(pick, adults, children, beds_ok) or (
+                wanted and beds_ok and party_fits(pick, adults, children, False))):
             out: list[tuple[RoomType, int]] = []
             for rt in pick:
                 if out and out[-1][0] is rt:

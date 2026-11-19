@@ -282,3 +282,57 @@ def test_standard_full_8_people_no_room_count_gets_the_fewest_remaining_rooms(li
     bk = w.repo.get_state(PHONE)["bk"]
     names = {rt.id: key for key, rt in w.rooms.items()}
     assert [(names[p["room_type_id"]], p["rooms"]) for p in bk["mix"]] == [("2", 2), ("Basic", 1)]  # 3 rooms hold 8
+
+
+def _plan(w):
+    names = {rt.id: key for key, rt in w.rooms.items()}
+    bk = w.repo.get_state(PHONE)["bk"]
+    if bk.get("mix"):
+        return [(names[p["room_type_id"]], p["rooms"], p.get("beds", 0)) for p in bk["mix"]]
+    return None
+
+
+def test_8_people_get_4_rooms_at_2_per_room(live):
+    """Owner, 2026-11-19: normally 2 persons per room. 8 people -> 4 rooms (Standard has 2 -> + 2 Tiny Cottage)."""
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 8 people")
+    assert _plan(w) == [("Standard", 2, 0), ("2", 2, 0)]
+    assert not any("extra bed" in x for x in w.wa.texts(PHONE))  # no extra beds unless the guest asks fewer rooms
+
+
+def test_fewer_rooms_only_when_asked_with_extra_beds_at_500(live):
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 8 people, 3 rooms")
+    assert _plan(w) == [("Standard", 2, 2), ("2", 1, 0)]  # 2 Standard with an extra bed each + 1 Tiny Cottage
+    texts = w.wa.texts(PHONE)
+    assert "2 extra bed(s) added: ₹500 per bed per night." in texts
+    assert texts.index("Yes, rooms are available for your dates.") < texts.index("2 extra bed(s) added: ₹500 per bed per night.")
+    chat(w, "Asha 9847012345")
+    summary = next(x for x in w.wa.texts(PHONE) if x.startswith("Following are the glimpse of your enquiry"))
+    assert "Extra Bed - 2,000" in summary and "3 Rooms" in summary  # 2 beds x 500 x 2 nights
+
+
+def test_one_room_type_fewer_rooms_asked(live):
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 3 people")
+    assert w.repo.get_state(PHONE)["bk"]["rooms"] == 0 and _plan(w) is None
+    assert "Please share your name and mobile number to proceed." in w.wa.texts(PHONE)
+    texts_before = len(w.wa.texts(PHONE))
+    assert not any("extra bed" in x for x in w.wa.texts(PHONE))  # 3 people -> 2 rooms, no bed talk
+
+
+def test_too_few_rooms_asked_says_the_minimum(live):
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 8 people, 2 rooms")
+    assert w.wa.texts(PHONE)[-1] == "Max 3 persons per room (2 + 1 extra bed), so 8 persons need at least 3 rooms."
+    assert not any("not available" in x for x in w.wa.texts(PHONE))
+    chat(w, "ok 3 rooms")
+    assert _plan(w) == [("Standard", 2, 2), ("2", 1, 0)]

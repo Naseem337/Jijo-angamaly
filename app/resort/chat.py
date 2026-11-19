@@ -1660,7 +1660,7 @@ class ChatMixin:
         mine = parse_stay(text, self._today())
         if not force and not (mine.get("check_in") or _STAY_LENGTH.search(text) or _WORD_NIGHTS.search(text)
                               or _DAY_ONLY.search(text) or _UNTIL.search(text)
-                              or (mine.get("persons") and not bk.get("check_in")) or mine.get("children")):
+                              or (mine.get("persons") and not bk.get("check_in")) or mine.get("children") or mine.get("rooms")):
             return False  # persons alone after the rooms were checked ('goa 2 people') stay with the AI
         prop = self.repo.get_property(place_id)
         if prop is None:
@@ -1888,7 +1888,7 @@ class ChatMixin:
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
         now = self.clock.now()
         free = [(rt, self.repo.free_rooms(rt, ci, co, now)) for rt in self.repo.list_room_types(prop.id)]
-        mix = av.mixed_rooms(free, bk["adults"], bk["children"], wanted)
+        mix = av.mixed_rooms(free, bk["adults"], bk["children"], wanted, bool(prop.extra_bed_rate))
         if not mix or len(mix) < 2:
             return None
         fits = self._fits(prop, bk)
@@ -1912,11 +1912,20 @@ class ChatMixin:
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
         now = self.clock.now()
         out = []
+        beds_ok = bool(prop.extra_bed_rate)
         for rt in self.repo.list_room_types(prop.id):
-            options = av.room_options(rt, bk["adults"], bk["children"], self.repo.free_rooms(rt, ci, co, now))
-            if options:
-                out.append((rt, options))
+            plan = av.plan_rooms(rt, bk["adults"], bk["children"], self.repo.free_rooms(rt, ci, co, now),
+                                 int(bk.get("rooms") or 0), beds_ok)
+            if plan:
+                out.append((rt, [plan[0]]))
         return out
+
+    @staticmethod
+    def _beds_for(prop: Property, rt: RoomType, adults: int, children: int, rooms: int) -> int:
+        """Extra beds when more persons than the normal 2 per room share the rooms (only when the guest asked)."""
+        if not prop.extra_bed_rate:
+            return 0
+        return max(0, adults + children - av.base_per_room(rt) * rooms)
 
     @staticmethod
     def _without_name(text: str, name: str) -> str:
@@ -2042,9 +2051,14 @@ class ChatMixin:
             # the top-priority room type cannot take the whole group: its free rooms first, then the next room type
             # (owner, 2026-11-19: 4 guests, 1 Basic left -> 1 Basic + 1 Standard)
             parts = []
+            beds_left = max(0, adults + children - sum(av.base_per_room(rt) * n for rt, n in mix)) \
+                if prop.extra_bed_rate else 0
             for rt, n in mix:
-                q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, n)
-                parts.append({"room_type_id": rt.id, "rooms": n, "total": q.total, "advance": q.advance})
+                beds = min(beds_left, n * max(0, rt.max_occupancy - av.base_per_room(rt)))
+                beds_left -= beds
+                q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, n, beds)
+                parts.append({"room_type_id": rt.id, "rooms": n, "beds": beds, "total": q.total,
+                              "advance": q.advance})
             bk["mix"] = parts
             offered = [rt for rt, _ in mix]
             total, advance = sum(p["total"] for p in parts), sum(p["advance"] for p in parts)
@@ -2053,12 +2067,17 @@ class ChatMixin:
                             "quoted_for_rooms": sum(n for _, n in mix), "total_for_stay": total,
                             "advance_now": advance, "balance_at_property": total - advance,
                             "price_per_night": round(first.total / max(1, first.nights))})
+            if mix_beds := sum(p["beds"] for p in parts):
+                options[-1]["extra_beds"] = mix_beds
         for rt, rooms_ok in ([] if mix else self._fits(prop, bk)):
             offered.append(rt)
             rooms = wanted if wanted in rooms_ok else rooms_ok[0]
-            q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, rooms)
+            beds = self._beds_for(prop, rt, adults, children, rooms)
+            q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, rooms, beds)
             option = {"room_type": rt.name, "rooms_possible": rooms_ok, "quoted_for_rooms": rooms,
                       "total_for_stay": q.total, "advance_now": q.advance, "balance_at_property": q.total - q.advance}
+            if beds:
+                option["extra_beds"] = beds
             if len({rate for _, rate in q.per_night}) == 1:
                 option["price_per_night"] = q.per_night[0][1]  # per room, only when every night costs the same
             options.append(option)
@@ -2067,6 +2086,13 @@ class ChatMixin:
                                "children": children, "options": options}
         out["note"] = ("Give the guest the total for their stay. Never mention that rates change, seasons, peak or high "
                        "season dates, or a price increase." + year_note)
+        if not options and wanted and (least := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children)) \
+                and wanted < least:
+            # 8 persons in 2 rooms: at most 3 per room (2 + 1 extra bed), so at least 3 rooms (owner, 2026-11-19)
+            ctx.after.append(t("min_rooms", st.get("lang", "en"), persons=adults + children, rooms=least))
+            ctx.silent = True
+            return {"error": f"at least {least} rooms are needed; the guest is told automatically. Reply exactly "
+                             "[no reply]."}
         if not options:
             ctx.none_found = True
             out["available"] = False
@@ -2112,6 +2138,8 @@ class ChatMixin:
         elif st.get("checked") != key:
             st["checked"] = key
             ctx.after.append(t("rooms_ok", lang))
+            if beds := options[0].get("extra_beds"):
+                ctx.after.append(t("extra_bed", lang, beds=beds, rate=f"{prop.extra_bed_rate:,}"))
             ctx.silent = True
             if prop.intro and st.get("intro_sent") != prop.id:
                 price = options[0].get("price_per_night") or round(
@@ -2155,13 +2183,13 @@ class ChatMixin:
             ((rt, o) for rt, o in fits if wanted and (wanted in rt.name.lower() or rt.name.lower() in wanted)), None)
         if chosen is None and (mix := bk.get("mix")):
             # a group over two room types (1 Basic + 1 Standard), figures from check_availability
-            if self._int(a, "extra_beds") or (a.get("early_checkin") and str(a.get("early_checkin")).lower()
-                                               not in ("false", "0", "no")):
-                return {"error": "extra beds / early check-in for a stay over two room types is arranged by the owner: "
+            if a.get("early_checkin") and str(a.get("early_checkin")).lower() not in ("false", "0", "no"):
+                return {"error": "early check-in for a stay over two room types is arranged by the owner: "
                                  "call talk_to_owner"}
             total, advance = sum(p["total"] for p in mix), sum(p["advance"] for p in mix)
             rooms = sum(p["rooms"] for p in mix)
-            bk["chosen"] = {"mix": mix, "rooms": rooms, "extra_beds": 0, "early": False, "total": total,
+            bk["chosen"] = {"mix": mix, "rooms": rooms, "extra_beds": sum(p.get("beds", 0) for p in mix),
+                            "early": False, "total": total,
                             "advance": advance, "turn": st["turn"]}
             label = " + ".join(f"{p['rooms']} {self.repo.get_room_type(p['room_type_id']).name}" for p in mix)
             leads.save_lead(self.repo, ctx.phone, self.clock.now(), room_type=label, rooms=rooms, stage="summary")
@@ -2178,7 +2206,14 @@ class ChatMixin:
             return {"error": "no room is free for these dates any more; the guest is told automatically. Reply exactly "
                              "[no reply]."}
         rt, options = chosen
-        rooms, beds = self._int(a, "rooms", options[0]), self._int(a, "extra_beds")
+        rooms = self._int(a, "rooms", options[0])
+        if rooms not in options:  # the guest asks for another number of rooms: allowed if it works (owner's rule)
+            ci_, co_ = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
+            plan = av.plan_rooms(rt, bk["adults"], bk["children"], self.repo.free_rooms(rt, ci_, co_, self.clock.now()),
+                                 rooms, bool(prop.extra_bed_rate))
+            if plan:
+                options = [plan[0]]
+        beds = self._int(a, "extra_beds") or self._beds_for(prop, rt, bk["adults"], bk["children"], rooms)
         early = bool(a.get("early_checkin")) and str(a.get("early_checkin")).lower() not in ("false", "0", "no")
         if rooms not in options:
             return {"error": f"{rooms} room(s) is not possible; choose one of {options}"}
@@ -2260,6 +2295,9 @@ class ChatMixin:
         rooms, guests = sum(x.rooms for x in parts), sum(x.adults + x.children for x in parts)
         total, paid = sum(x.total for x in parts), sum(x.paid_amount for x in parts)
         balance = sum(x.balance for x in parts)
+        if len(parts) > 1:  # every part's extra beds (a split group with 2 + 1 per room)
+            bed_cost = sum(int(m.group(1)) * (prop.extra_bed_rate if prop else 0) * x.nights for x in parts
+                           if (m := re.search(r"Extra beds: (\d+)", x.notes or "")))
         numbers = [n for x in parts for n in av.split_rooms(x.room_numbers)]
         label = ""
         if len(parts) > 1:
@@ -2400,7 +2438,8 @@ class ChatMixin:
         parts, types = [], []
         for p in chosen["mix"]:
             rt = self.repo.get_room_type(p["room_type_id"])
-            if rt is None or av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, p["rooms"]).total != p["total"]:
+            if rt is None or av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, p["rooms"],
+                                      p.get("beds", 0)).total != p["total"]:
                 bk.pop("chosen", None)
                 return {"error": "the price changed; call check_availability again"}
             rooms_left -= p["rooms"]
@@ -2411,7 +2450,8 @@ class ChatMixin:
             adults_left, children_left = adults_left - adults, children_left - children
             parts.append(Booking(prop.id, rt.id, phone, ci, co, adults, children, p["rooms"], p["total"], p["advance"], now,
                                  guest_name=name, language=lang, hold_expires_at=now + hold,
-                                 notes=f"Mobile: {display_phone(mobile)}"))
+                                 notes=f"Mobile: {display_phone(mobile)}" + (
+                                     f"; Extra beds: {p['beds']}" if p.get("beds") else "")))
             types.append((rt, p["rooms"]))
         label = self._mix_label(types)
         try:
@@ -2445,7 +2485,8 @@ class ChatMixin:
         leads.save_lead(self.repo, phone, now, stage="held", booking_id=parts[0].id,
                         from_city=(a.get("from_city") or "").strip()[:60] or None)
         q0 = av.quote(prop, types[0][0], self.repo.list_rate_rules(types[0][0].id), ci, co, 1)
-        ctx.summary_message = self._summary_text(prop, types[0][0], chosen["rooms"], 0, ci, co, q0,
+        ctx.summary_message = self._summary_text(prop, types[0][0], chosen["rooms"], chosen.get("extra_beds", 0),
+                                                 ci, co, q0,
                                                  bk["adults"] + bk["children"], name=name, mobile=mobile,
                                                  total=total, advance=advance, room_label=label)
         ctx.pay_message = t("pay", lang, id=parts[0].id, minutes=self.config.hold_minutes, advance=f"{advance:,}",
