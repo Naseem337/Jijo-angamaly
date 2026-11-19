@@ -263,11 +263,28 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
             out["persons"] = got["persons"]
         if "children" in got:
             out["children"] = got["children"]
+        if "rooms" in got:
+            out["rooms"] = got["rooms"]
     return out
 
 
 _KIDS = re.compile(r"\b(\d{1,2}|a|one|oru|ek|two|randu|rendu|do)\s*(?:small\s+)?(?:kids?|child(?:ren)?|kutti\w*|"
                    r"kuzhandhai\w*|bachch?[ae]|bachch?on|bab(?:y|ies))\b", re.IGNORECASE)
+
+
+_ROOMS_ASKED = re.compile(r"\b(\d{1,2}|one|two|three|four|five|six|oru|randu|rendu|moonu|moonnu|naalu|anju|"
+                          r"ek|do|teen|char|paanch)[ \t]*(?:rooms?|muri\w*|kamre|kamra|araigal)\b|"
+                          r"\brooms?[ \t]*[:=-][ \t]*(\d{1,2})\b", re.IGNORECASE)
+_ROOM_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "oru": 1, "randu": 2, "rendu": 2,
+                  "moonu": 3, "moonnu": 3, "naalu": 4, "anju": 5, "ek": 1, "do": 2, "teen": 3, "char": 4, "paanch": 5}
+
+
+def _rooms_in(text: str) -> int:
+    found = [m.group(1) or m.group(2) for m in _ROOMS_ASKED.finditer(text)]
+    if not found:
+        return 0
+    n = found[-1].lower()
+    return int(n) if n.isdigit() else _ROOM_WORD_NUM.get(n, 0)
 
 
 def _kids_in(text: str) -> int:
@@ -343,6 +360,8 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
         out["persons"] = persons[-1]  # the latest number they gave
     if kids := _kids_in(text):
         out["children"] = kids  # 'pinne oru kuttiyum' / '2 kids': children on top of the persons
+    if 0 < (rooms := _rooms_in(text)) <= 40:
+        out["rooms"] = rooms  # '4 rooms': the group wants that many rooms (owner, 2026-11-19)
     return out
 
 
@@ -1092,6 +1111,7 @@ class ChatMixin:
         if got.get("check_in") and got.get("check_out") and got.get("persons"):
             self._tool_check(ctx, {"place": self._place_label(prop), "check_in": got["check_in"].isoformat(),
                                    "check_out": got["check_out"].isoformat(), "adults": got["persons"],
+                                   "children": got.get("children", 0), "rooms": got.get("rooms", 0),
                                    "language": st.get("style")})
             self._save(phone, st)
             return  # rooms available / not, glimpse, photos and the name ask follow from ctx.after
@@ -1207,6 +1227,8 @@ class ChatMixin:
             got["persons"] = bk["adults"]
         if bk.get("children") and "children" not in got:
             got["children"] = bk["children"]
+        if bk.get("rooms") and "rooms" not in got:
+            got["rooms"] = bk["rooms"]
         return got
 
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
@@ -1647,7 +1669,8 @@ class ChatMixin:
         if got.get("check_in") and got.get("check_out") and got.get("persons"):
             self._tool_check(ctx, {"place": self._place_label(prop), "check_in": got["check_in"].isoformat(),
                                    "check_out": got["check_out"].isoformat(), "adults": got["persons"],
-                                   "children": got.get("children", 0), "language": st.get("style")})
+                                   "children": got.get("children", 0), "rooms": got.get("rooms", 0),
+                                   "language": st.get("style")})
         elif got or force:
             self._ask_missing(ctx, got)
         self._save(phone, st)
@@ -1730,6 +1753,7 @@ class ChatMixin:
             if prop and got.get("check_in") and got.get("check_out") and got.get("persons"):
                 self._tool_check(ctx, {"place": self._place_label(prop), "check_in": got["check_in"].isoformat(),
                                        "check_out": got["check_out"].isoformat(), "adults": got["persons"],
+                                       "children": got.get("children", 0), "rooms": got.get("rooms", 0),
                                        "language": st.get("style")})
             else:
                 self._ask_missing(ctx, got)
@@ -2006,7 +2030,7 @@ class ChatMixin:
         if adults < 1 or adults + children > av.MAX_GUESTS:
             return {"error": f"guests must be between 1 and {av.MAX_GUESTS}"}
         bk = {"property_id": prop.id, "check_in": ci.isoformat(), "check_out": co.isoformat(),
-              "adults": adults, "children": children}
+              "adults": adults, "children": children, "rooms": self._int(a, "rooms")}
         st["bk"] = bk
         wanted = self._int(a, "rooms")
         leads.save_lead(self.repo, ctx.phone, self.clock.now(), property_id=prop.id, check_in=ci.isoformat(),

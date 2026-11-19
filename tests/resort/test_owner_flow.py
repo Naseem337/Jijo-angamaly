@@ -243,3 +243,42 @@ def test_old_room_type_photos_move_to_each_room_number(tmp_path):
                                       number_photos={"109": ["own.jpg"]}))
     moved = ResortRepo(tmp_path / "m.sqlite3").get_room_type(rt.id)  # the move runs when the app starts
     assert moved.photo_urls == [] and moved.number_photos == {"108": ["a.jpg", "b.jpg"], "109": ["own.jpg"]}
+
+
+def _live_setup(w):
+    """Today's live dashboard: Standard 1 (108, 109), Tiny Cottage 2 (103, 104), Basic 3 (106, 107)."""
+    for key, prio, nums in (("Standard", 1, ["108", "109"]), ("2", 2, ["103", "104"]), ("Basic", 3, ["106", "107"])):
+        rt = w.repo.get_room_type(w.rooms[key].id)
+        w.repo.save_room_type(RoomType(**{**rt.__dict__, "priority": prio, "room_list": nums}))
+
+
+def test_standard_full_a_group_needing_4_rooms_gets_cottage_and_basic(live):
+    """Owner, 2026-11-19: both Standard rooms booked, a client needs 4 rooms -> the remaining rooms: 2 Tiny Cottage
+    + 2 Basic (by priority), one booking flow, and the room numbers 103, 104, 106, 107 on payment."""
+    w = live
+    _live_setup(w)
+    full(w, "Standard")  # 108 and 109 are booked on 12-14 Dec
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 8 people, 4 rooms")
+    bk = w.repo.get_state(PHONE)["bk"]
+    names = {rt.id: key for key, rt in w.rooms.items()}
+    assert [(names[p["room_type_id"]], p["rooms"]) for p in bk["mix"]] == [("2", 2), ("Basic", 2)]
+    assert "BOT: Yes, rooms are available for your dates." in transcript(w)
+    chat(w, "Asha 9847012345")
+    summary = next(x for x in w.wa.texts(PHONE) if x.startswith("Following are the glimpse of your enquiry"))
+    assert "4 Rooms" in summary and "*2 2 Bedroom Tiny Kerala Cottage + 2 Beach View Basic Room*" in summary
+    parts = w.repo.list_bookings(phone=PHONE)
+    assert w.bot.mark_paid(booking_id=parts[0].id) == "paid"
+    numbers = sorted(n for b in w.repo.list_bookings(phone=PHONE) for n in b.room_numbers.split(", "))
+    assert numbers == ["103", "104", "106", "107"]
+    confirmation = next(x for x in w.wa.texts(PHONE) if "Booking Confirmed" in x)
+    assert "#103" in confirmation and "#107" in confirmation
+
+
+def test_standard_full_8_people_no_room_count_gets_the_fewest_remaining_rooms(live):
+    w = live
+    _live_setup(w)
+    full(w, "Standard")
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 8 people")
+    bk = w.repo.get_state(PHONE)["bk"]
+    names = {rt.id: key for key, rt in w.rooms.items()}
+    assert [(names[p["room_type_id"]], p["rooms"]) for p in bk["mix"]] == [("2", 2), ("Basic", 1)]  # 3 rooms hold 8
