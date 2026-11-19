@@ -1645,7 +1645,7 @@ class ChatMixin:
             queued = True
         quiet = NO_REPLY in reply.lower()
         if quiet and not queued and GREETING.match(text):  # a mid-chat "hi" always gets an answer
-            reply, quiet = t("greet_again", st.get("lang", "en")), False
+            reply, quiet = t("greet", st.get("lang", "en")), False  # always the owner's greeting
         if (quiet and not queued and BOOKING_WISH.search(text) and not NOT_NOW.search(text)
                 and not (st.get("bk") or {}).get("check_in")):
             # 'need a room' / 'resort venam' left unanswered by the AI: the next fixed step goes (client's flow)
