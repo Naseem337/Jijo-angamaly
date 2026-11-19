@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from app.resort.availability import allocate_rooms, free_units
-from app.resort.models import (BLOCKING, Booking, Charge, ChatMessage, DashboardUser, Guest, IdProof, Property,
+from app.resort.models import (BLOCKING, Booking, new_id, Charge, ChatMessage, DashboardUser, Guest, IdProof, Property,
                                RateRule, Refund, RoomType)
 
 
@@ -234,6 +234,9 @@ class ResortRepo:
         return self.create_hold(b, now)
 
     def _insert_booking(self, db: sqlite3.Connection, b: Booking) -> None:
+        # ids are short (RB- + 6 hex): with thousands of bookings two can clash, so a taken id is drawn again
+        while db.execute("SELECT 1 FROM bookings WHERE id=?", (b.id,)).fetchone():
+            b.id = new_id("RB")
         db.execute(
             "INSERT INTO bookings(id, property_id, room_type_id, guest_phone, guest_name, language, check_in, "
             "check_out, adults, children, rooms, total, advance, status, created_at, hold_expires_at, paid_at, "
@@ -421,6 +424,8 @@ class ResortRepo:
     # ------------------------------------------------------------------ folio, refunds, ID proofs
 
     def add_charge(self, c: Charge) -> Charge:
+        while self._one("SELECT 1 FROM charges WHERE id=?", (c.id,)):  # short ids: draw again on a clash
+            c.id = new_id("CH")
         self._run("INSERT INTO charges(id, booking_id, description, amount, at, category, added_by) VALUES(?,?,?,?,?,?,?)",
                   (c.id, c.booking_id, c.description, c.amount, _iso(c.at), c.category, c.added_by))
         return c
@@ -430,10 +435,26 @@ class ResortRepo:
                        r["added_by"], r["id"])
                 for r in self._all("SELECT * FROM charges WHERE booking_id=? ORDER BY at", (booking_id,))]
 
+    def charges_by_booking(self) -> dict[str, list[Charge]]:
+        """Every charge, grouped by booking (one query, for reports over many bookings)."""
+        out: dict[str, list[Charge]] = {}
+        for r in self._all("SELECT * FROM charges ORDER BY at"):
+            out.setdefault(r["booking_id"], []).append(Charge(r["booking_id"], r["description"], r["amount"],  # type: ignore[arg-type]
+                                                               _dt(r["at"]), r["category"], r["added_by"], r["id"]))
+        return out
+
+    def refunds_by_booking(self) -> dict[str, list[Refund]]:
+        out: dict[str, list[Refund]] = {}
+        for r in self.list_refunds():
+            out.setdefault(r.booking_id, []).append(r)
+        return out
+
     def delete_charge(self, charge_id: str) -> None:
         self._run("DELETE FROM charges WHERE id=?", (charge_id,))
 
     def add_refund(self, r: Refund) -> Refund:
+        while self._one("SELECT 1 FROM refunds WHERE id=?", (r.id,)):  # short ids: draw again on a clash
+            r.id = new_id("RF")
         self._run("INSERT INTO refunds(id, booking_id, amount, at, method, ref, note, by) VALUES(?,?,?,?,?,?,?,?)",
                   (r.id, r.booking_id, r.amount, _iso(r.at), r.method, r.ref, r.note, r.by))
         return r

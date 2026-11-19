@@ -7,6 +7,7 @@ import io
 import json
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -213,7 +214,7 @@ def bookings_list(request: Request, auth: Auth = Depends(require_user)):
     items = _filtered_bookings(repo, auth, params)
     props, rooms = _names(repo)
     # the tabs count everything the other filters let through, whatever the status (owner's reference, 2026-11-18)
-    every = _filtered_bookings(repo, auth, {k: v for k, v in params.items() if k != "status"})
+    every = items if not params.get("status") else _filtered_bookings(repo, auth, {k: v for k, v in params.items() if k != "status"})
     counts = {s: sum(1 for b in every if b.status == s) for s in STATUSES}
     today, now = today_ist(), now_utc()
     month = [b for b in _visible_bookings(repo, auth, property_id=params.get("property_id") or None, limit=5000)
@@ -225,12 +226,23 @@ def bookings_list(request: Request, auth: Auth = Depends(require_user)):
         items = sorted(items, key=lambda b: b.check_in)
     elif sort == "amount":
         items = sorted(items, key=lambda b: -b.total)
-    return page(request, "bookings.html", auth, nav="bookings", items=items, props=props, rooms=rooms,
-                my_props=auth.properties(repo), statuses=STATUSES, f=params, methods=METHODS,
+    # 100 rows a page (load test 2026-11-19: 3000 bookings made a 1.7 MB page); totals still cover every match
+    per_page, pages = BOOKINGS_PER_PAGE, max(1, -(-len(items) // BOOKINGS_PER_PAGE))
+    page_no = min(max(1, _int(params, "page", 1, 1, 100000)), pages)
+    shown = items[(page_no - 1) * per_page: page_no * per_page]
+    keep = urlencode({k: v for k, v in params.items() if k != "page" and v})
+    return page(request, "bookings.html", auth, nav="bookings", items=shown, props=props, rooms=rooms,
+                my_props=auth.properties(repo), statuses=STATUSES, f=params, methods=METHODS, match_count=len(items),
+                page_no=page_no, pages=pages, page_query=keep,
                 query=str(request.query_params), collected=sum(b.paid_amount for b in items), counts=counts,
                 total_count=len(every), month_collected=sum(b.paid_amount for b in month),
                 month_count=len(month), waiting=waiting, waiting_sum=sum(b.advance for b in waiting),
                 upcoming_count=len(upcoming))
+
+
+BOOKINGS_PER_PAGE = 100
+MAX_PHOTOS = 20  # per property and per room type
+CSV_BOM = chr(0xFEFF)  # so Excel reads Malayalam / Tamil names as UTF-8
 
 
 def _csv_cell(value: object) -> str:
@@ -255,7 +267,7 @@ def bookings_csv(request: Request, auth: Auth = Depends(require_user)):
                          _csv_cell(b.payment_ref), b.razorpay_payment_id, b.paid_amount, b.balance,
                          _csv_cell(b.received_by),
                          b.paid_at.astimezone(IST).strftime("%Y-%m-%d %H:%M") if b.paid_at else "", b.created_at])
-    return Response(out.getvalue(), media_type="text/csv",
+    return Response(CSV_BOM + out.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": 'attachment; filename="bookings.csv"'})
 
 
@@ -736,9 +748,15 @@ def report_collections(request: Request, auth: Auth = Depends(require_user)):
     ids = {b.id for b in mine}
     report = billing.collections(mine, [r for r in repo.list_refunds() if r.booking_id in ids], start, end)
     owing = []
-    for b in mine:
-        if b.status in ("paid", "checked_in") and b.check_in <= end:
-            f = _folio(repo, b)
+    due = [b for b in mine if b.status in ("paid", "checked_in") and b.check_in <= end]
+    if due:  # one query for all charges and one for all refunds (load test 2026-11-19: it was 4 queries per booking)
+        charges_by, refunds_by = repo.charges_by_booking(), repo.refunds_by_booking()
+        props_all = {p.id: p for p in repo.list_properties(active_only=False)}
+        _, rooms = _names(repo)
+        for b in due:
+            rt = rooms.get(b.room_type_id)
+            f = billing.folio(b, charges_by.get(b.id, []), refunds_by.get(b.id, []), props_all.get(b.property_id),
+                              rt.name if rt else "")
             if f.balance > 0:
                 owing.append((b, f.balance))
     owing.sort(key=lambda row: row[0].check_in)
@@ -754,7 +772,7 @@ def report_collections(request: Request, auth: Auth = Depends(require_user)):
         writer.writerow(["Collected", "", "", "", "", report.collected])
         writer.writerow(["Refunded", "", "", "", "", -report.refunded])
         writer.writerow(["Net", "", "", "", "", report.net])
-        return Response(out.getvalue(), media_type="text/csv",
+        return Response(CSV_BOM + out.getvalue(), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="collections-{start}-{end}.csv"'})
     props, _ = _names(repo)
     return page(request, "report_collections.html", auth, nav="reports", r=report, start=start, end=end, f=q, today=today,
@@ -910,8 +928,13 @@ async def _apply_photos(request: Request, auth: Auth, photos: list[str]) -> tupl
     if action == "cover" and ref in photos:
         return [ref] + [x for x in photos if x != ref], "Cover photo set"
     files = [f for f in form.getlist("photos") if hasattr(f, "read")]
+    room = MAX_PHOTOS - len(photos)  # photos past the limit were saved, counted as added, then dropped (2026-11-19)
+    if files and room <= 0:
+        return photos, f"!This already has {MAX_PHOTOS} photos. Remove some first"
     added, problem = 0, ""
-    for upload in files[:12]:
+    if len(files) > min(12, room):
+        problem = f"only {min(12, room)} could be added (at most 12 at a time, {MAX_PHOTOS} in all)"
+    for upload in files[:min(12, room)]:
         try:
             photos = photos + [ph.save_photo(await upload.read())]
             added += 1
@@ -921,7 +944,7 @@ async def _apply_photos(request: Request, auth: Auth, photos: list[str]) -> tupl
         return photos, "!" + problem
     if not added:
         return photos, "!Choose one or more photos first"
-    return photos[:20], f"{added} photo{'s' if added != 1 else ''} added" + (f" ({problem})" if problem else "")
+    return photos, f"{added} photo{'s' if added != 1 else ''} added" + (f" ({problem})" if problem else "")
 
 
 @router.post("/properties/{property_id}/photos")
@@ -1143,9 +1166,14 @@ def guests_list(request: Request, auth: Auth = Depends(require_user)):
                              ld.get("check_out") or "", ld.get("adults") or "", ld.get("children") or "", ld.get("rooms") or "",
                              _csv_cell(ld.get("room_type") or ""), _csv_cell(ld.get("from_city") or ""), r["label"],
                              g.last_seen.astimezone(IST).strftime("%Y-%m-%d %H:%M") if g.last_seen else ""])
-        return Response(out.getvalue(), media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="guests-and-leads.csv"'})
+        return Response(CSV_BOM + out.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="guests-and-leads.csv"'})
     return page(request, "guests.html", auth, nav="guests", rows=rows, q=q, stage=stage, query=str(params),
-                counts={k: sum(1 for r in _lead_rows(repo, auth) if r["key"] in v) for k, v in STAGE_FILTERS.items()})
+                counts=_stage_counts(rows if not (q or stage) else _lead_rows(repo, auth)))
+
+
+def _stage_counts(rows: list[dict]) -> dict[str, int]:
+    """Guests per stage tab, from ONE list (load test 2026-11-19: it was rebuilt once per tab)."""
+    return {k: sum(1 for r in rows if r["key"] in v) for k, v in STAGE_FILTERS.items()}
 
 
 @router.get("/guests/{phone}")
@@ -1214,6 +1242,9 @@ async def conversation_send(phone: str, request: Request, auth: Auth = Depends(r
     if error:
         raise redirect(toast_url(url, f"!{error}"))
     repo.add_chat(ChatMessage(phone, "out", text, now_utc(), source="staff"))
+    # a staff reply takes the chat over, like a reply from the WhatsApp app (2026-11-07): the bot steps back and
+    # comes back by itself after 24 h of staff silence, or with Resume
+    repo.set_paused(phone, True, now_utc())
     raise redirect(toast_url(url, "Sent"))
 
 

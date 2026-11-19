@@ -22,7 +22,7 @@
 
 <form class="mg-tools" method="get">
   <input type="hidden" name="status" value="{{ f.get('status', '') }}">
-  <span class="mg-count">{{ items|length }} booking{{ 's' if items|length != 1 }}</span>
+  <span class="mg-count">{{ match_count }} booking{{ 's' if match_count != 1 }}</span>
   <label class="mg-search">{{ icon('search') }}<input name="q" placeholder="Search name or phone…" value="{{ f.get('q','') }}"></label>
   <select name="sort" onchange="this.form.submit()" aria-label="Sort"><option value="">Newest first</option>
     <option value="stay" {{ 'selected' if f.get('sort') == 'stay' }}>By stay date</option><option value="amount" {{ 'selected' if f.get('sort') == 'amount' }}>By amount</option></select>
@@ -46,5 +46,7 @@
   <td class="r"><a class="mg-dots" href="{{ BASE }}/bookings/{{ b.id }}" aria-label="Open">•••</a></td></tr>
 {% else %}<tr><td colspan="8">{{ empty("No bookings match", "book", BASE ~ "/bookings/new", "Create a booking") }}</td></tr>{% endfor %}
 </tbody></table>
-<div class="mg-foot"><span>{{ items|length }} shown</span><span>{{ collected|rupees }} collected</span></div></div>
+<div class="mg-foot"><span>{{ items|length }} of {{ match_count }}{% if pages > 1 %} · page {{ page_no }} of {{ pages }}{% endif %}</span>
+  {% if pages > 1 %}<span class="mg-pager">{% if page_no > 1 %}<a class="btn sm" href="?{{ page_query }}{{ '&' if page_query }}page={{ page_no - 1 }}">‹ Previous</a>{% endif %}{% if page_no < pages %}<a class="btn sm" href="?{{ page_query }}{{ '&' if page_query }}page={{ page_no + 1 }}">Next ›</a>{% endif %}</span>{% endif %}
+  <span>{{ collected|rupees }} collected</span></div></div>
 {% endblock %}

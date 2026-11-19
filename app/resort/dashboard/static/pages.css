@@ -133,3 +133,4 @@ html body a,html body a:hover,html body a:focus{text-decoration:none}
 /* photos: compact grid */
 #photos .gallery{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
 #photos .ph img{aspect-ratio:4/3;object-fit:cover}
+.mg-pager{display:flex;gap:6px}

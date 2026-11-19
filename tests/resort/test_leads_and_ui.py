@@ -52,7 +52,7 @@ def test_guests_page_lists_leads_with_status_and_filters(env):
     interested = client.get(f"{BASE}/guests", params={"stage": "interested"}).text
     assert "Maya" in interested and "Ravi" not in interested and "Asha" not in interested
     assert "Kochi" in client.get(f"{BASE}/guests", params={"q": "kochi"}).text
-    rows = list(csv.reader(io.StringIO(client.get(f"{BASE}/guests?format=csv").text)))
+    rows = list(csv.reader(io.StringIO(client.get(f"{BASE}/guests?format=csv").text.lstrip(chr(0xFEFF)))))
     assert rows[0][:5] == ["Name", "Phone", "Language", "Place", "Check-in"]
     maya = next(r for r in rows[1:] if r[0] == "Maya")
     assert maya[3] == "Pozhiyoram Resort" and maya[4] == "2026-12-05" and maya[10] == "Kochi" and maya[11] == "Asked for dates"

@@ -252,7 +252,7 @@ def test_csv_and_filter_have_payment_fields(env):
     repo.create_hold(other, now_utc())
     client, token = login(app)
     _action(client, token, b, method="cash", amount="4000")
-    rows = list(csv.reader(io.StringIO(client.get(f"{BASE}/bookings/export.csv").text)))
+    rows = list(csv.reader(io.StringIO(client.get(f"{BASE}/bookings/export.csv").text.lstrip(chr(0xFEFF)))))
     header = rows[0]
     for col in ("Payment method", "Payment reference", "Razorpay payment id", "Amount paid", "Balance", "Received by"):
         assert col in header

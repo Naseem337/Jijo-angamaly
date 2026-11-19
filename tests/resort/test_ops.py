@@ -245,7 +245,7 @@ def test_collection_report_by_method_staff_and_refunds(env):
     client, _ = login(app)
     page = client.get(f"{BASE}/reports/collections")
     assert page.status_code == 200 and "₹6,000" in page.text and "staff1@x.com" in page.text
-    rows = list(csv.reader(io.StringIO(client.get(f"{BASE}/reports/collections?format=csv").text)))
+    rows = list(csv.reader(io.StringIO(client.get(f"{BASE}/reports/collections?format=csv").text.lstrip(chr(0xFEFF)))))
     assert rows[0][:3] == ["Date (IST)", "Type", "Booking"]
     assert any(r[:1] == ["Net"] and r[-1] == "5600" for r in rows)
     assert any(len(r) > 1 and r[1] == "refund" and r[5] == "-400" for r in rows)
