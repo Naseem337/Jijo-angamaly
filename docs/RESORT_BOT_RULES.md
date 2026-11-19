@@ -4,6 +4,28 @@ These rules are enforced by our own prompt and code (`app/resort/chat.py`, `flow
 Changing `LLM_CHAIN` (for example to DeepSeek) keeps them. After changing the model, run
 `.venv\Scripts\python.exe scripts\live_eval_resort.py` and read `data/eval/resort_<lang>.txt`.
 
+## LATEST RULES (owner, 2026-11-19): these win over anything older below
+Tested in `tests/resort/test_owner_flow.py` (the whole flow with the live room setup) and
+`tests/resort/test_mixed_and_today.py`, `test_room_photos.py`, `test_never_silent.py`.
+1. **Order after the form:** "Yes, rooms are available for your dates." -> the glimpse -> the GENERAL photos (first 6)
+   -> the photos of ONLY the one room offered -> "Please share your name and mobile number to proceed."
+2. **The room offered = top priority AND free on the guest's dates.** Never photos of a room that is full, never photos
+   of a second room type. Two room types only when one group is split over them (below).
+3. **Photos asked at any stage:** the free room's own photos by priority (before dates: the top-priority room's), then
+   the open step again. "Other room photos" = the next FREE room by priority, else "Sorry, no other room is free on your
+   dates." A named room that is full: "Sorry, <room> is not free on your dates." (no photos).
+4. **Mixed rooms:** a group that the top room cannot take alone gets its free rooms first, then the next room type
+   (4 guests, 1 Basic left -> 1 Basic + 1 Standard), one summary, one payment link, one confirmation. Never more rooms
+   than one room type would need (10 guests -> 3 Family Suites). The next guest silently gets the next free room.
+5. **Dates and persons are read in code, not by the AI:** today / tomorrow / innu / naale / aaj / "for a day" /
+   "2 disam" / "2 ദിവസം" / "3 പേരാണ്" / "oru kutti" (child). The NEWEST date wins; only details given since the last
+   full form count. Missing parts -> the form with only the missing lines.
+6. **Never "fully booked" without a real room check** (the AI once made it up).
+7. **Name and number:** a name sent alone right after the name question is the name (never an old saved name).
+8. **Nothing twice:** a re-check for the same dates (e.g. a child added) repeats nothing.
+9. **Switched-off resort (Kanthalloor):** "Sorry, <town> is currently not available."
+10. **A final "ok":** after 10 s of silence, "Is there anything else?" once; "no" / "nothing" then gets no reply.
+
 ## Booking flow (client, 2026-11-17; replaces the older order below where they differ)
 1. "Hi" -> "Hi, How may I assist you?"
 2. Wants a resort -> fixed (`ask_location` tool) "Sure, Kindly confirm the Location 📍 / Alleppey or Kanthalloor ?" (exact, client 2026-11-18; towns from the properties in the dashboard; a new property is added automatically). On every fixed step the AI's own line is not sent. If the AI asks which location in its own words (a question naming 2+ of our towns), the code sends this fixed question instead (`_own_location_question`).

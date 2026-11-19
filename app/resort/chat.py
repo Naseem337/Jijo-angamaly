@@ -709,7 +709,8 @@ class ChatMixin:
             sent = self._sent_photos(phone)
             others = [rt for rt in free if rt is not current]
             fresh = [rt for rt in others if any(r not in sent for r in rt.photo_urls)]
-            return ((fresh or others)[0], "") if others else (None, "no_other_room")
+            # every other free room was already shown: say so, never the same photos again or silence
+            return (fresh[0], "") if fresh else (None, "no_other_room")
         return current, ""
 
     def _photos_now(self, phone: str, st: dict[str, Any], text: str) -> str | None:
