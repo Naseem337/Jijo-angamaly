@@ -11,23 +11,20 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
-from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from app.core.clock import IST
 from app.core.phone import try_normalize_phone
 from app.resort import availability as av
 from app.resort import billing, refunds, stay
-from app.resort.invoice_pdf import build_invoice_pdf, invoice_filename
 from app.resort.dashboard import integrations
 from app.resort.dashboard.deps import (BASE, COOKIE, HERE, Auth, current_property, form_of, get_repo,
                                        make_session, now_utc, page, require_owner, require_user, templates, toast_url)
 from app.resort.db import SoldOut, check_password, hash_password
 from app.resort.paying import DESK_METHODS, METHODS, PaymentError, apply_payment, history, method_label
 from app.resort.models import (Booking, Charge, ChatMessage, DashboardUser, Property, RateRule, RoomType)
-from app.settings import get_settings
 
 router = APIRouter(prefix=BASE)
-public_router = APIRouter(prefix="/resort")  # the signed invoice link a guest opens without logging in
+public_router = APIRouter(prefix="/resort")  # pages opened without logging in (the uploaded photos)
 
 STATUSES = ["hold", "paid", "checked_in", "checked_out", "failed", "expired", "cancelled"]
 PAID = billing.PAID_STATES
@@ -408,7 +405,7 @@ def booking_detail(booking_id: str, request: Request, auth: Auth = Depends(requi
                 id_state=stay.id_summary(proofs), id_types=stay.ID_TYPES, warnings=stay.check_in_warnings(b, f, proofs),
                 sugg_pct=pct, sugg_amount=amount, left_to_refund=refunds.refundable(b, refund_list),
                 refund_methods=refunds.REFUND_METHODS, categories=billing.CATEGORY_LABELS,
-                invoice_no=billing.invoice_number(b, prop), payments=billing.payments_of(b),
+                payments=billing.payments_of(b),
                 can_charge=b.status in ("paid", "checked_in"))
 
 
@@ -618,96 +615,25 @@ def id_view(booking_id: str, proof_id: str, request: Request, auth: Auth = Depen
         "Content-Disposition": "inline"})
 
 
-# --------------------------------------------------------------------------- invoice and receipt
+# --------------------------------------------------------------------------- receipt
 
 
-def _invoice_ctx(repo, b: Booking) -> dict:
+def _receipt_ctx(repo, b: Booking) -> dict:
     prop, rt = repo.get_property(b.property_id), repo.get_room_type(b.room_type_id)
     return {"b": b, "prop": prop, "rt": rt, "f": _folio(repo, b, prop, rt), "payments": billing.payments_of(b),
             "refund_list": repo.list_refunds(b.id), "invoice_no": billing.invoice_number(b, prop),
             "guest": repo.get_guest(b.guest_phone), "issued": now_utc()}
 
 
-def _invoice_serializer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(get_settings().session_secret, salt="resort-invoice")
-
-
-INVOICE_LINK_SECONDS = 7 * 24 * 3600
-
-
-def invoice_token(b: Booking) -> str:
-    return _invoice_serializer().dumps({"b": b.id})
-
-
-def _public_base(request: Request) -> str:
-    import os
-    configured = os.environ.get("RESORT_PUBLIC_URL", "").rstrip("/")
-    if configured:
-        return configured
-    base = str(request.base_url).rstrip("/")
-    return base.replace("http://", "https://") if "localhost" not in base and "127.0.0.1" not in base else base
-
-
-@router.get("/bookings/{booking_id}/invoice")
-def invoice_page(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
-    repo = get_repo()
-    b = _booking(repo, auth, booking_id)
-    return templates.TemplateResponse(request, "invoice.html", {**_invoice_ctx(repo, b), "public": False,
-                                                                   "BASE": BASE, "csrf": auth.csrf})
-
-
 @router.get("/bookings/{booking_id}/receipt/{n}")
 def receipt_page(booking_id: str, n: int, request: Request, auth: Auth = Depends(require_user)):
     repo = get_repo()
     b = _booking(repo, auth, booking_id)
-    ctx = _invoice_ctx(repo, b)
+    ctx = _receipt_ctx(repo, b)
     payment = next((p for p in ctx["payments"] if p.n == n), None)
     if payment is None:
         raise HTTPException(404, "Receipt not found")
     return templates.TemplateResponse(request, "receipt.html", {**ctx, "payment": payment, "BASE": BASE})
-
-
-@router.post("/bookings/{booking_id}/send-invoice")
-async def invoice_send(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
-    await form_of(request, auth)
-    repo = get_repo()
-    b = _booking(repo, auth, booking_id)
-    ctx = _invoice_ctx(repo, b)
-    # the invoice itself as a PDF file, with no text message around it (owner, 2026-11-18)
-    name = invoice_filename(ctx["invoice_no"])
-    error = integrations.send_staff_document(b.guest_phone, build_invoice_pdf(ctx), name)
-    if error:
-        raise redirect(toast_url(_url(b), f"!{error}"))
-    repo.add_chat(ChatMessage(b.guest_phone, "out", f"[invoice] {name}", now_utc(), source="staff"))
-    raise redirect(toast_url(_url(b), "Invoice PDF sent on WhatsApp"))
-
-
-@router.get("/bookings/{booking_id}/invoice.pdf")
-def invoice_pdf(booking_id: str, request: Request, auth: Auth = Depends(require_user)):
-    """Download the same PDF the guest gets."""
-    repo = get_repo()
-    b = _booking(repo, auth, booking_id)
-    ctx = _invoice_ctx(repo, b)
-    name = invoice_filename(ctx["invoice_no"])
-    return Response(build_invoice_pdf(ctx), media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="{name}"'})
-
-
-@public_router.get("/invoice/{token}")
-def public_invoice(token: str, request: Request):
-    try:
-        booking_id = _invoice_serializer().loads(token, max_age=INVOICE_LINK_SECONDS)["b"]
-    except (BadSignature, KeyError, TypeError):
-        raise HTTPException(404, "This invoice link is not valid or has expired") from None
-    repo = get_repo()
-    b = repo.get_booking(booking_id)
-    if b is None:
-        raise HTTPException(404, "Invoice not found")
-    resp = templates.TemplateResponse(request, "invoice.html", {**_invoice_ctx(repo, b), "public": True, "BASE": BASE,
-                                                                  "csrf": ""})
-    resp.headers["Cache-Control"] = "no-store"
-    resp.headers["X-Robots-Tag"] = "noindex"
-    return resp
 
 
 # --------------------------------------------------------------------------- arrivals and departures

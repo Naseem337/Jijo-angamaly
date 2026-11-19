@@ -515,7 +515,7 @@ def test_system_prompt_has_the_rules_and_facts(world):
     system = w.llm.calls[0].system
     assert "9497861924" in system and "9995855789" in system and "https://maps.app.goo.gl/abc" in system
     assert "Never ask which language" in system and "Manglish" in system and "Hinglish" in system
-    assert "call the owner" in system and "NEGOTIATION" in system and "Never offer a" in system
+    assert "the owner does it" in system and "NEGOTIATION" in system and "Never offer a" in system
     assert "₹4,000" not in system and "Extra bed: ₹500" in system  # prices only ever come from the tools
     assert "Kanthalloor, Munnar" in system and "2026-11-02 (Monday)" in system
 
@@ -884,7 +884,7 @@ def test_a_confirmed_booking_closes_the_chat_and_the_next_message_starts_fresh(w
     hold(w, rooms=1)
     b = w.repo.list_bookings(phone=GUEST)[0]
     w.bot.mark_paid(booking_id=b.id)
-    w.bot._log(GUEST, "[invoice] Invoice-INV-2026-X.pdf")  # staff sent the PDF again from the dashboard
+    w.bot._log(GUEST, "[invoice] Invoice-INV-2026-X.pdf")  # an old log row (the invoice feature is gone; old chats keep such rows)
     first = len(w.llm.calls)
     say(w, "is there parking?", GUEST, reply("Your booking is on hold. [invoice] Invoice-INV-2026-X.pdf"))
     seen = "\n".join(m.content for m in w.llm.calls[first].messages)  # what the AI was shown this turn
@@ -901,7 +901,6 @@ def test_after_payment_the_guest_gets_only_the_clients_confirmation_with_the_roo
     before = len(w.wa.to(GUEST))
     w.bot.mark_paid(booking_id=b.id)
     sent = w.wa.to(GUEST)[before:]
-    # the confirmation, then the invoice PDF (owner, 2026-11-18); no map line, no ID request
     # the confirmation, then the cancellation policy (owner, 2026-11-18); no invoice, no map line, no ID request
     assert [k for _, k, _ in sent] == ["text", "text"] and sent[1][2] == "Free cancellation 7 days before."
     w.bot.announce_paid(w.repo.get_booking(b.id))  # announced again by staff
@@ -1586,7 +1585,7 @@ def test_the_prompt_hides_rates_and_forbids_a_price_hike_story(world):
     assert "rate" not in system.lower().split("facts")[-1].replace("rated", "")  # no rate table among the facts
     assert "Never tell the guest that rates change" in system and "peak or high season" in system
     assert "Never quote a price from memory" in system
-    assert "NO essays" in system and "Each room type on its own line" in system
+    assert "NO essays" in system and "Never list room types" in system
 
 
 # --------------------------------------------------------------------------- found by playing the bot against the real AI

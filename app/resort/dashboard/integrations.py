@@ -45,25 +45,6 @@ def send_staff_text(phone: str, text: str) -> str | None:
         return f"Could not send: {exc}"
 
 
-def send_staff_document(phone: str, data: bytes, filename: str, mime: str = "application/pdf") -> str | None:
-    """Send a file (the invoice PDF) on WhatsApp as staff. Returns an error text, or None on success."""
-    try:
-        from app.resort import web  # type: ignore[attr-defined]
-        fn = getattr(web, "send_document", None)
-        if fn is not None:
-            fn(phone, data, filename)
-            return None
-        if not _whatsapp_ready():
-            return "WhatsApp is not connected yet"
-        from app.resort.services import get_services
-        wa = get_services().whatsapp
-        wa.send_document(phone, wa.upload_media(data, mime, filename), filename)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning("send_document failed: %s", exc)
-        return f"Could not send: {exc}"
-
-
 def announce_paid(booking: Booking) -> str | None:
     """Confirm a desk-recorded payment to the guest on WhatsApp and alert staff.
     Returns a note for staff if the guest could not be messaged, or None on success."""

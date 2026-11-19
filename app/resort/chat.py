@@ -556,9 +556,9 @@ TOOLS = [
         {"type": "object", "properties": {}}),
     ToolSpec(
         "send_photos",
-        "Send the guest photos of a resort (or of one room type) that the owner uploaded. ONLY when the guest's "
-        "message itself asks for photos, pictures, pics or images. Never for a town or resort name alone. The "
-        "photos are sent automatically after your reply; reply exactly [no reply].",
+        "Send the guest the owner's photos. ONLY when the guest's message itself asks for photos, pictures, pics or "
+        "images; never for a town or resort name alone. Which photos go is decided automatically by the owner's "
+        "rules; reply exactly [no reply].",
         {"type": "object", "properties": {
             "place": {"type": "string", "description": "the resort or town"},
             "room_type": {"type": "string", "description": "only if they asked to see one room type"}},
@@ -588,8 +588,8 @@ TOOLS = [
          "required": ["place", "check_in", "adults"]}),
     ToolSpec(
         "prepare_booking",
-        "Lock the room type and figures when the guest picks one of several room types, or asks for extra beds or "
-        "early check-in. Does not book anything and sends nothing.",
+        "Lock the room type and figures when the guest asks for a particular room type, extra beds or early "
+        "check-in. Does not book anything and sends nothing.",
         {"type": "object", "properties": {
             "room_type": {"type": "string", "description": "room type name as shown by check_availability"},
             "rooms": {"type": "integer"},
@@ -1141,13 +1141,10 @@ class ChatMixin:
 
     def _closed_facts(self) -> list[str]:
         """Resorts the guest may pick that have no online booking yet: the owner takes those."""
-        open_props = self._places()
-        fallback = open_props[0].contact_numbers if open_props else []
         out = []
         for p in self.repo.list_properties(active_only=False):
             if p.active:
                 continue
-            numbers = ", ".join(display_phone(n) for n in (p.contact_numbers or fallback)) or "not set"
             out.append(f"RESORT '{p.name}': currently not available. If the guest picks it, say only, in one short line, that it is currently not available")
         return out
 
@@ -1266,8 +1263,7 @@ class ChatMixin:
             "'room undo', 'evide', 'ethra aaya') is Manglish: answer in Manglish, in English letters only, NEVER in "
             "Malayalam script. Malayalam script gets Manglish too. English gets English. Never mix languages or "
             "languages in one reply; plain English words like room, booking, check-in, payment and price are fine "
-            "inside Manglish. Example: guest 'Alleppey il room undo' -> 'Und, Alleppey il rooms und. Ethra "
-            "aalkkaar und, ethra divasam?'\n"
+            "inside Manglish. Example: guest 'avde parking undo' -> 'Und, parking und.'\n"
             "- Hindi typed in English letters ('kitne log', 'room milega', 'theek hai') is Hinglish: answer in Hinglish "
             "(Hindi in English letters), NEVER in Malayalam or Manglish. Tamil in English letters ('irukka', 'venum') "
             "is Tanglish: answer in Tanglish.\n"
@@ -1288,15 +1284,14 @@ class ChatMixin:
             "location? Send the Maps link with a few words. Asked a yes/no question? Start with yes or no.\n"
             "- Say \"sir\" at most ONCE in the whole chat (\"madam\" only if they are clearly a woman), never again after that. "
             "Never bro, dear, da, chetta, chechi, machane or their name.\n"
-            "- Each room type on its own line when you list prices. Never one long paragraph.\n"
+            "- The resort offers ONE room, chosen by the owner's priority. Never list room types or their prices.\n"
             "- Every question you ask: ONE short line, at most 12 words, with no lead-in ('Got it', 'I see', 'Okay so'). "
             "Ask only ONE thing at a time. No lists of options, no emoji piles (one is fine).\n"
             "- Do not paste the property description. Do not mention offers, discounts or 'special' deals. Just "
             "state the price.\n"
             "- Never repeat details the guest already gave, except in the final summary.\n"
-            "- A 'hi' or 'hello' in the middle of a chat is NOT a new start and always gets a reply (never [no reply]): "
-            "use the chat so far and carry on from where you left off in one short line (for example the next thing "
-            "you still need, or 'Hi, how can I help?'). Never ask again what they already told you.\n"
+            "- A greeting ('hi', 'hello', 'Hi bro'), also in the middle of a chat, always gets exactly 'Hi, How may I "
+            "assist you?' (never [no reply]). Never ask again what they already told you.\n"
             "- Always polite, concise and to the point.\n"
             "- Talk ONLY about our resorts: rooms, prices, dates, bookings, payment, the stay, location and facilities. "
             "For anything else (general questions, other places, news, jokes, coding, personal chat) say politely in "
@@ -1309,7 +1304,7 @@ class ChatMixin:
             "THAT message.\n"
             "- VERY SIMPLE: easy everyday words a school child understands, short sentences, no fancy or formal "
             "phrases ('kindly', 'we would be delighted', 'nestled', 'serene'), no sales talk. Example: guest 'is it near "
-            "the beach?' -> 'Yes, right on the beach.'. Room lines look like 'Deluxe - <price from the tool>/night'.\n"
+            "the beach?' -> 'Yes, right on the beach.'\n"
             "- Reply only when it is necessary: a question, a request, a booking detail, a payment problem, a complaint, "
             "or an answer to something you asked. For anything else send no reply at all, answer with exactly "
             "[no reply]: 'ok', 'thanks', a thumbs up, compliments, jokes, 'will tell my family', 'let me check and "
@@ -1345,7 +1340,8 @@ class ChatMixin:
             "write the summary, the link, the advance amount or a percent yourself. If they say 'this number' "
             "or 'same number', pass mobile 'same'. If they give only the number (or 'same number') without a name, "
             "call create_booking anyway with an empty name: their WhatsApp name is used.\n"
-            "- Photos: when the guest asks for photos or to see the place or a room, call send_photos.\n"
+            "- Photos: only when the guest asks for photos, call send_photos and reply [no reply]; the photos are "
+            "chosen automatically.\n"
             "- ID proof: if asked, say only 'Please bring your ID proof while coming.' Never name ID types and never ask "
             "for an ID photo on WhatsApp.\n"
             "- Early check-in: only if the guest asks. Tell them the time and charge from the FACTS and pass "
@@ -1359,7 +1355,7 @@ class ChatMixin:
             "- Never tell the guest that rates change, that their dates are peak or high season, or that a price went "
             "up. Give only the total for their stay, and a per-night price only when the tool provides one. Never "
             "quote a price from memory: only from check_availability or prepare_booking. If they ask the price before "
-            "you know their dates, ask for the dates first.\n"
+            "you know their dates, call ask_stay_details.\n"
             "- Every price, date, room count and availability you state must come from the tool results or the "
             "FACTS below. Never calculate your own totals. Never invent amenities or policies. If you do not "
             "know something, say the owner will tell them and give the owner's number.\n"
@@ -1384,8 +1380,8 @@ class ChatMixin:
             "- If money was deducted but they got no confirmation, tell them not to pay again, that it normally "
             "shows within a few minutes, and give the owner's number. Never promise a refund.\n\n"
             "CANCELLATION, CHANGES AND REFUNDS\n"
-            "- You cannot cancel or change a booking or promise a refund. Politely ask them to call the owner and give "
-            "the owner's number(s) of the place they booked.\n\n"
+            "- You cannot cancel or change a booking or promise a refund: the owner does it. For a cancellation state "
+            "only the policy charge (see GUEST MEMORY).\n\n"
             "NEGOTIATION\n"
             "- Asking about offers, deals or the price is only a question, NOT a request to reduce. Just answer: the "
             "price for their dates (no dates yet: call ask_stay_details). Never say there is no offer, never "
@@ -1403,7 +1399,7 @@ class ChatMixin:
             "- Earlier bookings: if they ask about one, answer from the records or my_bookings in plain words: dates, place, rooms, whether it is confirmed, how much was paid and what is left to pay at the property. Paid and upcoming: say you can see it and be warm about their coming stay. Past: a warm thanks or welcome back. ON HOLD and still valid: tell them it is waiting for payment and offer the link (send_payment_link). Expired, cancelled or failed: say so kindly and offer to book again. Payment queries are answered politely and respectfully, never defensively.\n"
             "- When the guest asks for another room or a new stay while a paid booking is upcoming or in progress, ask in ONE short line, no lead-in like 'Got it' or 'I see': 'You have a booking on <their real dates from the records>. Is this a new one?' (max 12 words), then follow their answer. A request to CHANGE the dates or rooms of an existing booking is NOT a new booking: say in one short line that the owner will help (the owner is alerted automatically). To CANCEL: call my_bookings and tell them in one short line the charge from if_cancelled_today (e.g. '25% charge, Rs X refunded') and that the owner will confirm; for anything outside the policy call talk_to_owner. Never ask 'is this a new one?' for these. With only past stays, treat it as a new booking and add at most one warm welcome-back line.\n"
             "- A new booking always takes its dates, rooms and price from what the guest says now and from the tools, never from an earlier booking. Never paste an old payment link: only the send_payment_link tool sends one, and only for a booking still on hold.\n"
-            "- Warm and easy: one or two short lines, no forms, no jargon.\n"
+            "- Warm and easy: one or two short lines, no jargon.\n"
             "- Never address them by name.\n\n"
             "FACTS\n" + self._facts() + "\n\n" + self._guest_memory(phone, fresh) + "\n\n"
             + self._chosen_note(st) + self._language_note(st, text))
@@ -1469,7 +1465,7 @@ class ChatMixin:
         return merged
 
     def _greet(self, phone: str, st: dict[str, Any], text: str = "") -> str:
-        """Any plain greeting gets the client's own line: 'Hi, How can I assist you?' (no AI call)."""
+        """Any plain greeting gets the client's own line: 'Hi, How may I assist you?' (no AI call)."""
         self._text(phone, t("greet", st.get("lang", "en")))
         return "greeting"
 

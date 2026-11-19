@@ -1,5 +1,5 @@
 """Resort management dashboard. Mount with `app.include_router(router)`; the pages live under /resort/admin and
-the signed guest invoice link under /resort/invoice."""
+the uploaded photos under /resort/media."""
 
 from fastapi import APIRouter
 

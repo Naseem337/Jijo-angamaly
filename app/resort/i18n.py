@@ -51,7 +51,6 @@ S: dict[str, dict[str, str]] = {
     "price_line": _t(*["{room}: {per} per night, {total} for {nights} night{s}."] * 4),
     "rooms_ok": _t(*["Yes, rooms are available for your dates."] * 4),
     "rooms_none": _t(*["Sorry, rooms are not available for your dates."] * 4),
-    "greet_again": _t(*["Hi sir, how can I help you further?"] * 4),
     "anything_else": _t(*["Is there anything else?"] * 4),
     "noted": _t(*["Noted, rooms are still available."] * 4),
     "photos_sent": _t(*["All the photos are sent above."] * 4),
@@ -77,7 +76,6 @@ S: dict[str, dict[str, str]] = {
                "செக்-இன் {checkin_time} முதல். உங்களை வரவேற்கக் காத்திருக்கிறோம்.",
                "पेमेंट मिल गया। आपकी बुकिंग {id} कन्फर्म है!\n{property}\n{check_in} से {check_out}, {rooms} कमरे।\n"
                "चेक-इन {checkin_time} से। आपके स्वागत का इंतज़ार रहेगा।"),
-    "map_line": _t("Location: {url}", "ലൊക്കേഷൻ: {url}", "இருப்பிடம்: {url}", "लोकेशन: {url}"),
     "failed": _t("Looks like the payment didn't go through. Please try once more:",
                 'പേയ്മെന്റ് നടന്നില്ലെന്ന് തോന്നുന്നു. ഒന്നുകൂടി ശ്രമിക്കൂ:',
                 'கட்டணம் நடைபெறவில்லை போலிருக்கிறது. மீண்டும் முயற்சிக்கவும்:',
@@ -189,7 +187,6 @@ MN = {
     "ai_down": "Kshamikkanam, ippo answer tharaan pattiyilla. Njangalude team udan sahayikkum.",
     "voice_problem": "Kshamikkanam, aa voice note manasilaayilla. Type cheyyamo?",
     "unsupported": "Enikku text-um voice note-um maathrame vaayikkaan pattooo. Message type cheyyuka.",
-    "map_line": "Location: {url}",
     "id_body_first": "Thanks! Guest {n}/{m}-nte ID photo (Aadhaar, passport, licence allenkil voter ID) ayakkuka. Niyamam "
                      "aanu, stay kazhinju {days} divasathil delete cheyyum.\n\nAllenkil check-in-nu kaanichaal mathi.",
     "id_body_next": "Kitti, thanks! Guest {n}/{m}-nte ID photo koodi ayakkuka, allenkil bakkiyullavar check-in-nu kaanikkum ennu paranjaal mathi.",
@@ -205,8 +202,8 @@ for _key, _text in MN.items():
 
 # Tanglish (Tamil in English letters) and Hinglish (Hindi in English letters) for the fixed messages (owner,
 # 2026-11-18: Tamil and Hindi guests get their language everywhere, like Malayalam guests get Manglish). The greeting,
-# the location question and the form keep the owner's exact English wording for everyone; summaries, the booking
-# confirmation and the invoice stay English. Keys not listed here fall back to English.
+# the location question and the form keep the owner's exact English wording for everyone; summaries and the booking
+# confirmation stay English. Keys not listed here fall back to English.
 TN = {
     "discount": "Nalla news: owner ungalukku special price tharaanga. Pudhu total ₹{total}, ippo pay panna vendiya advance ₹{advance}.",
     "or": "illa",
@@ -222,7 +219,6 @@ TN = {
     "fill_form": "Mela irukkura details share pannunga?",
     "say_again": "Sorry, konjam short-a innoru thadava type pannunga?",
     "price_line": "{room}: oru night-ku {per}, {nights} night-ku total {total}.",
-    "greet_again": "Hi sir, innum enna help venum?",
     "anything_else": "Vera edhavadhu venuma?",
     "noted": "Sari, rooms innum available.",
     "photos_sent": "Ella photos-um mela anupitten.",
@@ -233,7 +229,6 @@ TN = {
     "ai_down": "Sorry, ippo reply panna mudiyala. Engal team seekiram help pannuvaanga.",
     "voice_problem": "Sorry, andha voice note puriyala. Type pannunga?",
     "unsupported": "Text-um voice note-um mattum thaan padikka mudiyum. Message type pannunga.",
-    "map_line": "Location: {url}",
     "opt_out": "Sari, inimel offers anuppa maattom. Thirumba venumna START nu reply pannunga.",
     "opt_in": "Welcome back! Inimel engal messages varum.",
     "fb_thanks": "{property}-la thangiyadhukku thanks! Nalla time-a irundhirukkum nu nambrom.",
@@ -255,7 +250,6 @@ HN = {
     "fill_form": "Upar wali details share kijiye?",
     "say_again": "Sorry, thoda chhota karke dobara type kijiye?",
     "price_line": "{room}: ek night ka {per}, {nights} night ka total {total}.",
-    "greet_again": "Hi sir, aur kya help kar sakte hain?",
     "anything_else": "Aur kuch chahiye?",
     "noted": "Theek hai, rooms abhi bhi available hain.",
     "photos_sent": "Saari photos upar bhej di hain.",
@@ -266,7 +260,6 @@ HN = {
     "ai_down": "Sorry, abhi jawab nahi de pa rahe. Hamari team jaldi help karegi.",
     "voice_problem": "Sorry, voice note samajh nahi aaya. Type kar denge?",
     "unsupported": "Hum sirf text aur voice note padh sakte hain. Message type kijiye.",
-    "map_line": "Location: {url}",
     "opt_out": "Theek hai, ab offers nahi bhejenge. Dobara chahiye to START reply kijiye.",
     "opt_in": "Welcome back! Ab aapko hamare messages milenge.",
     "fb_thanks": "{property} mein rukne ke liye thanks! Ummeed hai achha time raha.",

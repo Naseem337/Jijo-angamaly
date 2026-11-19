@@ -480,7 +480,6 @@ class BookingBot(IdProofMixin, ChatMixin):
         prop = self.repo.get_property(b.property_id)
         rt = self.repo.get_room_type(b.room_type_id)
         # The client's confirmation, then the cancellation policy, then the stay details (owner, 2026-11-18).
-        # No invoice is sent to the guest any more (owner, 2026-11-18).
         delivered = self._notify_guest(b, self._confirmed_text(b, prop, rt), "paid", self._params(b))
         if delivered and prop:
             for extra in (prop.policies, prop.stay_info):
@@ -526,23 +525,6 @@ class BookingBot(IdProofMixin, ChatMixin):
             st.pop(key, None)
         self._save(phone, st)
         self._log(phone, RESTART_MARK, "system")
-
-    def _send_invoice(self, b: Booking) -> bool:
-        """The invoice as a PDF document, once per conversation. A failure is logged and never blocks the booking."""
-        from app.resort.invoice_pdf import build_invoice_pdf, invoice_context, invoice_filename
-        try:
-            ctx = invoice_context(self.repo, self.repo.get_booking(b.id) or b, self.clock.now())
-            name = invoice_filename(ctx["invoice_no"])
-            note = f"[invoice] {name}"
-            if any(m.text == note for m in self.repo.list_chat(b.guest_phone, limit=300)):  # once ever, not per chat
-                return False
-            media_id = self.wa.upload_media(build_invoice_pdf(ctx), "application/pdf", name)
-            self.wa.send_document(b.guest_phone, media_id, name)
-            self._log(b.guest_phone, note, "system")
-            return True
-        except Exception:
-            log.exception("Invoice PDF for %s was not sent", b.id)
-            return False
 
     def payment_failed(self, *, booking_id: str = "", link_id: str = "", payment_id: str = "") -> str:
         b = (self.repo.get_booking(booking_id) if booking_id else None) or (

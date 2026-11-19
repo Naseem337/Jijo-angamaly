@@ -1,4 +1,4 @@
-"""Folio, invoices, cancellation and refunds, collection report, check-in / check-out and ID proofs."""
+"""Folio, invoice numbers, receipts, cancellation and refunds, collection report, check-in / check-out and ID proofs."""
 
 import csv
 import io
@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from app.resort import billing, refunds, stay
 from app.resort.dashboard import integrations, router
-from app.resort.dashboard import routes
 from app.resort.dashboard.deps import BASE, get_repo, now_utc
 from app.resort.dashboard.routes import today_ist
 from app.resort.db import hash_password
@@ -29,7 +28,6 @@ def no_whatsapp(monkeypatch):
     monkeypatch.setattr(integrations, "announce_cancelled", lambda b, amount: SENT.append(("cancelled", b.id)))
     monkeypatch.setattr(integrations, "announce_checked_out", lambda b: SENT.append(("checked_out", b.id)))
     monkeypatch.setattr(integrations, "send_staff_text", lambda phone, text: SENT.append((phone, text)))
-    monkeypatch.setattr(integrations, "send_staff_document", lambda phone, data, name: SENT.append((phone, name, data)))
 
 
 @pytest.fixture()
@@ -133,48 +131,20 @@ def test_balance_payment_keeps_checked_in_status(env):
     assert b.status == "checked_in"
 
 
-# --------------------------------------------------------------------------- invoice, receipt, public link
+# --------------------------------------------------------------------------- receipt (there is no invoice any more)
 
 
-def test_invoice_and_receipt_render(env):
+def test_receipt_renders_and_no_invoice_pages(env):
     repo, app, (p1, _, rt1, _) = env
     b = make(repo, p1, rt1, total=11200)
-    repo.add_charge(Charge(b.id, "Campfire", 1120, now_utc(), "activity"))
     client, _ = login(app)
-    html = client.get(f"{BASE}/bookings/{b.id}/invoice").text
-    no = billing.invoice_number(repo.get_booking(b.id), p1)
-    assert no in html and "TAX INVOICE" in html and "GSTIN:" in html and "32ABCDE1234F1Z5" in html
-    assert "₹12,320" in html and "CGST" in html and "SGST" in html and "₹660" in html
     receipt = client.get(f"{BASE}/bookings/{b.id}/receipt/1")
     assert receipt.status_code == 200 and "₹4,000" in receipt.text and "RCPT-1" in receipt.text
+    assert billing.invoice_number(repo.get_booking(b.id), p1) in receipt.text
     assert client.get(f"{BASE}/bookings/{b.id}/receipt/9").status_code == 404
-    assert TestClient(app).get(f"{BASE}/bookings/{b.id}/invoice", follow_redirects=False).status_code == 303
-
-
-def test_public_invoice_token_valid_expired_tampered(env, monkeypatch):
-    repo, app, (p1, _, rt1, _) = env
-    b = make(repo, p1, rt1)
-    token = routes.invoice_token(b)
-    anon = TestClient(app)  # no login at all
-    ok = anon.get(f"/resort/invoice/{token}")
-    assert ok.status_code == 200 and billing.invoice_number(b, p1) in ok.text
-    assert ok.headers["cache-control"] == "no-store"
-    assert anon.get(f"/resort/invoice/{token[:-3]}abc").status_code == 404
-    monkeypatch.setattr(routes, "INVOICE_LINK_SECONDS", -1)
-    assert anon.get(f"/resort/invoice/{token}").status_code == 404
-
-
-def test_send_invoice_on_whatsapp(env):
-    repo, app, (p1, _, rt1, _) = env
-    b = make(repo, p1, rt1)
-    client, token = login(app)
-    resp = post(client, token, f"/bookings/{b.id}/send-invoice")
-    assert resp.status_code == 303 and "toast=Invoice" in resp.headers["location"]
-    phone, name, data = SENT[-1]  # the PDF itself, no text message (owner, 2026-11-18)
-    assert phone == PHONE and name == f"Invoice-{billing.invoice_number(b, p1)}.pdf" and data.startswith(b"%PDF")
-    assert not any(len(x) == 2 and x[0] == PHONE for x in SENT)
-    pdf = client.get(f"{BASE}/bookings/{b.id}/invoice.pdf")
-    assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf" and pdf.content.startswith(b"%PDF")
+    assert TestClient(app).get(f"{BASE}/bookings/{b.id}/receipt/1", follow_redirects=False).status_code == 303
+    for gone in (f"{BASE}/bookings/{b.id}/invoice", f"{BASE}/bookings/{b.id}/invoice.pdf"):
+        assert client.get(gone).status_code == 404  # the invoice feature is not wanted (owner, 2026-11-19)
 
 
 # --------------------------------------------------------------------------- cancellation and refunds

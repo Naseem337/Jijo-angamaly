@@ -60,7 +60,7 @@
 </div>
 <label class="check"><input type="checkbox" name="active" {{ 'checked' if p.active }}> Active</label></section>
 
-<section class="card" id="payment"><h3>Payment, invoices and cancellation</h3><div class="cols">
+<section class="card" id="payment"><h3>Payment and cancellation</h3><div class="cols">
   {{ field("Advance to pay online (%)", "advance_pct", p.advance_pct, "number", attrs='min="1" max="100"') }}
   {{ field("GST (%)", "gst_pct", p.gst_pct, "number", "Prices already include it. It is split into CGST and SGST on the invoice.", attrs='min="0" max="40"') }}
   {{ field("GSTIN", "gstin", p.gstin, "text", "Shown on invoices", attrs='maxlength="20"') }}
