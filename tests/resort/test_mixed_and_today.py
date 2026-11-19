@@ -105,3 +105,12 @@ def test_clearing_test_data_keeps_rooms_and_guests(world):
     assert counts["bookings"] == 1 and counts["chat"] > 0
     assert w.repo.list_bookings() == [] and w.repo.list_chat(GUEST) == [] and w.repo.get_state(GUEST) == {}
     assert w.repo.list_room_types(w.p1.id) and w.repo.get_guest(GUEST) is not None
+
+
+def test_demo_data_fills_the_dashboard_without_sending_anything(world):
+    from app.resort.demo import seed_demo
+    w = world
+    out = seed_demo(w.repo, w.clock.now())
+    assert out["bookings"] >= 10 and out["chat_messages"] > 20
+    assert w.wa.sent == []
+    assert {b.status for b in w.repo.list_bookings()} >= {"paid", "checked_in", "checked_out", "hold", "cancelled"}
