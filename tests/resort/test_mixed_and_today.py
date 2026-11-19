@@ -166,3 +166,27 @@ def test_the_manglish_anything_else_is_sent(world):
     w.bot.followup_s = 0.01
     say(w, "beach view undo?", GUEST, reply("Und, ella roomilum."))
     assert say(w, "ok") == "anything_else"
+
+
+def test_after_the_check_only_the_free_rooms_photos_go(world, tmp_path, monkeypatch):
+    from app.resort import photos as ph
+    from app.resort.models import Property, RoomType
+    monkeypatch.setenv("RESORT_DB_PATH", str(tmp_path / "r.sqlite3"))
+    monkeypatch.setattr(ph, "_shrink", lambda data: None)
+    w = world
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 50
+    general = [ph.save_photo(png + b"g" + bytes([i])) for i in range(3)]
+    deluxe = [ph.save_photo(png + b"d" + bytes([i])) for i in range(2)]
+    family = [ph.save_photo(png + b"f" + bytes([i])) for i in range(2)]
+    w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": general}))
+    w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "photo_urls": deluxe}))
+    w.repo.save_room_type(RoomType(**{**w.family.__dict__, "photo_urls": family}))
+    _fill(w, w.deluxe, 2, "2026-12-12", "2026-12-14")  # the top-priority Deluxe is full on these dates
+    say(w, "Rooms?")
+    say(w, "Alleppey")
+    say(w, "dec 12 to dec 14, 2 people")
+    logged = [m.text[len("[photo] "):] for m in w.repo.list_chat(GUEST, limit=100) if m.text.startswith("[photo] ")]
+    assert logged == family  # the free room's photos only: never the full Deluxe, never the general photos
+    say(w, "room photos")
+    logged = [m.text[len("[photo] "):] for m in w.repo.list_chat(GUEST, limit=100) if m.text.startswith("[photo] ")]
+    assert logged == family  # asked again: nothing new to send, never the full room's photos

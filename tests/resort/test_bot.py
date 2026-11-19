@@ -247,11 +247,9 @@ def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_t
     w.repo.set_state(GUEST, st)
     say(w, "deluxe room photos undo?", GUEST, tool("send_photos", place="Pozhiyoram", room_type="Deluxe"), reply("[no reply]"))
     images = [p for _, k, p in w.wa.to(GUEST) if k == "image"]
-    assert len(images) == 4 and w.wa.texts() == []  # the room's own photos first, at most 4, no extra text
-    say(w, "more photos", GUEST, tool("send_photos", place="Pozhiyoram"), reply("[no reply]"))
-    assert len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 6  # only the 2 not sent yet
+    assert images and len(images) == 2 and w.wa.texts() == []  # the room's own photos only, never the general ones
     say(w, "more?", GUEST, tool("send_photos", place="Pozhiyoram"), reply("That's all the photos we have sir."))
-    assert "already sent" in last_tool(w)["error"] and len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 6
+    assert "already sent" in last_tool(w)["error"] and len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 2
 
 
 def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then_name(world, tmp_path, monkeypatch):
@@ -273,12 +271,12 @@ def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then
         tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-15", adults=2),
         reply("[no reply]"))
     sent = [(k, p) for _, k, p in w.wa.to(GUEST)][start:]
-    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 8 + ["text"]
+    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 2 + ["text"]  # the free room's photos only
     assert sent[0][1] == "Yes, rooms are available for your dates."
     assert sent[1][1] == "Your Beachfront Hideout Awaits!\nDeluxe - ₹4,000/Night/Room"
     assert sent[-1][1] == "Please share your name and mobile number to proceed."
     logged = [m.text[len("[photo] "):] for m in w.repo.list_chat(GUEST, limit=100) if m.text.startswith("[photo] ")]
-    assert logged == general[:6] + room  # the first 6 general photos in the owner's order, then the room's own
+    assert logged == room  # only the offered (free) room's photos, no general photos (owner, 2026-11-19)
 
 
 @pytest.mark.parametrize("answer, place", [("allepy", "p1"), ("Aleppey pls", "p1"), ("alappuzha", "p1"),

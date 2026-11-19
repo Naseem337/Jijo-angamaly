@@ -731,7 +731,9 @@ class ChatMixin:
             self._text(phone, t(problem, lang, room=room.name if room else ""), repeat_ok=True)
             return "photos"
         sent = self._sent_photos(phone)
-        fresh = [r for r in dict.fromkeys([*(room.photo_urls if room else []), *prop.photo_urls]) if r not in sent][:4]
+        # the free room's own photos only (owner, 2026-11-19); the resort's general photos only if it has no rooms
+        refs = list(room.photo_urls) if room else list(prop.photo_urls)
+        fresh = [r for r in dict.fromkeys(refs) if r not in sent][:MAX_ROOM_PHOTOS]
         if not fresh or not self._send_photos(phone, fresh):
             return None
         step = self.next_step(phone, st) or t("ask_location", lang, towns=" or ".join(self._towns()))
@@ -750,10 +752,9 @@ class ChatMixin:
             ctx.silent = True
             return {"error": "that room is not free on the guest's dates; the guest is told automatically. Reply "
                              "exactly [no reply]."}
-        refs = list(room.photo_urls) if room else []
-        refs += list(prop.photo_urls)
+        refs = list(room.photo_urls) if room else list(prop.photo_urls)  # the free room's own photos only
         sent = self._sent_photos(ctx.phone)
-        fresh = [r for r in dict.fromkeys(refs) if r not in sent][:4]
+        fresh = [r for r in dict.fromkeys(refs) if r not in sent][:MAX_ROOM_PHOTOS]
         if not fresh:
             numbers = ", ".join(display_phone(n) for n in prop.contact_numbers) or "the owner"
             return {"error": ("all photos were already sent" if refs else "no photos uploaded yet") +
@@ -1971,12 +1972,12 @@ class ChatMixin:
                     options[0]["total_for_stay"] / max(1, out["nights"] * options[0]["quoted_for_rooms"]))
                 ctx.after.append(prop.intro.replace("{price}", _money(price)).replace("{room}", offered[0].name))
                 st["intro_sent"] = prop.id
-            general = self._general_photos(ctx.phone, prop)
-            sent = self._sent_photos(ctx.phone) | set(general)
+            # only the photos of the room that is free and offered (owner, 2026-11-19): no general photos
+            sent = self._sent_photos(ctx.phone)
             room_photos = [r for rt in offered[:2] for r in [x for x in dict.fromkeys(rt.photo_urls)
                                                               if x not in sent][:MAX_ROOM_PHOTOS]]
-            if general + room_photos:
-                ctx.after.append(general + room_photos)  # sent in order: general first, then the room's own
+            if room_photos:
+                ctx.after.append(room_photos)
             ctx.after.append(t("ask_contact", lang))
             out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
         else:
