@@ -20,7 +20,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from app.core.clock import to_ist
@@ -1308,6 +1308,8 @@ class ChatMixin:
         if quote and messages and messages[-1].role == "user":
             messages[-1].content += "\n\n" + quote
         reply = ""
+        if self._over_ai_cap(phone, st):  # one guest flooding messages: the team takes over, no more AI calls
+            return "handoff"
         try:
             if self._llm is None:
                 raise LLMError("none", "no LLM configured")
@@ -1363,7 +1365,12 @@ class ChatMixin:
             return "quiet"
         if not reply and not queued:
             self._text(phone, t("ai_down", st.get("lang", "en")))
-            self.alert_staff(f"Bot could not answer a message from {phone}: {text[:200]}", st.get("bk", {}).get("property_id"))
+            now = self.clock.now()
+            last = getattr(self, "_down_alerted", None)
+            if last is None or now - last >= timedelta(minutes=30):  # one staff alert per outage, not per message
+                self._down_alerted = now
+                self.alert_staff(f"Bot could not answer a message from {phone}: {text[:200]} (AI unavailable; further "
+                                 "failures in the next 30 min are not alerted)", st.get("bk", {}).get("property_id"))
             return "ai_down"
         # the client's order: the AI's short line, then the fixed messages (form / glimpse / ask name), then the
         # enquiry summary, then the payment link
@@ -1886,6 +1893,20 @@ class ChatMixin:
         if paid_now:
             out["note"] = "a payment was just found and the confirmation message was sent automatically; do not repeat its details"
         return out
+
+    def _over_ai_cap(self, phone: str, st: dict[str, Any]) -> bool:
+        """True when this guest has used up MAX_AI_TURNS_PER_HOUR: the chat is handed to the team once (pause + one
+        staff alert) instead of calling the AI again. Counted per clock hour in the guest's state."""
+        from app.resort.flow import MAX_AI_TURNS_PER_HOUR
+        hour = self.clock.now().strftime("%Y%m%d%H")
+        used = st.get("ai_hour") if isinstance(st.get("ai_hour"), list) else [hour, 0]
+        if used[0] != hour:
+            used = [hour, 0]
+        if used[1] >= MAX_AI_TURNS_PER_HOUR:
+            self.handoff(phone, st, f"too many messages ({used[1]} AI replies in an hour); please take over")
+            return True
+        st["ai_hour"] = [hour, used[1] + 1]
+        return False
 
     def _tool_owner(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         """The guest wants the owner (owner, 2026-11-18): pause the bot, send the owner a short summary."""

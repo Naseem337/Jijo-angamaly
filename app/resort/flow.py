@@ -37,6 +37,11 @@ log = logging.getLogger(__name__)
 # Guests never see a booking id (owner, 2026-11-18): 'booking RB-1D9E49', '(RB-1D9E49)', 'ID: RB-1D9E49' are removed.
 BOOKING_ID = re.compile(r"\s*\(?\b(?:id\s*:?\s*)?RB-[A-Z0-9]{6}\b\)?", re.IGNORECASE)
 AUTO_RESUME = timedelta(hours=24)
+SILENT_TYPES = ("reaction", "sticker", "unsupported", "system", "request_welcome", "edit", "revoke", "ephemeral",
+                "text", "button", "interactive")  # the last three only get here when their text is empty
+# One guest cannot burn unlimited AI calls (pre-launch, 2026-11-19): past this many AI turns in an hour the chat goes to
+# the team (bot paused, one staff alert). A real guest never needs this many.
+MAX_AI_TURNS_PER_HOUR = 40
 INDIC = re.compile(r"[ऀ-ॿ஀-௿ഀ-ൿ]")
 
 
@@ -94,7 +99,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             return False
         try:
             wamid = self.wa.send_text(phone, text)
-        except WhatsAppError as exc:
+        except Exception as exc:  # WhatsApp error or network failure: logged, never crashes the turn, not marked sent
             log.error("Could not send to %s: %s", mask_phone(phone), exc)
             return False
         self._log(phone, text, wamid=wamid if isinstance(wamid, str) else "")
@@ -129,8 +134,12 @@ class BookingBot(IdProofMixin, ChatMixin):
             except Exception:  # best effort only
                 pass
             voice = self._voice_in()
-            result = voice.process(msg.media_id) if voice else None
-            if result is None or result.text is None:
+            try:
+                result = voice.process(msg.media_id) if voice else None
+            except Exception as exc:  # download / ffmpeg / STT crashed: the guest still gets the polite text
+                log.error("Voice note failed for %s: %s", mask_phone(phone), exc)
+                result = None
+            if result is None or not (result.text or "").strip():
                 self.repo.add_chat(Chat(phone, "in", "[voice note: not understood]", now, "voice"))
                 self._text(phone, t("voice_problem", lang))
                 return "voice_problem"
@@ -139,7 +148,9 @@ class BookingBot(IdProofMixin, ChatMixin):
             return self._image_turn(phone, st, msg, now)
         elif not msg.is_text:
             self.repo.add_chat(Chat(phone, "in", f"[{msg.type}]", now, "text"))
-            if msg.type not in ("reaction", "sticker"):
+            # reactions, stickers, edits / deletes / polls (Meta's 'unsupported'), system events and empty texts get no
+            # reply; location, contacts, video ... get one short "text or voice only" line
+            if msg.type not in SILENT_TYPES:
                 self._text(phone, t("unsupported", lang))
             return "unsupported"
         in_id = self.repo.add_chat(Chat(phone, "in", text, now, source, msg.id))
@@ -308,7 +319,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         for number in self.staff_numbers(property_id):
             try:
                 self.wa.send_text(number, text)
-            except WhatsAppError as exc:  # outside their 24 h window: needs a template at go-live
+            except Exception as exc:  # outside their 24 h window (needs a template at go-live) or a network error
                 log.warning("Staff alert to %s failed: %s", mask_phone(number), exc)
 
     def handoff(self, phone: str, st: dict[str, Any], reason: str, *, notify_guest: bool = True) -> str:
@@ -349,8 +360,8 @@ class BookingBot(IdProofMixin, ChatMixin):
             self.wa.send_text(phone, text)
             self._log(phone, text, "system")
             return True
-        except WhatsAppError as exc:
-            if exc.code != 131047:  # 131047 = outside the 24 h window
+        except Exception as exc:
+            if getattr(exc, "code", None) != 131047:  # 131047 = outside the 24 h window
                 log.error("Could not notify %s: %s", mask_phone(phone), exc)
                 return False
         name = getattr(self.config.templates, template_key, "") or os.environ.get(f"RESORT_TPL_{template_key.upper()}", "")
@@ -360,7 +371,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         try:
             self.wa.send_template(phone, name, booking.language if booking.language in LANGS else "en", params)
             self._log(phone, f"[template {name}] " + text, "system")
-        except WhatsAppError as exc:
+        except Exception as exc:
             log.error("Template %s to %s failed: %s", name, mask_phone(phone), exc)
         return False
 
