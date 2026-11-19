@@ -336,3 +336,25 @@ def test_too_few_rooms_asked_says_the_minimum(live):
     assert not any("not available" in x for x in w.wa.texts(PHONE))
     chat(w, "ok 3 rooms")
     assert _plan(w) == [("Standard", 2, 2), ("2", 1, 0)]
+
+
+def test_an_old_unpaid_enquiry_never_gets_a_reminder_after_a_new_booking(live):
+    """Live chat 2026-11-19: Shibil left a 23-25 Dec enquiry unpaid, booked and paid 25-27 Dec, then got 'Your payment
+    link is still open for 4 more minutes'. A new booking closes the old enquiry and its link."""
+    from datetime import timedelta
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 23 to dec 25, 1 person")
+    chat(w, "Shibil 8590629268")
+    old = w.repo.list_bookings(phone=PHONE)[0]
+    assert old.status == "hold"
+    chat(w, "restart", "Rooms", "Alleppey", "dec 25 to dec 27, 2 people")
+    chat(w, "Shibil 8590629268")
+    new = next(b for b in w.repo.list_bookings(phone=PHONE) if b.id != old.id)
+    assert w.repo.get_booking(old.id).status == "expired"  # closed when the new enquiry was made
+    assert old.payment_link_id in w.bot.payments.cancelled  # its link can no longer be paid
+    w.bot.mark_paid(booking_id=new.id)
+    sent = len(w.wa.texts(PHONE))
+    w.clock.advance(minutes=w.bot.config.hold_minutes - 3)  # the old hold would have been 'about to expire'
+    w.bot.sweep()
+    assert w.wa.texts(PHONE)[sent:] == []  # no 'still open' message after the confirmation

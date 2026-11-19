@@ -427,6 +427,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             apply_payment(x, method="online", amount=x.advance if x.advance >= 1 else x.total,
                           ref=payment_id or link_id or x.payment_link_id or f"online-{x.id}", now=now)
             self.repo.save_booking(x)
+        self.close_old_holds(b.guest_phone, {x.id for x in parts})  # no reminder may follow about an old enquiry
         self.announce_paid(self.repo.get_booking(b.id) or b)
         return "paid"
 
@@ -595,6 +596,11 @@ class BookingBot(IdProofMixin, ChatMixin):
             if (b.hold_expires_at and b.payment_link_url and "[reminded]" not in b.notes
                     and not (b.group_id and b.group_id != b.id)
                     and timedelta(0) < b.hold_expires_at - now <= timedelta(minutes=5)):
+                if any(o.created_at > b.created_at and o.id != b.id and o.group_id != b.id
+                       for o in self.repo.list_bookings(phone=b.guest_phone, limit=20)):
+                    self.close_old_holds(b.guest_phone, {o.id for o in self.repo.list_bookings(
+                        phone=b.guest_phone, limit=20) if o.created_at > b.created_at})
+                    continue  # the guest booked again since: this old enquiry is closed, never reminded
                 b.notes = (b.notes + " [reminded]").strip()
                 self.repo.save_booking(b)
                 mins = max(1, int((b.hold_expires_at - now).total_seconds() // 60))

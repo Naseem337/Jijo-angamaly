@@ -2414,6 +2414,7 @@ class ChatMixin:
             return {"error": "payment link failed; the team has been told and will contact the guest"}
         booking.payment_link_id, booking.payment_link_url = link.id, link.url
         self.repo.save_booking(booking)
+        self.close_old_holds(phone, {booking.id})  # one open enquiry per guest: the new one replaces older ones
         st["booking_id"] = booking.id
         st.pop("bk", None)
         leads.save_lead(self.repo, phone, now, stage="held", booking_id=booking.id,
@@ -2480,6 +2481,7 @@ class ChatMixin:
             b.payment_link_id, b.payment_link_url = link.id, link.url
             b.notes += "; One stay with " + ", ".join(i for i in ids if i != b.id)
             self.repo.save_booking(b)
+        self.close_old_holds(phone, {b.id for b in parts})
         st["booking_id"] = parts[0].id
         st.pop("bk", None)
         leads.save_lead(self.repo, phone, now, stage="held", booking_id=parts[0].id,
@@ -2493,6 +2495,24 @@ class ChatMixin:
                             url=link.url)
         return {"ok": True, "booking_id": parts[0].id,
                 "note": "the enquiry summary and the payment link are sent automatically. Reply exactly [no reply]."}
+
+    def close_old_holds(self, phone: str, keep: set[str]) -> int:
+        """Close this guest's other unpaid enquiries and their payment links (owner, 2026-11-19: a guest who left one
+        enquiry unpaid and booked other dates got 'your payment link is still open' after paying the new one)."""
+        closed = 0
+        for old in self.repo.list_bookings(phone=phone, status="hold", limit=50):
+            if old.id in keep:
+                continue
+            if old.payment_link_id:
+                try:
+                    self.payments.cancel_link(old.payment_link_id)
+                except Exception as exc:  # a link that cannot be closed must never stop the booking
+                    log.warning("Could not close the old link of %s: %s", old.id, exc)
+            old.status = "expired"
+            old.notes = (old.notes + " [replaced by a newer booking]").strip()
+            self.repo.save_booking(old)
+            closed += 1
+        return closed
 
     def _tool_recall(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         rows = self.repo.list_chat(ctx.phone, limit=80)
