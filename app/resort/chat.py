@@ -298,6 +298,10 @@ QUESTION_WORD = re.compile(r"\b(?:what|how|when|where|which|why|who|is|are|do|do
                            r"kitna|entha|enthu|enna|yenna|kya|evide|enga|kahan)\b", re.IGNORECASE)
 PHOTO_ASK = re.compile(r"\b(?:photos?|pics?|pictures?|images?|fotos?|padam|padangal|video)\b|ഫോട്ടോ|படம்|फोटो",
                        re.IGNORECASE)
+# "other room photos" / "vere room" / "dusra room": the next free room type by the owner's priority
+OTHER_ROOM = re.compile(r"\b(?:other|another|different|next|vere|veroru|matte|mattu|innoru|vera|dusra|doosra|aur)\b",
+                        re.IGNORECASE)
+ROOM_NAME_FILLER = {"room", "rooms", "view", "the", "with", "and", "type", "suite", "cottage", "villa"}
 WISH_CORE = {"room", "rooms", "resort", "resorts", "booking", "book", "stay", "availability", "available", "cottage",
              "kamra", "accommodation"}
 WISH_WORDS = WISH_CORE | {"a", "an", "any", "is", "are", "there", "i", "we", "need", "want", "wanted", "looking", "for",
@@ -588,16 +592,75 @@ class ChatMixin:
         sent = self._sent_photos(phone)
         return [r for r in prop.photo_urls if r not in sent][:MAX_GENERAL_PHOTOS]
 
+    @staticmethod
+    def _room_named(text: str, rooms: list[RoomType]) -> RoomType | None:
+        """The room type the guest named ('deluxe photos', 'premium room', 'basic'), by its distinctive words."""
+        words = set(re.findall(r"[a-z]{3,}", (text or "").lower()))
+        best, score = None, 0
+        for rt in rooms:
+            names = set(re.findall(r"[a-z]{3,}", rt.name.lower())) - ROOM_NAME_FILLER
+            hits = sum(1 for n in names if any(close_word(w, n) for w in words))
+            if hits > score:  # ties keep the higher-priority one
+                best, score = rt, hits
+        return best
+
+    def _photo_room(self, phone: str, st: dict[str, Any], prop: Property, text: str,
+                    wanted: str = "") -> tuple[RoomType | None, str]:
+        """Whose photos to send (owner, 2026-11-19): the room the guest is being offered, by the owner's priority AND
+        availability on their dates. A named room type: its photos only if it is free, else 'room_not_free'.
+        'Other room': the next free room type by priority, else 'no_other_room'."""
+        rooms = self.repo.list_room_types(prop.id)  # the owner's priority order
+        bk = st.get("bk") or {}
+        dated = bk.get("property_id") == prop.id and bk.get("check_in") and bk.get("check_out")
+        free = [rt for rt, _ in self._fits(prop, bk)] if dated else rooms
+        named = self._room_named(wanted, rooms) or self._room_named(text, rooms)
+        if named:
+            return (named, "") if named in free else (named, "room_not_free")
+        if not free:
+            return None, "room_not_free" if dated else ""
+        chosen_id = (bk.get("chosen") or {}).get("room_type_id")
+        current = next((rt for rt in free if rt.id == chosen_id), free[0])
+        if OTHER_ROOM.search(text or ""):
+            sent = self._sent_photos(phone)
+            others = [rt for rt in free if rt is not current]
+            fresh = [rt for rt in others if any(r not in sent for r in rt.photo_urls)]
+            return ((fresh or others)[0], "") if others else (None, "no_other_room")
+        return current, ""
+
+    def _photos_now(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """'room photos' / 'deluxe photos' / 'other room pics' once the rooms were checked: the free room's photos by
+        the owner's priority, then the open step so the chat moves on to the booking. None = let the AI answer
+        (another resort named, or every photo already sent)."""
+        bk = st.get("bk") or {}
+        prop = self.repo.get_property(bk["property_id"]) if bk.get("property_id") else None
+        if prop is None or ((other := self._named_place(text)) and other.id != prop.id):
+            return None
+        room, problem = self._photo_room(phone, st, prop, text)
+        lang = st.get("lang", "en")
+        if problem:
+            self._text(phone, t(problem, lang, room=room.name if room else ""), repeat_ok=True)
+            return "photos"
+        sent = self._sent_photos(phone)
+        fresh = [r for r in dict.fromkeys([*(room.photo_urls if room else []), *prop.photo_urls]) if r not in sent][:4]
+        if not fresh or not self._send_photos(phone, fresh):
+            return None
+        if step := self.next_step(phone, st):
+            self._text(phone, step, repeat_ok=True)  # back to the booking: name and mobile
+        return "photos"
+
     def _tool_photos(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
-        """Up to 4 photos on request: the room type asked about, else every room type's photos, then any general
-        photo not yet sent. Never one already sent."""
+        """Up to 4 photos on request: the room picked by the owner's priority and the guest's dates (or the room they
+        named, when free), then any general photo not yet sent. Never one already sent."""
         prop = self._find_property(a.get("place", ""))
         if prop is None:
             return {"error": "unknown place", "places": [self._place_label(p) for p in self._places()]}
-        rooms = self.repo.list_room_types(prop.id)
-        wanted = str(a.get("room_type") or "").lower().strip()
-        room = next((rt for rt in rooms if wanted and (wanted in rt.name.lower() or rt.name.lower() in wanted)), None)
-        refs = list(room.photo_urls) if room else [r for rt in rooms for r in rt.photo_urls]
+        room, problem = self._photo_room(ctx.phone, ctx.st, prop, ctx.text, str(a.get("room_type") or ""))
+        if problem:
+            ctx.after.append(t(problem, ctx.st.get("lang", "en"), room=room.name if room else ""))
+            ctx.silent = True
+            return {"error": "that room is not free on the guest's dates; the guest is told automatically. Reply "
+                             "exactly [no reply]."}
+        refs = list(room.photo_urls) if room else []
         refs += list(prop.photo_urls)
         sent = self._sent_photos(ctx.phone)
         fresh = [r for r in dict.fromkeys(refs) if r not in sent][:4]

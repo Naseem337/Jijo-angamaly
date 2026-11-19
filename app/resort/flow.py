@@ -283,6 +283,8 @@ class BookingBot(IdProofMixin, ChatMixin):
                 step = t("fill_form", st.get("lang", "en"))  # the form is just above: point to it, never silence
             self._text(phone, step, repeat_ok=True)
             return "next_step"
+        if PHOTO_ASK.search(text) and st.get("checked") and (outcome := self._photos_now(phone, st, text)):
+            return outcome  # rooms found: photos of the free room by the owner's priority, in code (owner, 2026-11-19)
         if GREETING.match(text) and not st.get("bk") and self._places() and not self._chatting_now(phone):
             self._save(phone, st)
             return self._greet(phone, st, text)
