@@ -915,6 +915,16 @@ async def seed_demo_data(request: Request, auth: Auth = Depends(require_owner)):
     return JSONResponse(seed_demo(get_repo(), now_utc()))
 
 
+@router.post("/clear-demo")
+async def clear_demo_data(request: Request, auth: Auth = Depends(require_owner)):
+    """Owner only: remove the demo bookings and chats again (real data stays). Needs confirm=DEMO."""
+    from app.resort.demo import clear_demo
+    f = await request.form()
+    if str(f.get("confirm", "")) != "DEMO":
+        raise HTTPException(400, "Type DEMO to confirm")
+    return JSONResponse(clear_demo(get_repo()))
+
+
 @router.get("/properties/new")
 def property_new(request: Request, auth: Auth = Depends(require_owner)):
     return page(request, "property_form.html", auth, nav="properties", p=Property(""), rooms=[], is_new=True)

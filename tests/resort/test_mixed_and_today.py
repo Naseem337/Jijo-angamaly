@@ -114,3 +114,14 @@ def test_demo_data_fills_the_dashboard_without_sending_anything(world):
     assert out["bookings"] >= 10 and out["chat_messages"] > 20
     assert w.wa.sent == []
     assert {b.status for b in w.repo.list_bookings()} >= {"paid", "checked_in", "checked_out", "hold", "cancelled"}
+
+
+def test_demo_data_is_removed_and_real_data_stays(world):
+    from app.resort.demo import clear_demo, seed_demo
+    from test_bot import hold
+    w = world
+    hold(w)
+    seed_demo(w.repo, w.clock.now())
+    out = clear_demo(w.repo)
+    assert out["bookings"] >= 10
+    assert [b.guest_phone for b in w.repo.list_bookings()] == [GUEST]

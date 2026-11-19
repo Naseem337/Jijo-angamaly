@@ -174,7 +174,7 @@ def test_a_booking_request_is_asked_which_resort_including_one_not_open_online(w
     towns = [(p.city or p.name).split(",")[0].strip() for p in w.repo.list_properties(active_only=False)]
     assert sent == [f"Sure, Kindly confirm the Location 📍\n{' or '.join(towns)} ?"]  # the AI's own line is not sent
     say(w, "is it near the beach?", GUEST, reply("Yes."))
-    assert len(towns) == 2 and "online booking is not open yet" in w.llm.calls[-1].system
+    assert len(towns) == 2 and "currently not available" in w.llm.calls[-1].system
 
 
 def test_the_ai_asking_which_location_in_its_own_words_is_replaced_by_the_owners_question(world):
@@ -788,7 +788,7 @@ def test_a_resort_switched_off_in_the_dashboard_gets_the_phone_numbers_not_a_re_
     w.repo.save_property(Property(**{**w.p2.__dict__, "active": False, "contact_numbers": ["+919497861924"]}))
     assert say(w, "Rooms?") == "location"
     assert say(w, answer) == "closed_place"
-    assert w.wa.texts()[-1] == "For Kanthalloor, Munnar, please call 9497861924 to book."
+    assert w.wa.texts()[-1] == "Sorry, Munnar is currently not available."
 
 
 def test_a_status_question_gets_no_unasked_money_talk(world):

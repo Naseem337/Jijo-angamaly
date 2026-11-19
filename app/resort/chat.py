@@ -788,7 +788,7 @@ class ChatMixin:
         if prop is None and (closed := self._closed_place(text, place_like)):
             # a resort that is switched off in the dashboard (Kanthalloor today): bookings by phone, never a re-ask
             numbers = ", ".join(display_phone(n) for n in (closed.contact_numbers or self._all_contact_numbers()))
-            self._text(phone, t("closed_place", st.get("lang", "en"), place=self._place_label(closed), numbers=numbers))
+            self._text(phone, t("closed_place", st.get("lang", "en"), place=(closed.city or closed.place or closed.name).split(",")[0].strip(), numbers=numbers))
             return "closed_place"
         if prop is None:
             if not place_like or PHOTO_ASK.search(text) or re.search(r"\d", text) or GREETING.match(text) \
@@ -850,7 +850,7 @@ class ChatMixin:
             msg = t("owner_will_help", lang)  # the owner was alerted when the message came in
         elif closed := self._closed_place(text, True):
             numbers = ", ".join(display_phone(n) for n in (closed.contact_numbers or self._all_contact_numbers()))
-            msg = t("closed_place", lang, place=self._place_label(closed), numbers=numbers)
+            msg = t("closed_place", lang, place=(closed.city or closed.place or closed.name).split(",")[0].strip(), numbers=numbers)
         elif step := self.next_step(phone, st):
             msg = step if step != last else (t("fill_form", lang) if step == t("form", lang) else t("say_again", lang))
         elif wish and not (st.get("bk") or {}).get("check_in"):
@@ -1090,8 +1090,7 @@ class ChatMixin:
             if p.active:
                 continue
             numbers = ", ".join(display_phone(n) for n in (p.contact_numbers or fallback)) or "not set"
-            out.append(f"RESORT '{p.name}': online booking is not open yet. If the guest picks it, say in one short "
-                       f"line that the owner will help them with it and give the owner's numbers: {numbers}")
+            out.append(f"RESORT '{p.name}': currently not available. If the guest picks it, say only, in one short line, that it is currently not available")
         return out
 
     def _facts(self) -> str:

@@ -104,3 +104,19 @@ def seed_demo(repo: ResortRepo, now: datetime) -> dict[str, int]:
             chats += 1
     return {"bookings": made, "chat_messages": chats}
 
+
+
+def clear_demo(repo: ResortRepo) -> dict[str, int]:
+    """Remove only what seed_demo added (its bookings, their charges, the demo guests' chats). Real data stays."""
+    phones = [p[1] for p in PLAN]
+    ids = [b.id for b in repo.list_bookings(limit=100000) if b.notes.startswith("Demo booking") and b.guest_phone in phones]
+    marks = ",".join("?" for _ in phones)
+    with repo._tx() as db:
+        for bid in ids:
+            for table in ("charges", "refunds", "id_proofs"):
+                db.execute(f"DELETE FROM {table} WHERE booking_id=?", (bid,))
+            db.execute("DELETE FROM bookings WHERE id=?", (bid,))
+        chats = db.execute(f"DELETE FROM chat WHERE phone IN ({marks})", phones).rowcount
+        db.execute(f"DELETE FROM chat_state WHERE phone IN ({marks})", phones)
+        db.execute(f"DELETE FROM guests WHERE phone IN ({marks})", phones)
+    return {"bookings": len(ids), "chat_messages": chats}
