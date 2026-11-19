@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -31,6 +32,13 @@ from app.resort.paying import apply_payment, method_label
 from app.resort.payments import PaymentError, Payments
 from app.whatsapp.client import WhatsAppClient, WhatsAppError
 from app.whatsapp.parse import EchoMessage, InboundMessage
+
+ANYTHING_ELSE = {t("anything_else", lg) for lg in ("en", "mn", "tn", "hn")}
+# the answer to 'Is there anything else?' that needs no reply
+NOTHING = re.compile(r"^\s*(?:no+|nope|nah|nothing(?: else)?|no thanks?|no thank you|that'?s (?:all|it)|thats (?:all|it)|"
+                     r"illa|ella|onnum (?:illa|venda)|onnumilla|venda|vendaa|nahi|kuch nahi|nahi chahiye|onnum vendaa|"
+                     r"edhuvum (?:illa|venam)|illai|vendam|all good|done)(?:\s+(?:sir|bro|thanks?|thank you|ok))*[\s.!]*$",
+                     re.IGNORECASE)
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +74,9 @@ def profile_name(raw: str | None) -> str:
 class BookingBot(IdProofMixin, ChatMixin):
     def __init__(self, config: ResortConfig, repo: ResortRepo, whatsapp: WhatsAppClient, payments: Payments,
                  clock: Any, *, llm: Callable[[], LLMProvider] | None = None,
-                 voice_in: Callable[[], Any] | None = None, debounce_s: float = 0.0, patience_s: float = 0.0) -> None:
+                 voice_in: Callable[[], Any] | None = None, debounce_s: float = 0.0, patience_s: float = 0.0,
+                 followup_s: float = 0.0) -> None:
+        self.followup_s = followup_s  # after a final 'ok': wait this long, then 'Is there anything else?' (0 = never)
         self.debounce_s = debounce_s  # seconds to wait for a quick second message before answering
         self.patience_s = patience_s or debounce_s  # the longer wait when the message stops mid-sentence
         self.config = config
@@ -268,6 +278,8 @@ class BookingBot(IdProofMixin, ChatMixin):
             return outcome
         if st.get("fb") and (outcome := self._fb_step(phone, st, text)):
             return outcome
+        if (self.repo.last_outbound_text(phone) or "") in ANYTHING_ELSE and (is_ack(text) or NOTHING.match(text)):
+            return "quiet"  # 'Is there anything else?' -> 'no' / 'nothing' / 'ok': no reply (owner, 2026-11-19)
         if is_ack(text) and "?" not in text:  # "ok" mid-chat ("?" is a question, not an ok) (owner, 2026-11-18): carry on to the step still open, else stay quiet
             if step := self.next_step(phone, st):
                 if step == (self.repo.last_outbound_text(phone) or ""):
@@ -275,7 +287,9 @@ class BookingBot(IdProofMixin, ChatMixin):
                 self._text(phone, step, repeat_ok=True)
                 return "next_step"
             if not self._bot_asked_something(phone, st):
-                return "quiet"
+                return self._final_ok(phone, st, in_id)
+        if PHOTO_ASK.search(text) and (outcome := self._photos_now(phone, st, text)):
+            return outcome  # photos at any stage (owner, 2026-11-19): the free room by priority, else the top one
         if PHOTO_ASK.search(text) and not st.get("checked"):
             # photos come with the glimpse once rooms are found (owner's flow); before that, the next step
             step = self.next_step(phone, st) or t("ask_location", st.get("lang", "en"), towns=" or ".join(self._towns()))
@@ -283,8 +297,6 @@ class BookingBot(IdProofMixin, ChatMixin):
                 step = t("fill_form", st.get("lang", "en"))  # the form is just above: point to it, never silence
             self._text(phone, step, repeat_ok=True)
             return "next_step"
-        if PHOTO_ASK.search(text) and st.get("checked") and (outcome := self._photos_now(phone, st, text)):
-            return outcome  # rooms found: photos of the free room by the owner's priority, in code (owner, 2026-11-19)
         if GREETING.match(text) and not st.get("bk") and self._places() and not self._chatting_now(phone):
             self._save(phone, st)
             return self._greet(phone, st, text)
@@ -390,20 +402,31 @@ class BookingBot(IdProofMixin, ChatMixin):
         if b.status == "paid":
             return "already_paid"
         now = self.clock.now()
-        rt = self.repo.get_room_type(b.room_type_id)
-        if b.status in ("expired", "cancelled") and rt is not None \
-                and self.repo.free_rooms(rt, b.check_in, b.check_out, now) < b.rooms:
+        parts = self.repo.list_group(b)  # one link pays every part of a stay over two room types
+        b = parts[0] if b.group_id else b
+        if b.status == "paid":
+            return "already_paid"
+        gone = False
+        for x in parts:
+            xrt = self.repo.get_room_type(x.room_type_id)
+            if x.status in ("expired", "cancelled") and xrt is not None \
+                    and self.repo.free_rooms(xrt, x.check_in, x.check_out, now) < x.rooms:
+                gone = True
+        if gone:
             b.notes = (b.notes + " PAID AFTER EXPIRY, ROOMS GONE: REFUND NEEDED").strip()
             b.razorpay_payment_id = payment_id or b.razorpay_payment_id
             self.repo.save_booking(b)
             self.alert_staff(f"REFUND NEEDED: {b.id} was paid after the hold expired and the rooms are gone "
                              f"({b.guest_name} {b.guest_phone}, Rs {b.advance}).", b.property_id)
             return "refund_needed"
-        b.razorpay_payment_id = payment_id or b.razorpay_payment_id
-        apply_payment(b, method="online", amount=b.advance if b.advance >= 1 else b.total,
-                      ref=payment_id or link_id or b.payment_link_id or f"online-{b.id}", now=now)
-        self.repo.save_booking(b)
-        self.announce_paid(b)
+        for x in parts:
+            if x.status == "paid":
+                continue
+            x.razorpay_payment_id = payment_id or x.razorpay_payment_id
+            apply_payment(x, method="online", amount=x.advance if x.advance >= 1 else x.total,
+                          ref=payment_id or link_id or x.payment_link_id or f"online-{x.id}", now=now)
+            self.repo.save_booking(x)
+        self.announce_paid(self.repo.get_booking(b.id) or b)
         return "paid"
 
     def reissue_link(self, b: Booking, *, discount: int = 0, by: str = "") -> str | None:
@@ -412,6 +435,8 @@ class BookingBot(IdProofMixin, ChatMixin):
         text for staff, or None."""
         if b.status != "hold" or b.paid_amount:
             return "Only a booking that is waiting for payment can get a new link or a discount"
+        if b.group_id:
+            return "This stay is split over two room types; please send the guest a link yourself"
         prop, rt = self.repo.get_property(b.property_id), self.repo.get_room_type(b.room_type_id)
         now = self.clock.now()
         total, advance = b.total, b.advance
@@ -466,10 +491,31 @@ class BookingBot(IdProofMixin, ChatMixin):
                 self.start_id_request(b)
         except Exception:
             log.exception("ID request for %s failed", b.id)
-        self.alert_staff(f"New booking {b.id} PAID: {prop.name if prop else ''}, {rt.name if rt else ''} x {b.rooms}, "
-                         f"{fmt_date(b.check_in)} to {fmt_date(b.check_out)}, {b.adults}A {b.children}C. "
-                         f"{b.guest_name} {b.guest_phone}. Paid Rs {b.paid_amount} of Rs {b.total} "
+        parts = self.repo.list_group(b)
+        names = []
+        for x in parts:
+            xrt = self.repo.get_room_type(x.room_type_id)
+            names.append(f"{xrt.name if xrt else ''} x {x.rooms}")
+        self.alert_staff(f"New booking {' + '.join(x.id for x in parts)} PAID: {prop.name if prop else ''}, "
+                         f"{' + '.join(names)}, {fmt_date(b.check_in)} to {fmt_date(b.check_out)}, "
+                         f"{sum(x.adults for x in parts)}A {sum(x.children for x in parts)}C. "
+                         f"{b.guest_name} {b.guest_phone}. Paid Rs {sum(x.paid_amount for x in parts)} of Rs "
+                         f"{sum(x.total for x in parts)} "
                          f"({method_label(b.payment_method)}).", b.property_id)
+
+    def _final_ok(self, phone: str, st: dict[str, Any], in_id: int) -> str:
+        """A last 'ok' with nothing open (owner, 2026-11-19): if the guest writes nothing more for followup_s seconds,
+        'Is there anything else?' once per conversation."""
+        if not self.followup_s or not in_id:
+            return "quiet"
+        rows = self.repo.list_chat(phone, limit=120)
+        if any(m.direction == "out" and m.text in ANYTHING_ELSE for m in rows[self._session_start(rows):]):
+            return "quiet"
+        time.sleep(self.followup_s)
+        if self.repo.last_chat_id(phone, "in") != in_id:
+            return "superseded"  # they wrote again: that message is answered instead
+        self._text(phone, t("anything_else", st.get("lang", "en")))
+        return "anything_else"
 
     def end_conversation(self, phone: str) -> None:
         """Close the current chat (booking confirmed or cancelled, owner 2026-11-18): the guest's next message starts a
@@ -520,8 +566,10 @@ class BookingBot(IdProofMixin, ChatMixin):
             self.repo.find_booking_by_link(link_id) if link_id else None)
         if b is None or b.status != "hold":
             return "ignored"
-        b.status = "expired"  # the rooms go back on sale; the guest is not chased, they write if they still want it
-        self.repo.save_booking(b)
+        for x in self.repo.list_group(b):  # the rooms go back on sale; the guest is not chased
+            if x.status == "hold":
+                x.status = "expired"
+                self.repo.save_booking(x)
         return "expired"
 
     def _bot_asked_something(self, phone: str, st: dict[str, Any]) -> bool:
@@ -539,8 +587,8 @@ class BookingBot(IdProofMixin, ChatMixin):
             return 0
         found = 0
         for b in self.repo.list_bookings(status="hold", limit=200):
-            if not b.payment_link_id:
-                continue
+            if not b.payment_link_id or (b.group_id and b.group_id != b.id):
+                continue  # the second part of a two-room-type stay shares the first part's link
             try:
                 status = link_status(b.payment_link_id)
             except Exception as exc:  # the provider being slow must never stop the sweep
@@ -562,6 +610,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         nudged = 0
         for b in self.repo.list_bookings(status="hold", limit=200):
             if (b.hold_expires_at and b.payment_link_url and "[reminded]" not in b.notes
+                    and not (b.group_id and b.group_id != b.id)
                     and timedelta(0) < b.hold_expires_at - now <= timedelta(minutes=5)):
                 b.notes = (b.notes + " [reminded]").strip()
                 self.repo.save_booking(b)

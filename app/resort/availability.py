@@ -42,6 +42,32 @@ def room_options(rt: RoomType, adults: int, children: int, available_units: int)
     return list(range(low, high + 1)) if low <= high else []
 
 
+def party_fits(rooms: list[RoomType], adults: int, children: int) -> bool:
+    """Can these rooms (one entry per room) hold the party, with at least one adult in each room?"""
+    return (len(rooms) <= adults and adults <= sum(r.max_adults for r in rooms)
+            and adults + children <= sum(r.max_occupancy for r in rooms)
+            and children <= sum(r.max_children for r in rooms))
+
+
+def mixed_rooms(free: list[tuple[RoomType, int]], adults: int, children: int,
+                wanted: int = 0) -> list[tuple[RoomType, int]] | None:
+    """The owner's priority across room types (2026-11-19): the fewest rooms (or `wanted` rooms) taken from the top of
+    the priority list, e.g. 1 Basic View (the last one free) + 1 Standard for 4 guests. `free` is (room type, free
+    rooms) in priority order. Returns [(room type, rooms), ...] or None if no set of rooms fits."""
+    units = [rt for rt, n in free for _ in range(max(n, 0)) if rt.max_adults >= 1 and rt.max_occupancy >= 1]
+    for n in ([wanted] if wanted else range(1, min(len(units), adults) + 1)):
+        pick = units[:n]
+        if len(pick) == n and party_fits(pick, adults, children):
+            out: list[tuple[RoomType, int]] = []
+            for rt in pick:
+                if out and out[-1][0] is rt:
+                    out[-1] = (rt, out[-1][1] + 1)
+                else:
+                    out.append((rt, 1))
+            return out
+    return None
+
+
 # --------------------------------------------------------------------------- price
 
 

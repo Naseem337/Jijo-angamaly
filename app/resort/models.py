@@ -114,6 +114,7 @@ class Booking:
     room_numbers: str = ""  # physical rooms given at check-in, e.g. "101, 102"
     cancel_reason: str = ""
     notes: str = ""
+    group_id: str = ""  # one stay split over room types (1 Basic + 1 Standard): every part has the first part's id
     id: str = field(default_factory=lambda: new_id("RB"))
 
     @property

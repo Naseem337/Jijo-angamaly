@@ -52,6 +52,7 @@ S: dict[str, dict[str, str]] = {
     "rooms_ok": _t(*["Yes, rooms are available for your dates."] * 4),
     "rooms_none": _t(*["Sorry, rooms are not available for your dates."] * 4),
     "greet_again": _t(*["Hi sir, how can I help you further?"] * 4),
+    "anything_else": _t(*["Is there anything else?"] * 4),
     "or": _t("or", "അല്ലെങ്കിൽ", "அல்லது", "या"),
     # the client wants no talk about payment here (2026-11-17): just the link and "please pay"
     "pay": _t('Please pay the advance using this link:\n{url}',
@@ -217,6 +218,7 @@ TN = {
     "say_again": "Sorry, konjam short-a innoru thadava type pannunga?",
     "price_line": "{room}: oru night-ku {per}, {nights} night-ku total {total}.",
     "greet_again": "Hi sir, innum enna help venum?",
+    "anything_else": "Vera edhavadhu venuma?",
     "failed": "Payment nadakkala pola irukku. Innoru thadava try pannunga:",
     "retry_link": "{url}",
     "pending": "Payment link innum {minutes} nimisham irukku: {url}",
@@ -247,6 +249,7 @@ HN = {
     "say_again": "Sorry, thoda chhota karke dobara type kijiye?",
     "price_line": "{room}: ek night ka {per}, {nights} night ka total {total}.",
     "greet_again": "Hi sir, aur kya help kar sakte hain?",
+    "anything_else": "Aur kuch chahiye?",
     "failed": "Lagta hai payment nahi hua. Ek baar phir try kijiye:",
     "retry_link": "{url}",
     "pending": "Payment link abhi {minutes} minute aur chalega: {url}",

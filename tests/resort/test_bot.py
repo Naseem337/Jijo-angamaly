@@ -194,7 +194,8 @@ def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
     assert say(w, "hi") == "greeting"  # mid-chat: the owner's greeting, no AI call (2026-11-18)
     assert w.wa.texts()[-2:] == [form, "Hi, How may I assist you?"]
     say(w, "2 people", GUEST, reply("[no reply]"))
-    assert any("need a room in Pozhiyoram" in m.content for m in w.llm.calls[-1].messages)  # the chat is remembered
+    # the chat is remembered: the resort is still known, so only the missing dates are asked (in code, 2026-11-19)
+    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :"
 
 
 def test_english_with_place_and_room_words_stays_english():
@@ -328,7 +329,9 @@ def test_the_ai_never_asks_dates_in_its_own_words_the_form_goes(world):
     assert w.wa.texts() == [FORM]
     say(w, "2 people", GUEST, reply("Yes, right on the beach. Please share your check-in and check-out dates."))
     # the answer stays, the ask becomes the form with only the missing lines (they gave '2 people')
-    assert w.wa.texts()[-2:] == ["Yes, right on the beach.", "Please share these details:\n\nCheck in :\nCheck out :"]
+    # '2 people' is stay details: the code asks only the missing lines, the AI is not needed (2026-11-19)
+    assert w.wa.texts()[-2:] == [FORM, "Please share these details:\n\nCheck in :\nCheck out :"]
+    w.llm.script.clear()
 
 
 def test_a_room_request_the_ai_leaves_silent_still_gets_the_location_question(world):
@@ -347,9 +350,9 @@ def test_naming_the_place_skips_the_location_question(world):
 def test_details_spread_over_messages_are_checked_in_code_not_asked_again(world):
     w = world
     say(w, "need a room in Alleppey", GUEST, tool("ask_stay_details", place="Alleppey"), reply("[no reply]"))
-    say(w, "dec 12", GUEST, reply("Check out date? And how many persons?"))
-    assert w.wa.texts() == [FORM]  # the form is already the last message: not sent twice in a row
-    say(w, "3 persons, till 15", GUEST, reply("Could you confirm check-in is 12 December and check-out 15 December?"))
+    say(w, "dec 12", GUEST)
+    assert w.wa.texts() == [FORM, "Please share these details:\n\nCheck out :\nNumber of persons :"]  # only what is missing
+    say(w, "3 persons, till 15", GUEST)
     assert w.wa.texts()[-2:] == ["Yes, rooms are available for your dates.",
                                  "Please share your name and mobile number to proceed."]
     assert w.repo.get_state(GUEST)["bk"]["check_out"] == "2026-12-15"
@@ -399,9 +402,8 @@ def test_a_town_answer_to_the_location_question_gets_the_form_without_the_ai(wor
     calls = len(w.llm.calls)
     assert say(w, "Alleppey") == "form" and len(w.llm.calls) == calls  # no AI guesswork for this step
     assert w.wa.texts()[-1].startswith("Please share these details:")
-    say(w, "20 Nov to 21 Nov, 2 persons", GUEST,
-        tool("check_availability", place="Alleppey", check_in="2026-11-20", check_out="2026-11-21", adults=2), reply("[no reply]"))
-    assert "CHOSEN RESORT: the guest picked Pozhiyoram, Alleppey" in w.llm.calls[-1].system
+    say(w, "20 Nov to 21 Nov, 2 persons", GUEST)  # checked in code, no AI (2026-11-19)
+    assert w.repo.get_state(GUEST)["bk"]["check_in"] == "2026-11-20" and len(w.llm.calls) == calls
     say(w, "Kochi", "+919847000123")  # not after our location question: the AI handles it as usual
     assert w.llm.calls[-1].messages[-1].content.startswith("Kochi")
 

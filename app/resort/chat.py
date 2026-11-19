@@ -143,7 +143,8 @@ _UNTIL = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:vare|vareyum|varey|tak|tk
                     r"jayenge|niklenge))\b",
                     re.IGNORECASE)  # '22 vare'
 _STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|d?h?ivas\w*|disam|dhisam|ra+thri\w*|din|raat\w*|iravu|naal\w*)\b|\bone night\b|\bovernight\b|"
-                          r"\b(?:a|one|two|three)\s+(?:nights?|days?)\b", re.IGNORECASE)
+                          r"\b(?:a|one|oru|ek|single|two|randu|rendu|do|three|moonu|moonnu|teen)\s+(?:nights?|days?|d?h?ivas\w*|disam|raat\w*|din|naal\w*)\b",
+                          re.IGNORECASE)
 _NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|ra+thri|raat|raatein|iravu|days?|d?h?ivas\w*|disam|dhisam|din|naal\w*)\b", re.IGNORECASE)
 _PERSONS = re.compile(r"(?:number of persons|persons|pax|guests|people)\s*[:=-]\s*(\d{1,2})\b|(?:we are|we're|we r|njangal|njmal|nangal|hum)\s+(\d{1,2})\b|\b(\d{1,2})\s*(?:persons?|"
                       r"people|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b", re.IGNORECASE)
@@ -181,13 +182,69 @@ def _latin_stay(text: str) -> str:
     return text
 
 
+MSG_SEP = "\x1e"  # between the guest's messages in _recent_guest_text
+_DAY_AFTER = re.compile(r"\b(?:day after tomorrow|mattannal|matannal|marunaal|parso|parson)\b|മറ്റന്നാൾ|परसों",
+                        re.IGNORECASE)
+_TOMORROW = re.compile(r"\b(?:tomorrow|tmrw|tmr|tomo|naale|nale|naaley|naalai|naalaikku|nalaiku|kal)\b|നാളെ|நாளை|कल",
+                       re.IGNORECASE)
+_TODAY = re.compile(r"\b(?:today|tonight|innu|innale raathri|aaj|indru|inniki|innaikku|innikku)\b|ഇന്ന്|இன்று|आज",
+                    re.IGNORECASE)
+_WORD_NUM = {"a": 1, "one": 1, "oru": 1, "ek": 1, "single": 1, "two": 2, "randu": 2, "rendu": 2, "do": 2, "three": 3,
+             "moonu": 3, "moonnu": 3, "munnu": 3, "teen": 3}
+_WORD_NIGHTS = re.compile(r"\b(a|one|oru|ek|single|two|randu|rendu|do|three|moonu|moonnu|munnu|teen)\s+"
+                          r"(?:nights?|days?|d?h?ivas\w*|disam|dhisam|raat\w*|din|naal\w*|ra+thri\w*)\b|\b(overnight)\b",
+                          re.IGNORECASE)
+_OUT_CUE = re.compile(r"(?:till|until|upto|up to|to|check[\s-]?out\s*:?|vare|tak|varai|-)\s*$", re.IGNORECASE)
+
+
 def parse_stay(text: str, today: date) -> dict[str, Any]:
+    """The stay details over the guest's messages (split by MSG_SEP), read one message at a time: a newer check-in
+    date replaces an older one ('dec 12' then later 'today' = today, live chat 2026-11-19), a lone 'till 15' / 'check
+    out : 15 dec' / '2 nights' completes the dates already given, and the latest number of persons wins."""
+    out: dict[str, Any] = {}
+    for seg in text.split(MSG_SEP):
+        got = _parse_one(seg, today)
+        if "check_in" in got:
+            if got.get("out_only") and out.get("check_in") and got["check_in"] > out["check_in"]:
+                out["check_out"] = got["check_in"]
+            else:
+                out["check_in"] = got["check_in"]
+                out.pop("check_out", None)
+                if "check_out" in got:
+                    out["check_out"] = got["check_out"]
+        elif got.get("nights") and out.get("check_in"):
+            out["check_out"] = out["check_in"] + timedelta(days=got["nights"])
+        elif got.get("until_day") and out.get("check_in"):  # 'dec 12' ... later '3 persons, till 15'
+            ci, day = out["check_in"], got["until_day"]
+            month, year = (ci.month, ci.year) if day > ci.day else ((ci.month % 12) + 1, ci.year + (ci.month == 12))
+            try:
+                out["check_out"] = date(year, month, day)
+            except ValueError:
+                pass
+        if "persons" in got:
+            out["persons"] = got["persons"]
+    return out
+
+
+def _nights_in(text: str) -> int:
+    if m := _NIGHTS.search(text):
+        return int(m.group(1))
+    if m := _WORD_NIGHTS.search(text):
+        return 1 if m.group(2) else _WORD_NUM[m.group(1).lower()]
+    return 0
+
+
+def _parse_one(text: str, today: date) -> dict[str, Any]:
     """Check-in, check-out and persons from what the guest typed, in any order or spread over messages:
     'Check in :dec 12 / Check out :dec 15 / Number of persons :3', '12 dec to 14 dec, 2 people', 'dec 12 ... 3 persons,
     till 15', '25/12 2 nights 4 pax', 'dec 12 se 15 tak 3 log', '12 dec la irundhu 15 varai 3 per', and the same in
     Malayalam / Tamil / Hindi script. Only what is clearly there is returned (no guessing)."""
     text = _latin_stay(text)
     found: list[tuple[int, date]] = []
+    for rx, days in ((_DAY_AFTER, 2), (_TOMORROW, 1), (_TODAY, 0)):  # 'today', 'naale', 'aaj', 'day after tomorrow'
+        for m in rx.finditer(text):
+            found.append((m.start(), today + timedelta(days=days)))
+        text = rx.sub(lambda m: " " * len(m.group(0)), text)
     for m in _DAY_MON.finditer(text):
         if d := _upcoming(int(m.group(1)), _MONTHS[m.group(2).lower()[:3]], today):
             found.append((m.start(), d))
@@ -219,8 +276,14 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
                 out["check_out"] = date(year, month, day)
             except ValueError:
                 pass
-        elif m := _NIGHTS.search(text):
-            out["check_out"] = dates[0] + timedelta(days=int(m.group(1)))
+        elif nights := _nights_in(text):
+            out["check_out"] = dates[0] + timedelta(days=nights)
+        if len(dates) == 1 and "check_out" not in out and _OUT_CUE.search(text[:found[0][0]]):
+            out["out_only"] = True  # 'check out : 15 dec' / 'till dec 15' on its own completes earlier dates
+    elif nights := _nights_in(text):
+        out["nights"] = nights
+    elif m := next((x for rx in (_DAY_ONLY, _UNTIL) for x in rx.finditer(text)), None):
+        out["until_day"] = int(m.group(1))
     persons = [int(next(g for g in m.groups() if g)) for m in _PERSONS.finditer(text)]
     if persons and 0 < persons[-1] <= 40:
         out["persons"] = persons[-1]  # the latest number they gave
@@ -296,6 +359,9 @@ STALE_PAY = re.compile(r"\b(?:payment|pay|paid|link|advance)\b|confirm aak", re.
 FORM_LABELS = re.compile(r"check[\s-]?in\s*:|check[\s-]?out\s*:|(?:number of )?persons\s*:", re.IGNORECASE)
 QUESTION_WORD = re.compile(r"\b(?:what|how|when|where|which|why|who|is|are|do|does|can|price|rate|cost|ethra|evlo|"
                            r"kitna|entha|enthu|enna|yenna|kya|evide|enga|kahan)\b", re.IGNORECASE)
+SOLD_OUT_CLAIM = re.compile(r"fully booked|sold out|no rooms?\b|not available|full(?:y)? (?:on|for)|all (?:the )?rooms "
+                            r"(?:are )?(?:booked|full)|rooms? (?:are |is )?full|booked out|onnum (?:illa|ella)|"
+                            r"available alla|free alla|illa(?:llo)? rooms?", re.IGNORECASE)
 PHOTO_ASK = re.compile(r"\b(?:photos?|pics?|pictures?|images?|fotos?|padam|padangal|video)\b|ഫോട്ടോ|படம்|फोटो",
                        re.IGNORECASE)
 # "other room photos" / "vere room" / "dusra room": the next free room type by the owner's priority
@@ -447,6 +513,7 @@ class _Turn:
     photos: list[str] = field(default_factory=list)  # uploaded photo references to send after the reply
     text: str = ""  # the guest's message this turn
     priced: bool = False  # a tool worked out a price this turn (the only source of a price the AI may state)
+    none_found: bool = False  # check_availability found no room this turn (the only source of 'fully booked')
 
 
 LANGUAGE_FIELD = {"type": "string", "enum": list(STYLES),
@@ -632,8 +699,13 @@ class ChatMixin:
         the owner's priority, then the open step so the chat moves on to the booking. None = let the AI answer
         (another resort named, or every photo already sent)."""
         bk = st.get("bk") or {}
-        prop = self.repo.get_property(bk["property_id"]) if bk.get("property_id") else None
-        if prop is None or ((other := self._named_place(text)) and other.id != prop.id):
+        named = self._named_place(text)
+        place_id = bk.get("property_id") or st.get("form_place")
+        prop = self.repo.get_property(place_id) if place_id else None
+        if prop is None:  # no resort picked yet: the one they named, else the only open one
+            places = self._places()
+            prop = named or (places[0] if len(places) == 1 else None)
+        if prop is None or (named and named.id != prop.id):
             return None
         room, problem = self._photo_room(phone, st, prop, text)
         lang = st.get("lang", "en")
@@ -644,8 +716,8 @@ class ChatMixin:
         fresh = [r for r in dict.fromkeys([*(room.photo_urls if room else []), *prop.photo_urls]) if r not in sent][:4]
         if not fresh or not self._send_photos(phone, fresh):
             return None
-        if step := self.next_step(phone, st):
-            self._text(phone, step, repeat_ok=True)  # back to the booking: name and mobile
+        step = self.next_step(phone, st) or t("ask_location", lang, towns=" or ".join(self._towns()))
+        self._text(phone, step, repeat_ok=True)  # back to the booking: the open step (location, form, name)
         return "photos"
 
     def _tool_photos(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
@@ -996,8 +1068,11 @@ class ChatMixin:
 
     def _recent_guest_text(self, phone: str) -> str:
         """The guest's messages in this conversation, oldest first (their stay details may be spread over several)."""
-        rows = [m for m in self._session_rows(phone) if m.direction == "in"][-HISTORY:]
-        return "\n".join(m.text for m in rows)[-1500:]
+        rows = self._session_rows(phone)
+        forms = {t("form", lg) for lg in ("en", "mn", "tn", "hn")}
+        start = max((i for i, m in enumerate(rows) if m.direction == "out" and m.text in forms), default=-1)
+        rows = [m for m in rows[start + 1:] if m.direction == "in"][-HISTORY:]  # a new full form = a fresh enquiry
+        return f"\n{MSG_SEP}\n".join(m.text for m in rows)[-1500:]
 
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         if prop := self._named_place(ctx.text):  # 'rooms available in allepy?': the place is known, the form follows
@@ -1421,6 +1496,33 @@ class ChatMixin:
         eased = re.sub(rf"\s*,?\s*(?:{SIR.pattern})", "", eased, flags=re.IGNORECASE).strip()
         return eased[:1].upper() + eased[1:] if eased else reply
 
+    def _stay_in_code(self, ctx: _Turn, text: str, force: bool = False) -> bool:
+        """Dates or persons in this message, with the resort known: the code checks the rooms (or asks only for the
+        missing lines) instead of the AI, which once reused old dates and once made up 'fully booked' (2026-11-19).
+        True when something was queued for the guest."""
+        st, phone = ctx.st, ctx.phone
+        bk = st.get("bk") or {}
+        place_id = st.get("form_place") or bk.get("property_id")
+        if not place_id or bk.get("chosen") or CHANGE_ASK.search(text):
+            return False
+        mine = parse_stay(text, self._today())
+        if not force and not (mine.get("check_in") or _STAY_LENGTH.search(text) or _WORD_NIGHTS.search(text)
+                              or _DAY_ONLY.search(text) or _UNTIL.search(text)
+                              or (mine.get("persons") and not bk.get("check_in"))):
+            return False  # persons alone after the rooms were checked ('goa 2 people') stay with the AI
+        prop = self.repo.get_property(place_id)
+        if prop is None:
+            return False
+        got = parse_stay(self._recent_guest_text(phone), self._today())
+        if got.get("check_in") and got.get("check_out") and got.get("persons"):
+            self._tool_check(ctx, {"place": self._place_label(prop), "check_in": got["check_in"].isoformat(),
+                                   "check_out": got["check_out"].isoformat(), "adults": got["persons"],
+                                   "language": st.get("style")})
+        elif got or force:
+            self._ask_missing(ctx, got)
+        self._save(phone, st)
+        return bool(ctx.after or ctx.summary_message)
+
     def _converse(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0,
                   images: list[tuple[str, str]] | None = None) -> str:
         if self.debounce_s and in_id:  # a second message may follow: wait, and let the newest one answer
@@ -1449,12 +1551,16 @@ class ChatMixin:
         reply = ""
         if self._over_ai_cap(phone, st):  # one guest flooding messages: the team takes over, no more AI calls
             return "handoff"
+        coded = self._stay_in_code(ctx, text)
         try:
-            if self._llm is None:
+            if coded:
+                reply = NO_REPLY  # the stay details were handled in code: rooms checked or the missing lines asked
+            elif self._llm is None:
                 raise LLMError("none", "no LLM configured")
-            llm = self._llm()
-            response = llm.complete(system, messages, TOOLS, MAX_REPLY_TOKENS)
-            for _ in range(MAX_TOOL_ROUNDS):
+            if not coded:
+                llm = self._llm()
+                response = llm.complete(system, messages, TOOLS, MAX_REPLY_TOKENS)
+            for _ in range(0 if coded else MAX_TOOL_ROUNDS):
                 if not response.tool_calls or ctx.handed_off:
                     break
                 messages.append(response.to_message())
@@ -1462,8 +1568,12 @@ class ChatMixin:
                     content, is_error = self._run_tool(ctx, call)
                     messages.append(ChatMessage.tool_result(call.id, content, is_error=is_error))
                 response = llm.complete(system, messages, TOOLS, MAX_REPLY_TOKENS)
-            if not response.tool_calls:
+            if not coded and not response.tool_calls:
                 reply = self._fix_reply(llm, system, messages, response.text.strip(), text, st)
+                if SOLD_OUT_CLAIM.search(reply) and not ctx.none_found:
+                    # 'today is fully booked' with no room check behind it (live chat 2026-11-19, rooms were free)
+                    reply = NO_REPLY
+                    self._stay_in_code(ctx, text, force=True)
         except LLMError as exc:
             log.warning("AI answer failed: %s", exc)
         except Exception as exc:  # a missing key or a bad tool must never leave the guest unanswered
@@ -1610,6 +1720,24 @@ class ChatMixin:
                 best, best_score = p, score
         return best
 
+    def _mix(self, prop: Property, bk: dict[str, Any], wanted: int = 0) -> list[tuple[RoomType, int]] | None:
+        """Rooms over two or more room types by the owner's priority, only when the top room type cannot take the
+        whole group itself; None otherwise (then one room type is offered as before)."""
+        ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
+        now = self.clock.now()
+        free = [(rt, self.repo.free_rooms(rt, ci, co, now)) for rt in self.repo.list_room_types(prop.id)]
+        mix = av.mixed_rooms(free, bk["adults"], bk["children"], wanted)
+        if not mix or len(mix) < 2:
+            return None
+        fits = self._fits(prop, bk)
+        if fits and not wanted and fits[0][1][0] < sum(n for _, n in mix):
+            return None  # one room type needs fewer rooms (10 guests: 3 Family Suites, not 2 Deluxe + 2 Family)
+        return mix
+
+    @staticmethod
+    def _mix_label(mix: list[tuple[RoomType, int]]) -> str:
+        return " + ".join(f"{n} {rt.name}" for rt, n in mix)
+
     def _fits(self, prop: Property, bk: dict[str, Any]) -> list[tuple[RoomType, list[int]]]:
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
         now = self.clock.now()
@@ -1739,7 +1867,23 @@ class ChatMixin:
                         check_out=co.isoformat(), adults=adults, children=children, rooms=wanted, room_type="",
                         stage="asked", booking_id="")
         options, offered = [], []
-        for rt, rooms_ok in self._fits(prop, bk):
+        mix = self._mix(prop, bk, wanted)
+        if mix:
+            # the top-priority room type cannot take the whole group: its free rooms first, then the next room type
+            # (owner, 2026-11-19: 4 guests, 1 Basic left -> 1 Basic + 1 Standard)
+            parts = []
+            for rt, n in mix:
+                q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, n)
+                parts.append({"room_type_id": rt.id, "rooms": n, "total": q.total, "advance": q.advance})
+            bk["mix"] = parts
+            offered = [rt for rt, _ in mix]
+            total, advance = sum(p["total"] for p in parts), sum(p["advance"] for p in parts)
+            first = av.quote(prop, mix[0][0], self.repo.list_rate_rules(mix[0][0].id), ci, co, 1)
+            options.append({"room_type": self._mix_label(mix), "rooms_possible": [sum(n for _, n in mix)],
+                            "quoted_for_rooms": sum(n for _, n in mix), "total_for_stay": total,
+                            "advance_now": advance, "balance_at_property": total - advance,
+                            "price_per_night": round(first.total / max(1, first.nights))})
+        for rt, rooms_ok in ([] if mix else self._fits(prop, bk)):
             offered.append(rt)
             rooms = wanted if wanted in rooms_ok else rooms_ok[0]
             q = av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, rooms)
@@ -1754,6 +1898,7 @@ class ChatMixin:
         out["note"] = ("Give the guest the total for their stay. Never mention that rates change, seasons, peak or high "
                        "season dates, or a price increase." + year_note)
         if not options:
+            ctx.none_found = True
             out["available"] = False
             out["reason"] = "no room type is free for this many guests on these dates (sold out or too many guests)"
             key = f"none|{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}"
@@ -1785,7 +1930,8 @@ class ChatMixin:
                 st["intro_sent"] = prop.id
             general = self._general_photos(ctx.phone, prop)
             sent = self._sent_photos(ctx.phone) | set(general)
-            room_photos = [r for r in dict.fromkeys(offered[0].photo_urls) if r not in sent][:MAX_ROOM_PHOTOS]
+            room_photos = [r for rt in offered[:2] for r in [x for x in dict.fromkeys(rt.photo_urls)
+                                                              if x not in sent][:MAX_ROOM_PHOTOS]]
             if general + room_photos:
                 ctx.after.append(general + room_photos)  # sent in order: general first, then the room's own
             ctx.after.append(t("ask_contact", lang))
@@ -1816,6 +1962,22 @@ class ChatMixin:
         fits = self._fits(prop, bk)
         chosen = next(((rt, o) for rt, o in fits if rt.name.lower() == wanted or rt.id.lower() == wanted), None) or next(
             ((rt, o) for rt, o in fits if wanted and (wanted in rt.name.lower() or rt.name.lower() in wanted)), None)
+        if chosen is None and (mix := bk.get("mix")):
+            # a group over two room types (1 Basic + 1 Standard), figures from check_availability
+            if self._int(a, "extra_beds") or (a.get("early_checkin") and str(a.get("early_checkin")).lower()
+                                               not in ("false", "0", "no")):
+                return {"error": "extra beds / early check-in for a stay over two room types is arranged by the owner: "
+                                 "call talk_to_owner"}
+            total, advance = sum(p["total"] for p in mix), sum(p["advance"] for p in mix)
+            rooms = sum(p["rooms"] for p in mix)
+            bk["chosen"] = {"mix": mix, "rooms": rooms, "extra_beds": 0, "early": False, "total": total,
+                            "advance": advance, "turn": st["turn"]}
+            label = " + ".join(f"{p['rooms']} {self.repo.get_room_type(p['room_type_id']).name}" for p in mix)
+            leads.save_lead(self.repo, ctx.phone, self.clock.now(), room_type=label, rooms=rooms, stage="summary")
+            return {"place": self._place_label(prop), "room_type": label, "rooms": rooms, "total": total,
+                    "advance_now": advance, "balance_at_property": total - advance,
+                    "next_step": ("Nothing is sent yet. If you do not have the guest's name and mobile number, ask for "
+                                  "them in one short line; once you have both, call create_booking.")}
         if chosen is None and fits:
             # No room type named, or one that is not free: the owner's top-priority free one. The guest is never
             # told about other room types or asked to pick (client, 2026-11-17).
@@ -1859,7 +2021,7 @@ class ChatMixin:
 
     def _summary_text(self, prop: Property, rt: RoomType, rooms: int, beds: int, ci: date, co: date, q: av.Quote,
                       guests: int, *, name: str = "", mobile: str = "", fee: int = 0, total: int | None = None,
-                      advance: int | None = None) -> str:
+                      advance: int | None = None, room_label: str = "") -> str:
         """The client's "glimpse of your enquiry" (2026-11-17), always English, one fact per line. The advance is
         shown as an amount, never as a percent."""
         total = q.total if total is None else total
@@ -1876,11 +2038,13 @@ class ChatMixin:
             lines.append(f"*Early Check-in @ {self._short_time(prop.early_checkin_time)}*")
         lines += [f"Check out - {self._ordinal_date(co)}", plural(q.nights, "Night"), f"{guests} PAX",
                   plural(rooms, "Room")]
-        if len(self.repo.list_room_types(prop.id)) > 1:
+        if room_label:
+            lines.append(f"*{room_label}*")
+        elif len(self.repo.list_room_types(prop.id)) > 1:
             lines.append(f"*{rt.name}*")
         if prop.meal_plan:
             lines.append(f"*{prop.meal_plan}*")
-        lines.append(f"Room Cost - {q.total - bed_cost:,}")
+        lines.append(f"Room Cost - {total - fee - bed_cost:,}")
         if bed_cost:
             lines.append(f"Extra Bed - {bed_cost:,}")
         if fee:
@@ -1901,6 +2065,14 @@ class ChatMixin:
         fee = int(early.group(2).replace(",", "")) if early else 0
         bed_cost = int(beds.group(1)) * (prop.extra_bed_rate if prop else 0) * b.nights if beds else 0
         plural = lambda n, word: f"{n} {word}{'s' if n != 1 else ''}"  # noqa: E731
+        parts = self.repo.list_group(b)  # a stay over two room types is confirmed as one booking
+        rooms, guests = sum(x.rooms for x in parts), sum(x.adults + x.children for x in parts)
+        total, paid = sum(x.total for x in parts), sum(x.paid_amount for x in parts)
+        balance = sum(x.balance for x in parts)
+        numbers = [n for x in parts for n in av.split_rooms(x.room_numbers)]
+        label = ""
+        if len(parts) > 1:
+            label = " + ".join(f"{x.rooms} {(self.repo.get_room_type(x.room_type_id) or rt).name}" for x in parts)
         lines = ["Following are the glimpse of your booking,", ""]
         if b.guest_name:
             lines.append(f"Guest - {b.guest_name}")
@@ -1909,20 +2081,22 @@ class ChatMixin:
         if early:
             lines.append(f"*Early Check-in @ {early.group(1).strip()}*")
         lines += [f"Check out - {self._ordinal_date(b.check_out)}", plural(b.nights, "Night"),
-                  f"{b.adults + b.children} PAX", plural(b.rooms, "Room")]
-        if b.room_numbers:
-            lines.append("*" + ", ".join(f"#{n}" for n in av.split_rooms(b.room_numbers)) + "*")
-        if prop and rt and len(self.repo.list_room_types(prop.id)) > 1:
+                  f"{guests} PAX", plural(rooms, "Room")]
+        if numbers:
+            lines.append("*" + ", ".join(f"#{n}" for n in numbers) + "*")
+        if label:
+            lines.append(f"*{label}*")
+        elif prop and rt and len(self.repo.list_room_types(prop.id)) > 1:
             lines.append(f"*{rt.name}*")
         if prop and prop.meal_plan:
             lines.append(f"*{prop.meal_plan}*")
-        lines.append(f"Room Cost - {b.total - fee - bed_cost:,}")
+        lines.append(f"Room Cost - {total - fee - bed_cost:,}")
         if bed_cost:
             lines.append(f"Extra Bed - {bed_cost:,}")
         if fee:
             lines.append(f"Early Check-in Charges - {fee:,}")
-        lines += [f"Total Cost - {b.total:,}", "", f"Advance Paid - {b.paid_amount:,}",
-                  f"Balance Payable - {b.balance:,}", "*Booking Confirmed ✅*"]
+        lines += [f"Total Cost - {total:,}", "", f"Advance Paid - {paid:,}",
+                  f"Balance Payable - {balance:,}", "*Booking Confirmed ✅*"]
         return "\n".join(lines)
 
     def _tool_create(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
@@ -1937,8 +2111,10 @@ class ChatMixin:
         if not bk.get("chosen") or any(a.get(k) for k in ("rooms", "extra_beds", "early_checkin")):
             picked = {k: a[k] for k in ("rooms", "extra_beds", "early_checkin") if a.get(k)}
             prior = bk.get("chosen") or {}
-            if prior:
+            if prior.get("room_type_id"):
                 picked["room_type"] = prior["room_type_id"]
+            if prior.get("mix"):
+                picked.pop("rooms", None)  # the rooms of a mixed stay come from the owner's priority
             done = self._tool_prepare(ctx, {"room_type": "", **picked, "language": a.get("language")})
             if "error" in done:
                 return done
@@ -1965,6 +2141,8 @@ class ChatMixin:
             guest.name = name
             self.repo.upsert_guest(guest)
         prop = self.repo.get_property(bk["property_id"])
+        if chosen.get("mix"):
+            return self._create_mix(ctx, a, bk, chosen, prop, name, mobile)
         rt = self.repo.get_room_type(chosen["room_type_id"])
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
         early = bool(chosen.get("early"))
@@ -2015,6 +2193,73 @@ class ChatMixin:
         ctx.pay_message = t("pay", lang, id=booking.id, minutes=self.config.hold_minutes,
                             advance=f"{booking.advance:,}", url=link.url)
         return {"ok": True, "booking_id": booking.id,
+                "note": "the enquiry summary and the payment link are sent automatically. Reply exactly [no reply]."}
+
+    def _create_mix(self, ctx: _Turn, a: dict[str, Any], bk: dict[str, Any], chosen: dict[str, Any], prop: Property,
+                    name: str, mobile: str) -> dict[str, Any]:
+        """One stay over two or more room types: one booking per room type (linked by group_id), held together, one
+        enquiry summary, one payment link for the whole advance (owner, 2026-11-19)."""
+        st, phone = ctx.st, ctx.phone
+        now = self.clock.now()
+        ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
+        lang = st.get("lang", "en")
+        hold = timedelta(minutes=self.config.hold_minutes)
+        adults_left, children_left = bk["adults"], bk["children"]
+        rooms_left = chosen["rooms"]
+        parts, types = [], []
+        for p in chosen["mix"]:
+            rt = self.repo.get_room_type(p["room_type_id"])
+            if rt is None or av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, p["rooms"]).total != p["total"]:
+                bk.pop("chosen", None)
+                return {"error": "the price changed; call check_availability again"}
+            rooms_left -= p["rooms"]
+            last = rooms_left == 0
+            adults = adults_left if last else min(rt.max_adults * p["rooms"], adults_left - rooms_left)
+            children = children_left if last else min(rt.max_children * p["rooms"],
+                                                      rt.max_occupancy * p["rooms"] - adults, children_left)
+            adults_left, children_left = adults_left - adults, children_left - children
+            parts.append(Booking(prop.id, rt.id, phone, ci, co, adults, children, p["rooms"], p["total"], p["advance"], now,
+                                 guest_name=name, language=lang, hold_expires_at=now + hold,
+                                 notes=f"Mobile: {display_phone(mobile)}"))
+            types.append((rt, p["rooms"]))
+        label = self._mix_label(types)
+        try:
+            self.repo.create_holds(parts, now)
+        except SoldOut:
+            bk.pop("chosen", None)
+            self._sold_out(ctx)
+            return {"error": "those rooms were just taken by someone else; the guest is told automatically. Reply "
+                             "exactly [no reply]."}
+        total, advance = sum(b.total for b in parts), sum(b.advance for b in parts)
+        try:
+            link = self.payments.create_payment_link(
+                advance, parts[0].id, name, phone, f"{prop.name}: {label}, {av.fmt_range(ci, co)}",
+                int((now + max(hold, timedelta(minutes=16))).timestamp()))
+        except PaymentError as exc:
+            log.error("Payment link failed for %s: %s", parts[0].id, exc)
+            for b in parts:
+                b.status, b.notes = "failed", f"payment link failed: {exc}"
+                self.repo.save_booking(b)
+            self._text(phone, t("pay_failed_link", lang))
+            self.handoff(phone, st, f"payment link could not be created for {parts[0].id}", notify_guest=False)
+            ctx.handed_off = True
+            return {"error": "payment link failed; the team has been told and will contact the guest"}
+        ids = [b.id for b in parts]
+        for b in parts:
+            b.payment_link_id, b.payment_link_url = link.id, link.url
+            b.notes += "; One stay with " + ", ".join(i for i in ids if i != b.id)
+            self.repo.save_booking(b)
+        st["booking_id"] = parts[0].id
+        st.pop("bk", None)
+        leads.save_lead(self.repo, phone, now, stage="held", booking_id=parts[0].id,
+                        from_city=(a.get("from_city") or "").strip()[:60] or None)
+        q0 = av.quote(prop, types[0][0], self.repo.list_rate_rules(types[0][0].id), ci, co, 1)
+        ctx.summary_message = self._summary_text(prop, types[0][0], chosen["rooms"], 0, ci, co, q0,
+                                                 bk["adults"] + bk["children"], name=name, mobile=mobile,
+                                                 total=total, advance=advance, room_label=label)
+        ctx.pay_message = t("pay", lang, id=parts[0].id, minutes=self.config.hold_minutes, advance=f"{advance:,}",
+                            url=link.url)
+        return {"ok": True, "booking_id": parts[0].id,
                 "note": "the enquiry summary and the payment link are sent automatically. Reply exactly [no reply]."}
 
     def _tool_recall(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:

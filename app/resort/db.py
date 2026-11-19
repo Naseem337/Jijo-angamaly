@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS bookings (
     razorpay_payment_id TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
     payment_method TEXT NOT NULL DEFAULT '', payment_ref TEXT NOT NULL DEFAULT '', amount_paid INTEGER NOT NULL DEFAULT 0,
     payment_note TEXT NOT NULL DEFAULT '', received_by TEXT NOT NULL DEFAULT '',
-    checked_in_at TEXT, checked_out_at TEXT, room_numbers TEXT NOT NULL DEFAULT '', cancel_reason TEXT NOT NULL DEFAULT '');
+    checked_in_at TEXT, checked_out_at TEXT, room_numbers TEXT NOT NULL DEFAULT '', cancel_reason TEXT NOT NULL DEFAULT '',
+    group_id TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS bookings_room ON bookings(room_type_id, status);
 CREATE INDEX IF NOT EXISTS bookings_phone ON bookings(guest_phone);
 CREATE TABLE IF NOT EXISTS guests (phone TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
@@ -87,7 +88,7 @@ def _booking(row: sqlite3.Row) -> Booking:
         razorpay_payment_id=row["razorpay_payment_id"], payment_method=row["payment_method"],
         payment_ref=row["payment_ref"], amount_paid=row["amount_paid"], payment_note=row["payment_note"],
         received_by=row["received_by"], checked_in_at=_dt(row["checked_in_at"]),
-        checked_out_at=_dt(row["checked_out_at"]), room_numbers=row["room_numbers"],
+        checked_out_at=_dt(row["checked_out_at"]), room_numbers=row["room_numbers"], group_id=row["group_id"],
         cancel_reason=row["cancel_reason"], notes=row["notes"])
 
 
@@ -112,7 +113,8 @@ class ResortRepo:
         for col, ddl in (("payment_method", "TEXT NOT NULL DEFAULT ''"), ("payment_ref", "TEXT NOT NULL DEFAULT ''"),
                          ("amount_paid", "INTEGER NOT NULL DEFAULT 0"), ("payment_note", "TEXT NOT NULL DEFAULT ''"),
                          ("received_by", "TEXT NOT NULL DEFAULT ''"), ("checked_in_at", "TEXT"), ("checked_out_at", "TEXT"),
-                         ("room_numbers", "TEXT NOT NULL DEFAULT ''"), ("cancel_reason", "TEXT NOT NULL DEFAULT ''")):
+                         ("room_numbers", "TEXT NOT NULL DEFAULT ''"), ("cancel_reason", "TEXT NOT NULL DEFAULT ''"),
+                         ("group_id", "TEXT NOT NULL DEFAULT ''")):
             if col not in have:  # databases created before payment details were stored
                 self._db.execute(f"ALTER TABLE bookings ADD COLUMN {col} {ddl}")
         if "wamid" not in {r["name"] for r in self._db.execute("PRAGMA table_info(chat)")}:
@@ -229,6 +231,35 @@ class ResortRepo:
             self._insert_booking(db, b)
         return b
 
+    def create_holds(self, parts: list[Booking], now: datetime) -> list[Booking]:
+        """One stay over several room types (1 Basic + 1 Standard): all parts are held together or none (SoldOut).
+        Every part gets group_id = the first part's id."""
+        with self._tx() as db:
+            for b in parts:
+                rt = self.get_room_type(b.room_type_id)
+                if rt is None:
+                    raise SoldOut("unknown room type")
+                marks = ",".join("?" for _ in BLOCKING)
+                rows = db.execute(f"SELECT * FROM bookings WHERE room_type_id=? AND status IN ({marks}) "
+                                  "AND check_in < ? AND check_out > ?",
+                                  (b.room_type_id, *BLOCKING, b.check_out.isoformat(), b.check_in.isoformat())).fetchall()
+                if free_units(rt, [_booking(r) for r in rows], b.check_in, b.check_out, now) < b.rooms:
+                    raise SoldOut(f"only fewer than {b.rooms} {rt.name} room(s) free")
+            for b in parts:
+                self._insert_booking(db, b)
+            gid = parts[0].id
+            for b in parts:
+                b.group_id = gid
+                db.execute("UPDATE bookings SET group_id=? WHERE id=?", (gid, b.id))
+        return parts
+
+    def list_group(self, b: Booking) -> list[Booking]:
+        """All parts of b's stay (just [b] for an ordinary booking), first part first."""
+        if not b.group_id:
+            return [b]
+        rows = self._all("SELECT * FROM bookings WHERE group_id=? ORDER BY rowid", (b.group_id,))
+        return [_booking(r) for r in rows] or [b]
+
     def add_manual_booking(self, b: Booking, now: datetime) -> Booking:
         """Dashboard walk-in / phone booking: same room check as the bot."""
         return self.create_hold(b, now)
@@ -241,13 +272,13 @@ class ResortRepo:
             "INSERT INTO bookings(id, property_id, room_type_id, guest_phone, guest_name, language, check_in, "
             "check_out, adults, children, rooms, total, advance, status, created_at, hold_expires_at, paid_at, "
             "payment_link_id, payment_link_url, razorpay_payment_id, notes, payment_method, payment_ref, amount_paid, "
-            "payment_note, received_by, checked_in_at, checked_out_at, room_numbers, cancel_reason) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "payment_note, received_by, checked_in_at, checked_out_at, room_numbers, cancel_reason, group_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (b.id, b.property_id, b.room_type_id, b.guest_phone, b.guest_name, b.language, b.check_in.isoformat(),
              b.check_out.isoformat(), b.adults, b.children, b.rooms, b.total, b.advance, b.status,
              _iso(b.created_at), _iso(b.hold_expires_at), _iso(b.paid_at), b.payment_link_id, b.payment_link_url,
              b.razorpay_payment_id, b.notes, b.payment_method, b.payment_ref, b.amount_paid, b.payment_note,
-             b.received_by, _iso(b.checked_in_at), _iso(b.checked_out_at), b.room_numbers, b.cancel_reason))
+             b.received_by, _iso(b.checked_in_at), _iso(b.checked_out_at), b.room_numbers, b.cancel_reason, b.group_id))
 
     def save_booking(self, b: Booking) -> Booking:
         """Update an existing booking (status, payment ids, notes...). A paid booking with no rooms yet gets the
