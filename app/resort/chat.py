@@ -170,8 +170,10 @@ _NATIVE_STAY_WORDS = [
     ("aug", "ഓഗസ്റ്റ്|ആഗസ്റ്റ്|ஆகஸ்ட்|अगस्त"), ("sep", "സെപ്റ്റംബർ|செப்டம்பர்|सितंबर|सितम्बर"),
     ("oct", "ഒക്ടോബർ|அக்டோபர்|अक्टूबर|अक्तूबर"), ("nov", "നവംബർ|நவம்பர்|नवंबर|नवम्बर"),
     ("dec", "ഡിസംബർ|டிசம்பர்|दिसंबर|दिसम्बर"),
-    ("per", "പേർ|പേര്|ആളുകൾ|ആൾക്കാർ|ആൾ|பேர்|நபர்கள்|நபர்|लोगों|लोग|व्यक्ति|आदमी|जन"),
+    ("per", "പേരാണ്|പേരുണ്ട്|പേർ|പേര്|ആളുകൾ|ആൾക്കാർ|ആൾ|பேர்|நபர்கள்|நபர்|लोगों|लोग|व्यक्ति|आदमी|जन"),
     ("nights", "രാത്രി|ராத்திரி|இரவு|इरवु|रातें|रात"), ("vare", "വരെ|வரை|तक"),
+    ("days", "ദിവസം|ദിവസത്തേക്ക്|ദിവസ|நாள்|நாட்கள்|दिन"), ("kid", "കുട്ടി\\S*|குழந்தை\\S*|बच्च\\S*"),
+    ("one", "ഒരു|ஒரு|एक"),
 ]
 _NATIVE_STAY = [(word, re.compile(pattern)) for word, pattern in _NATIVE_STAY_WORDS]
 
@@ -223,7 +225,21 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
                 pass
         if "persons" in got:
             out["persons"] = got["persons"]
+        if "children" in got:
+            out["children"] = got["children"]
     return out
+
+
+_KIDS = re.compile(r"\b(\d{1,2}|a|one|oru|ek|two|randu|rendu|do)\s*(?:small\s+)?(?:kids?|child(?:ren)?|kutti\w*|"
+                   r"kuzhandhai\w*|bachch?[ae]|bachch?on|bab(?:y|ies))\b", re.IGNORECASE)
+
+
+def _kids_in(text: str) -> int:
+    m = _KIDS.search(text)
+    if not m:
+        return 0
+    n = m.group(1).lower()
+    return int(n) if n.isdigit() else _WORD_NUM.get(n, 1)
 
 
 def _nights_in(text: str) -> int:
@@ -287,6 +303,8 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
     persons = [int(next(g for g in m.groups() if g)) for m in _PERSONS.finditer(text)]
     if persons and 0 < persons[-1] <= 40:
         out["persons"] = persons[-1]  # the latest number they gave
+    if kids := _kids_in(text):
+        out["children"] = kids  # 'pinne oru kuttiyum' / '2 kids': children on top of the persons
     return out
 
 
@@ -817,11 +835,20 @@ class ChatMixin:
     def _name_in_chat(self, phone: str) -> str:
         """The newest name the guest typed with a number in this conversation ('Shibil 859002727' gives Shibil even
         when that number was wrong), else ''."""
-        for m in reversed(self._session_rows(phone)):
+        rows = self._session_rows(phone)
+        asks = {t(k, lg) for k in ("ask_contact", "ask_name") for lg in ("en", "mn", "tn", "hn")}
+        for i in range(len(rows) - 1, -1, -1):
+            m = rows[i]
             if m.direction != "in":
                 continue
             words = [w for w in re.findall(r"[A-Za-z][A-Za-z.']*", m.text) if w.lower().strip(".") not in _NOT_NAME]
             if re.search(r"\d{6,}", m.text) and 1 <= len(words) <= 3:
+                return " ".join(words)
+            # 'Naseem' on its own, then the number in the next message (live chat 2026-11-19: the old saved name was
+            # used instead): a short Latin-letter answer right after we asked for the name is the name
+            prev = next((r for r in reversed(rows[:i]) if r.direction == "out"), None)
+            if (prev is not None and prev.text in asks and not re.search(r"\d|\?", m.text) and 1 <= len(words) <= 3
+                    and len(words) == len(m.text.split()) and not is_ack(m.text) and not GREETING.match(m.text)):
                 return " ".join(words)
         return ""
 
@@ -1507,7 +1534,7 @@ class ChatMixin:
         mine = parse_stay(text, self._today())
         if not force and not (mine.get("check_in") or _STAY_LENGTH.search(text) or _WORD_NIGHTS.search(text)
                               or _DAY_ONLY.search(text) or _UNTIL.search(text)
-                              or (mine.get("persons") and not bk.get("check_in"))):
+                              or (mine.get("persons") and not bk.get("check_in")) or mine.get("children")):
             return False  # persons alone after the rooms were checked ('goa 2 people') stay with the AI
         prop = self.repo.get_property(place_id)
         if prop is None:
@@ -1516,7 +1543,7 @@ class ChatMixin:
         if got.get("check_in") and got.get("check_out") and got.get("persons"):
             self._tool_check(ctx, {"place": self._place_label(prop), "check_in": got["check_in"].isoformat(),
                                    "check_out": got["check_out"].isoformat(), "adults": got["persons"],
-                                   "language": st.get("style")})
+                                   "children": got.get("children", 0), "language": st.get("style")})
         elif got or force:
             self._ask_missing(ctx, got)
         self._save(phone, st)
@@ -1918,7 +1945,24 @@ class ChatMixin:
         # room's photos -> ask name and mobile.
         key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}"
         lang = st.get("lang", "en")
-        if st.get("checked") != key:
+        same_dates = (st.get("checked") or "").rsplit("|", 1)[0] == key.rsplit("|", 1)[0]
+        if st.get("checked") != key and same_dates:
+            # only the number of guests changed ('pinne oru kuttiyum'): nothing is said twice (live chat, 2026-11-19).
+            # A different room now fits: its photos only. Then the name question, unless it is already the last ask.
+            st["checked"] = key
+            ctx.silent = True
+            sent = self._sent_photos(ctx.phone)
+            fresh = [r for rt in offered[:2] for r in [x for x in dict.fromkeys(rt.photo_urls)
+                                                       if x not in sent][:MAX_ROOM_PHOTOS]]
+            if fresh:
+                ctx.after.append(fresh)
+            asks = {t("ask_contact", lg) for lg in ("en", "mn", "tn", "hn")}
+            if fresh or (self.repo.last_outbound_text(ctx.phone) or "") not in asks:
+                ctx.after.append(t("ask_contact", lang))
+            else:
+                ctx.after.append(t("noted", lang))
+            out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
+        elif st.get("checked") != key:
             st["checked"] = key
             ctx.after.append(t("rooms_ok", lang))
             ctx.silent = True

@@ -125,3 +125,44 @@ def test_demo_data_is_removed_and_real_data_stays(world):
     out = clear_demo(w.repo)
     assert out["bookings"] >= 10
     assert [b.guest_phone for b in w.repo.list_bookings()] == [GUEST]
+
+
+def test_malayalam_voice_today_two_days_three_persons_and_a_child():
+    got = parse_stay("നമ്മൾ ഇന്ന് വരും, 2 ദിവസം അവിടെ ഉണ്ടാവും, പിന്നെ നമ്മൾ 3 പേരാണ് ടോട്ടൽ ഉള്ളത്, പിന്നെ ഒരു "
+                     "കുട്ടിയുണ്ട്.", TODAY)
+    assert got == {"check_in": TODAY, "check_out": TODAY + timedelta(days=2), "persons": 3, "children": 1}
+
+
+def test_a_name_sent_alone_then_the_number_is_used_not_an_old_saved_name(world):
+    w = world
+    g = w.repo.touch_guest(GUEST, w.clock.now(), name="Kochu kunj")
+    assert g.name == "Kochu kunj"
+    say(w, "i want rooms", GUEST, reply("[no reply]"))
+    say(w, "Allepey")
+    say(w, "i am coming dec 20 and i will be there for 2 days. we were 2 people")
+    assert w.wa.texts()[-1] == "Please share your name and mobile number to proceed."
+    say(w, "Naseem", GUEST, reply("[no reply]"))
+    say(w, "8136931505.", GUEST, reply("[no reply]"))
+    summary = next(x for x in w.wa.texts() if x.startswith("Following are the glimpse of your enquiry"))
+    assert "Guest - Naseem" in summary and "Kochu" not in summary
+
+
+def test_a_child_added_after_the_check_repeats_nothing(world):
+    w = world
+    say(w, "Rooms?")
+    say(w, "Alleppey")
+    say(w, "dec 20 2 days 3 aal")
+    n_ok = sum("available" in x for x in w.wa.texts())
+    asks = sum("name" in x and "mobile" in x for x in w.wa.texts())
+    say(w, "Pinne oru kuttiyum", GUEST, reply("[no reply]"))
+    texts = w.wa.texts()
+    assert sum("rooms are available" in x or "rooms available aanu" in x for x in texts) == 1 and n_ok >= 1
+    assert sum("name" in x and "mobile" in x for x in texts) == asks  # not asked again in another language
+    assert w.repo.get_state(GUEST)["bk"]["children"] == 1
+
+
+def test_the_manglish_anything_else_is_sent(world):
+    w = world
+    w.bot.followup_s = 0.01
+    say(w, "beach view undo?", GUEST, reply("Und, ella roomilum."))
+    assert say(w, "ok") == "anything_else"
