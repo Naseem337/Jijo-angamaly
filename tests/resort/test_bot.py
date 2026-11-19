@@ -271,12 +271,12 @@ def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then
         tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-15", adults=2),
         reply("[no reply]"))
     sent = [(k, p) for _, k, p in w.wa.to(GUEST)][start:]
-    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 2 + ["text"]  # the free room's photos only
+    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 8 + ["text"]
     assert sent[0][1] == "Yes, rooms are available for your dates."
     assert sent[1][1] == "Your Beachfront Hideout Awaits!\nDeluxe - ₹4,000/Night/Room"
     assert sent[-1][1] == "Please share your name and mobile number to proceed."
     logged = [m.text[len("[photo] "):] for m in w.repo.list_chat(GUEST, limit=100) if m.text.startswith("[photo] ")]
-    assert logged == room  # only the offered (free) room's photos, no general photos (owner, 2026-11-19)
+    assert logged == general[:6] + room  # the first 6 general photos, then ONLY the offered room's own
 
 
 @pytest.mark.parametrize("answer, place", [("allepy", "p1"), ("Aleppey pls", "p1"), ("alappuzha", "p1"),

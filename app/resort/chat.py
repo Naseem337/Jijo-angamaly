@@ -1947,14 +1947,17 @@ class ChatMixin:
         key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}"
         lang = st.get("lang", "en")
         same_dates = (st.get("checked") or "").rsplit("|", 1)[0] == key.rsplit("|", 1)[0]
+        # whose photos go: ONLY the one room offered (top priority AND free). Both room types only when the group is
+        # split over two (1 Basic + 1 Standard). A live chat got Basic + Standard photos together (owner, 2026-11-19).
+        shown = offered if mix else offered[:1]
         if st.get("checked") != key and same_dates:
             # only the number of guests changed ('pinne oru kuttiyum'): nothing is said twice (live chat, 2026-11-19).
             # A different room now fits: its photos only. Then the name question, unless it is already the last ask.
             st["checked"] = key
             ctx.silent = True
             sent = self._sent_photos(ctx.phone)
-            fresh = [r for rt in offered[:2] for r in [x for x in dict.fromkeys(rt.photo_urls)
-                                                       if x not in sent][:MAX_ROOM_PHOTOS]]
+            fresh = [r for rt in shown for r in [x for x in dict.fromkeys(rt.photo_urls)
+                                                 if x not in sent][:MAX_ROOM_PHOTOS]]
             if fresh:
                 ctx.after.append(fresh)
             asks = {t("ask_contact", lg) for lg in ("en", "mn", "tn", "hn")}
@@ -1972,12 +1975,13 @@ class ChatMixin:
                     options[0]["total_for_stay"] / max(1, out["nights"] * options[0]["quoted_for_rooms"]))
                 ctx.after.append(prop.intro.replace("{price}", _money(price)).replace("{room}", offered[0].name))
                 st["intro_sent"] = prop.id
-            # only the photos of the room that is free and offered (owner, 2026-11-19): no general photos
-            sent = self._sent_photos(ctx.phone)
-            room_photos = [r for rt in offered[:2] for r in [x for x in dict.fromkeys(rt.photo_urls)
-                                                              if x not in sent][:MAX_ROOM_PHOTOS]]
-            if room_photos:
-                ctx.after.append(room_photos)
+            # the owner's order (2026-11-19): rooms available -> glimpse -> general photos -> the offered room's photos
+            general = self._general_photos(ctx.phone, prop)
+            sent = self._sent_photos(ctx.phone) | set(general)
+            room_photos = [r for rt in shown for r in [x for x in dict.fromkeys(rt.photo_urls)
+                                                       if x not in sent][:MAX_ROOM_PHOTOS]]
+            if general + room_photos:
+                ctx.after.append(general + room_photos)
             ctx.after.append(t("ask_contact", lang))
             out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
         else:
