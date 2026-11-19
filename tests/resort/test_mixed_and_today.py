@@ -94,3 +94,14 @@ def test_a_final_ok_gets_anything_else_once_and_no_gets_nothing(world):
     n = len(w.wa.to(GUEST))
     assert say(w, "no") == "quiet" and len(w.wa.to(GUEST)) == n
     assert say(w, "ok") == "quiet" and len(w.wa.to(GUEST)) == n  # once per conversation
+
+
+def test_clearing_test_data_keeps_rooms_and_guests(world):
+    w = world
+    from test_bot import hold
+    hold(w)
+    assert w.repo.list_bookings(phone=GUEST)
+    counts = w.repo.clear_bookings_and_chats()
+    assert counts["bookings"] == 1 and counts["chat"] > 0
+    assert w.repo.list_bookings() == [] and w.repo.list_chat(GUEST) == [] and w.repo.get_state(GUEST) == {}
+    assert w.repo.list_room_types(w.p1.id) and w.repo.get_guest(GUEST) is not None

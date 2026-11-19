@@ -231,6 +231,16 @@ class ResortRepo:
             self._insert_booking(db, b)
         return b
 
+    def clear_bookings_and_chats(self) -> dict[str, int]:
+        """Before a client starts testing: every booking (with its payments, charges, refunds and ID proofs), every
+        chat and the bot's memory of each chat. Properties, rooms, photos, guests and users stay."""
+        counts = {}
+        with self._tx() as db:
+            for table in ("bookings", "charges", "refunds", "id_proofs", "chat", "chat_state"):
+                counts[table] = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                db.execute(f"DELETE FROM {table}")
+        return counts
+
     def create_holds(self, parts: list[Booking], now: datetime) -> list[Booking]:
         """One stay over several room types (1 Basic + 1 Standard): all parts are held together or none (SoldOut).
         Every part gets group_id = the first part's id."""
