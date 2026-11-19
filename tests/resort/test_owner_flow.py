@@ -249,7 +249,7 @@ def _live_setup(w):
     """Today's live dashboard: Standard 1 (108, 109), Tiny Cottage 2 (103, 104), Basic 3 (106, 107)."""
     for key, prio, nums in (("Standard", 1, ["108", "109"]), ("2", 2, ["103", "104"]), ("Basic", 3, ["106", "107"])):
         rt = w.repo.get_room_type(w.rooms[key].id)
-        w.repo.save_room_type(RoomType(**{**rt.__dict__, "priority": prio, "room_list": nums}))
+        w.repo.save_room_type(RoomType(**{**rt.__dict__, "priority": prio, "room_list": nums, "max_adults": 3}))
 
 
 def test_standard_full_a_group_needing_4_rooms_gets_cottage_and_basic(live):
@@ -358,3 +358,43 @@ def test_an_old_unpaid_enquiry_never_gets_a_reminder_after_a_new_booking(live):
     w.clock.advance(minutes=w.bot.config.hold_minutes - 3)  # the old hold would have been 'about to expire'
     w.bot.sweep()
     assert w.wa.texts(PHONE)[sent:] == []  # no 'still open' message after the confirmation
+
+
+def test_a_big_group_not_fitting_2_per_room_is_offered_extra_beds_then_ok_books(live):
+    """Live chat 2026-11-19: 15 people on 25-27 Dec got only 'not available'. 6 rooms x 2 = 12 < 15, but 5 rooms with
+    extra beds fit: the bot offers that, and 'ok' goes ahead."""
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "Check in :dec 25\nCheck out :dec 27\nNumber of persons :15")
+    assert transcript(w)[-1] == ("BOT: 15 persons fit in 5 rooms with extra beds (2 + 1 per room, ₹500 per extra bed "
+                                 "per night). Shall I go ahead with 5 rooms?")
+    chat(w, "ok")
+    lines = transcript(w)
+    assert "BOT: Yes, rooms are available for your dates." in lines
+    assert "BOT: 5 extra bed(s) added: ₹500 per bed per night." in lines
+
+
+def test_not_available_suggests_the_nearest_free_dates(live):
+    w = live
+    _live_setup(w)
+    for key in ("Standard", "2", "Basic"):
+        full(w, key, "2026-12-12", "2026-12-14")  # everything is booked on 12-14 Dec
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people")
+    assert transcript(w)[-1] == "BOT: Sorry, rooms are not available for your dates. Rooms are free on 10 Dec - 12 Dec or 14 Dec - 16 Dec."
+    chat(w, "14 dec to 16 dec")
+    assert "BOT: Yes, rooms are available for your dates." in transcript(w)  # the persons are kept
+
+
+def test_a_lone_date_after_check_out_is_asked_is_the_check_out_and_nudges_get_a_reply(live):
+    """Live chat 2026-11-19: 'For 29th Nov.?' -> 'Check out :' -> '30th Nov' got no reply; 'Please respond' too."""
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "3 Ppl")
+    chat(w, "For 29th Nov.?")
+    assert transcript(w)[-1] == "BOT: Please share these details:"
+    chat(w, "30th Nov")
+    assert "BOT: Yes, rooms are available for your dates." in transcript(w)
+    n = len(w.wa.texts(PHONE))
+    chat(w, "Please respond")
+    assert len(w.wa.texts(PHONE)) > n

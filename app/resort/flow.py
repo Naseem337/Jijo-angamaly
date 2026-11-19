@@ -22,7 +22,7 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
+from app.resort.chat import CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, YES_REPLY, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
@@ -280,6 +280,8 @@ class BookingBot(IdProofMixin, ChatMixin):
             return outcome
         if (self.repo.last_outbound_text(phone) or "") in ANYTHING_ELSE and (is_ack(text) or NOTHING.match(text)):
             return "quiet"  # 'Is there anything else?' -> 'no' / 'nothing' / 'ok': no reply (owner, 2026-11-19)
+        if st.get("suggest_rooms") and (is_ack(text) or YES_REPLY.match(text)):
+            return self._converse(phone, st, text, in_id)  # 'ok' to 'Shall I go ahead with 5 rooms?': checked in code
         if is_ack(text) and "?" not in text:  # "ok" mid-chat ("?" is a question, not an ok) (owner, 2026-11-18): carry on to the step still open, else stay quiet
             if step := self.next_step(phone, st):
                 if step == (self.repo.last_outbound_text(phone) or ""):

@@ -151,7 +151,7 @@ _NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|ra+thri|raat|raatein|iravu|days?
 # 'Person 3' at the start of a line, '3 persons', 'persons : 3'. Never across a line break: 'To 23\nPerson 3' was once
 # read as 23 persons (live chat, 2026-11-19).
 _PERSONS = re.compile(r"(?:number of persons|persons|pax|guests|people)[ \t]*[:=-][ \t]*(\d{1,2})\b|(?:we are|we're|we r|njangal|njmal|nangal|hum)[ \t]+(\d{1,2})\b|\b(\d{1,2})[ \t]*(?:persons?|"
-                      r"people|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b|"
+                      r"people|ppl|pple|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b|"
                       r"(?:^|\n)[ \t]*(?:persons?|people|pax|guests?|adults?|members)[ \t]*[:=-]?[ \t]*(\d{1,2})[ \t]*(?:$|\n)",
                       re.IGNORECASE)
 
@@ -243,8 +243,10 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
     for seg in text.split(MSG_SEP):
         got = _parse_one(seg, today)
         if "check_in" in got:
-            if got.get("out_only") and out.get("check_in") and got["check_in"] > out["check_in"]:
-                out["check_out"] = got["check_in"]
+            lone_later = ("check_out" not in got and out.get("check_in") and "check_out" not in out
+                          and got["check_in"] > out["check_in"])
+            if (got.get("out_only") or lone_later) and out.get("check_in") and got["check_in"] > out["check_in"]:
+                out["check_out"] = got["check_in"]  # '29th Nov' then '30th Nov' = 29 to 30 Nov
             else:
                 out["check_in"] = got["check_in"]
                 out.pop("check_out", None)
@@ -434,6 +436,11 @@ STALE_PAY = re.compile(r"\b(?:payment|pay|paid|link|advance)\b|confirm aak", re.
 FORM_LABELS = re.compile(r"check[\s-]?in\s*:|check[\s-]?out\s*:|(?:number of )?persons\s*:", re.IGNORECASE)
 QUESTION_WORD = re.compile(r"\b(?:what|how|when|where|which|why|who|is|are|do|does|can|price|rate|cost|ethra|evlo|"
                            r"kitna|entha|enthu|enna|yenna|kya|evide|enga|kahan)\b", re.IGNORECASE)
+NUDGE = re.compile(r"\b(?:respond|reply|answer|anyone|any update|update|waiting|there\?|marupadi|parayu|"
+                   r"bolo|sollunga)\b", re.IGNORECASE)
+YES_REPLY = re.compile(r"^\W*(?:yes|yeah|yep|ya|yaa|s|sure|ok\w*|go ahead|proceed|book|book it|do it|fine|done|"
+                       r"sheri|seri|sari|athe|aam|aanu|mathi|cheyyu|cheytho|haan|ha|haa|theek|thik|aamaa|ama|seri da)"
+                       r"(?:\s+(?:please|pls|sir|bro|cheyyu|cheytho|karo|pannunga|go ahead|book))*\W*$", re.IGNORECASE)
 SOLD_OUT_CLAIM = re.compile(r"fully booked|sold out|no rooms?\b|not available|full(?:y)? (?:on|for)|all (?:the )?rooms "
                             r"(?:are )?(?:booked|full)|rooms? (?:are |is )?full|booked out|onnum (?:illa|ella)|"
                             r"available alla|free alla|illa(?:llo)? rooms?", re.IGNORECASE)
@@ -974,7 +981,7 @@ class ChatMixin:
                 or bool(parse_stay(text, self._today())) or self._named_place(text) is not None)
         # a question, a request, booking details, or one unclear word ('asdfgh'); remarks like 'nice place' may stay quiet
         real = wish or "?" in text or bool(QUESTION_WORD.search(text)) or bool(OWNER_ASK.search(text)) \
-            or bool(CHANGE_ASK.search(text)) or len(text.split()) == 1
+            or bool(CHANGE_ASK.search(text)) or len(text.split()) == 1 or bool(NUDGE.search(text))
         if not real:
             return None
         last = self.repo.last_outbound_text(phone) or ""
@@ -1657,6 +1664,9 @@ class ChatMixin:
         place_id = st.get("form_place") or bk.get("property_id")
         if not place_id or bk.get("chosen") or CHANGE_ASK.search(text):
             return False
+        if st.get("suggest_rooms") and (is_ack(text) or YES_REPLY.match(text)):
+            bk["rooms"] = st.pop("suggest_rooms")  # 'ok' to 'Shall I go ahead with 5 rooms?'
+            force = True
         mine = parse_stay(text, self._today())
         if not force and not (mine.get("check_in") or _STAY_LENGTH.search(text) or _WORD_NIGHTS.search(text)
                               or _DAY_ONLY.search(text) or _UNTIL.search(text)
@@ -2100,9 +2110,11 @@ class ChatMixin:
             key = f"none|{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}"
             if st.get("checked") != key:  # the client's flow says plainly whether rooms are free
                 st["checked"] = key
-                ctx.after.append(t("rooms_none", st.get("lang", "en")))
+                ctx.after.append(self._no_room_answer(st, prop, bk, ci, co, adults, children, wanted))
                 ctx.silent = True
                 out["note"] += " The guest is told automatically. Reply exactly [no reply]."
+            if alt := st.get("alt_dates"):
+                out["free_dates"] = alt  # the AI may answer 'which dates are free?' from these
             return out
         if wanted and not any(wanted in o["rooms_possible"] for o in options):
             out["note"] += (f" {wanted} room(s) is not possible for {adults + children} guest(s); "
@@ -2158,6 +2170,39 @@ class ChatMixin:
         else:
             out["note"] += " Rooms are still available. Answer only what the guest asked, in one short line."
         return out
+
+    def _no_room_answer(self, st: dict[str, Any], prop: Property, bk: dict[str, Any], ci: date, co: date,
+                        adults: int, children: int, wanted: int) -> str:
+        """'Not available' is never a dead end (owner, 2026-11-19): a group too big for 2 per room is offered fewer
+        rooms with extra beds ('Shall I go ahead with 5 rooms?'); otherwise the nearest dates that are free."""
+        lang = st.get("lang", "en")
+        st.pop("suggest_rooms", None)
+        st.pop("alt_dates", None)
+        if not wanted and prop.extra_bed_rate:
+            now = self.clock.now()
+            free = [(rt, self.repo.free_rooms(rt, ci, co, now)) for rt in self.repo.list_room_types(prop.id)]
+            least = av.fewest_rooms([rt for rt, _ in free], adults, children)
+            for n in range(max(least, 1), sum(f for _, f in free) + 1):
+                if any(av.plan_rooms(rt, adults, children, f, n) for rt, f in free) or av.mixed_rooms(
+                        free, adults, children, n):
+                    st["suggest_rooms"] = n
+                    return t("beds_offer", lang, persons=adults + children, rooms=n, rate=f"{prop.extra_bed_rate:,}")
+        nights, today = (co - ci).days, self._today()
+        found: list[str] = []
+        for shift in sorted((d for d in range(-7, 22) if d), key=abs):
+            start = ci + timedelta(days=shift)
+            if start < today:
+                continue
+            probe = {**bk, "check_in": start.isoformat(), "check_out": (start + timedelta(days=nights)).isoformat()}
+            if self._fits(prop, probe) or self._mix(prop, probe, wanted):
+                found.append(f"{start.day} {start.strftime('%b')} - {(start + timedelta(days=nights)).day} "
+                             f"{(start + timedelta(days=nights)).strftime('%b')}")
+                if len(found) == 2:
+                    break
+        if found:
+            st["alt_dates"] = found
+            return t("rooms_none_alt", lang, dates=" or ".join(found))
+        return t("rooms_none", lang)
 
     def _sold_out(self, ctx: _Turn) -> None:
         """The last rooms went to another guest while this one was giving their name (stress test, 2026-11-18: with
