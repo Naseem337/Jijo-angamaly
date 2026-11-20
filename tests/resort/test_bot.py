@@ -1777,3 +1777,12 @@ def test_a_short_festival_price_beats_a_long_season_it_falls_in():
         assert night_rate(rt, rules, date(2026, 12, 20)) == 4999
         assert night_rate(rt, rules, date(2026, 12, 24)) == 3500
         assert night_rate(rt, rules, date(2026, 12, 10)) == 2500
+
+
+def test_the_bot_never_explains_how_rooms_are_picked(world):
+    # owner, 2026-11-21: never 'The resort will assign the room based on its own priority'
+    w = world
+    say(w, "which room will I get?", GUEST,
+        reply("Every room has a beach view. The resort will assign the room based on its own priority."))
+    sent = " ".join(w.wa.texts())
+    assert "priority" not in sent and "assign" not in sent and "Every room has a beach view." in sent

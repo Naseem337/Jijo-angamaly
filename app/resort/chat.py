@@ -236,6 +236,12 @@ FORM_START = "Please share these details"
 ROOMS_OFFER_ASK = re.compile(r"\b(\d{1,2})\s*rooms?\b[^.?!\n]*\?", re.IGNORECASE)
 ROOMS_MATH = re.compile(r"\b\d+\s*(?:rooms?|room\(s\)|extra beds?|beds?)\b|\bextra beds?\b|"
                         r"\b(?:rooms?|beds?)\s*(?:needed|venam|venum|chahiye)\b", re.IGNORECASE)
+# how the code picks rooms is internal: never 'The resort will assign the room based on its own priority' (owner,
+# 2026-11-21)
+INTERNAL_RULE = re.compile(r"\bpriority\b|\b(?:assign|allot|allocat)\w*\b[^.?!\n]{0,40}\brooms?\b|"
+                           r"\brooms?\b[^.?!\n]{0,40}\b(?:assign|allot|allocat)\w*|"
+                           r"\b(?:resort|owner|team|we)\b[^.?!\n]{0,30}\b(?:decide|choose|pick)s?\b[^.?!\n]{0,30}\brooms?\b",
+                           re.IGNORECASE)
 STALLING = re.compile(r"\b(?:one moment|just a moment|a moment|let me (?:check|see|confirm)|i will check|"
                       r"i'll check|please wait|wait a (?:moment|minute|sec)|checking now|"
                       r"give me a (?:moment|minute|sec))\b", re.IGNORECASE)
@@ -924,7 +930,8 @@ class ChatMixin:
         me check, one moment' promises (the code answers at once, nothing comes later)."""
         parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", reply) if x.strip()]
         checked = bool(st.get("checked")) and bool((st.get("bk") or {}).get("check_in"))
-        keep = [x for x in parts if not STALLING.search(x) and not (checked and ROOMS_MATH.search(x))]
+        keep = [x for x in parts if not STALLING.search(x) and not INTERNAL_RULE.search(x)
+                and not (checked and ROOMS_MATH.search(x))]
         out = " ".join(keep).strip()
         if checked and len(keep) < len(parts) and (line := st.get("rooms_line")) \
                 and re.search(r"\brooms?\b|\bbeds?\b|muri|kamr", guest_text, re.IGNORECASE) and line not in out:
@@ -1593,8 +1600,9 @@ class ChatMixin:
             "fewest rooms the group needs unless the guest asked for more. Whether rooms are free, the resort's "
             "details, the photos and the request for name and mobile number are all sent automatically: reply "
             "[no reply].\n"
-            "4. Never ask which room type: the resort gives the room by its own priority. Only if the guest asks for "
-            "a particular room type, call prepare_booking with it.\n"
+            "4. Never ask which room type; the code picks the room. Never tell the guest how rooms are picked: no "
+            "'priority', no 'the resort / owner will assign or decide the room'. Only if the guest asks for a "
+            "particular room type, call prepare_booking with it.\n"
             "- Never state prices, totals or the advance while checking availability; the price reaches the guest "
             "in the resort's details and the enquiry summary. Give a price only if the guest asks for it.\n"
             "5. When the guest gives their name and mobile number, call create_booking right away (no 'shall I "
