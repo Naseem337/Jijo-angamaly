@@ -563,3 +563,17 @@ def test_after_a_long_gap_the_guest_decides_new_or_continued_conversation(live):
     chat(w, "Hi")  # a greeting after a long gap starts afresh
     rows = w.repo.list_chat(PHONE, limit=50)
     assert w.bot._session_start(rows) > 0
+
+
+def test_photos_before_dates_show_every_room_and_say_why_dates_are_needed(live):
+    # owner, 2026-11-21: photos are not restricted before the dates; the guest is told the dates are needed to check
+    # which rooms are available, and is never told 'no other room is free on your dates' when they gave no dates
+    w = live
+    _live_setup(w)
+    chat(w, "Hi", "Alleppey", "photos")
+    assert "To check which rooms are available, we need your check-in and check-out dates." in w.wa.texts(PHONE)
+    chat(w, "more photos", "other room photos", "send all photos")
+    shown = {x for x in transcript(w) if x.startswith("PHOTO")}
+    assert {"PHOTO:Standard", "PHOTO:2", "PHOTO:Basic", "PHOTO:general"} <= shown
+    assert not any("no other room is free" in x for x in w.wa.texts(PHONE))
+    assert w.wa.texts(PHONE).count("To check which rooms are available, we need your check-in and check-out dates.") == 1

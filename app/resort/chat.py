@@ -860,11 +860,16 @@ class ChatMixin:
         current = next((rt for rt in free if rt.id == chosen_id), free[0])
         refs_of = {rt.id: self._room_refs(rt, st) for rt in free}
         others = [rt for rt in free if rt is not current and unsent(refs_of[rt.id])]
+        # before any dates every room is shown (owner, 2026-11-21: photos are not restricted); 'not free on your
+        # dates' is only said once there ARE dates
+        none_left = "no_other_room" if dated else "photos_sent"
+        if not dated and not others and not unsent(refs_of[current.id]) and (general := unsent(prop.photo_urls)):
+            return [(None, general)], "", ""  # every room shown: 'send all photos' / 'more' gets the resort's photos
         if ALL_ROOMS.search(text or ""):
             todo = [rt for rt in [current, *others] if unsent(refs_of[rt.id])]
-            return ([(rt, unsent(refs_of[rt.id])) for rt in todo], "", "") if todo else ([], "no_other_room", "")
+            return ([(rt, unsent(refs_of[rt.id])) for rt in todo], "", "") if todo else ([], none_left, "")
         if OTHER_ROOM.search(text or ""):
-            return ([(others[0], unsent(refs_of[others[0].id]))], "", "") if others else ([], "no_other_room", "")
+            return ([(others[0], unsent(refs_of[others[0].id]))], "", "") if others else ([], none_left, "")
         if unsent(refs_of[current.id]):
             return [(current, unsent(refs_of[current.id]))], "", ""
         if others:
@@ -1002,8 +1007,10 @@ class ChatMixin:
             self._text(phone, t("other_room_free", lang, room=plan[0][0].name), repeat_ok=True)
         if not self._send_plan(phone, plan):
             self._text(phone, t("photos_sent", lang), repeat_ok=True)
-            return "photos"
         step = self._open_step(phone, st)
+        if step == t("form", lang) and not (st.get("bk") or {}).get("check_in"):
+            # photos before any dates (owner, 2026-11-21): say WHY the dates are needed, once per conversation
+            self._text(phone, t("dates_for_availability", lang))
         if step and step != (self.repo.last_outbound_text(phone) or ""):
             self._text(phone, step, repeat_ok=True)  # back to the booking: the step still open, if any
         return "photos"

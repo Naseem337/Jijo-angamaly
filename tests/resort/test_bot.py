@@ -248,9 +248,11 @@ def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_t
     say(w, "deluxe room photos undo?", GUEST, tool("send_photos", place="Pozhiyoram", room_type="Deluxe"), reply("[no reply]"))
     images = [p for _, k, p in w.wa.to(GUEST) if k == "image"]
     assert images and len(images) == 2 and w.wa.texts() == ["*Deluxe*"]  # the room's own photos only, its name first
+    say(w, "more?", GUEST, tool("send_photos", place="Pozhiyoram"), reply("[no reply]"))
+    assert len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 6  # every room shown: the resort's 4 photos
     say(w, "more?", GUEST, tool("send_photos", place="Pozhiyoram"), reply("That's all the photos we have sir."))
     assert w.wa.texts()[-1] == "All the photos are sent above."  # fixed line, never the AI's own
-    assert len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 2
+    assert len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 6
 
 
 def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then_name(world, tmp_path, monkeypatch):

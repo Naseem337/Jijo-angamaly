@@ -55,6 +55,7 @@ S: dict[str, dict[str, str]] = {
     "anything_else": _t(*["Is there anything else?"] * 4),
     "noted": _t(*["Noted, rooms are still available."] * 4),
     "photos_sent": _t(*["All the photos are sent above."] * 4),
+    "dates_for_availability": _t(*["To check which rooms are available, we need your check-in and check-out dates."] * 4),
     "rooms_plain": _t(*["For {persons} persons: {rooms} room(s)."] * 4),
     "rooms_note": _t(*["For {persons} persons, {rooms} rooms are needed. Or {persons} persons can stay in {fewer} "
                        "room(s) with extra beds (₹{rate} per extra bed per night)."] * 4),
@@ -183,6 +184,7 @@ MN = {
     "anything_else": "Vere enthenkilum veno?",
     "noted": "Sheri, rooms ippozhum available aanu.",
     "photos_sent": "Ella photos-um mukalil ayachittund.",
+    "dates_for_availability": "Rooms available aano ennu nokkan check-in, check-out dates venam.",
     "rooms_plain": "{persons} perkku {rooms} room.",
     "rooms_note": "{persons} perkku {rooms} rooms venam. Allenkil {fewer} room-il extra bed vechu {persons} perkkum "
                   "nikkam (oru extra bed-inu ₹{rate} per night).",
@@ -245,6 +247,7 @@ TN = {
     "anything_else": "Vera edhavadhu venuma?",
     "noted": "Sari, rooms innum available.",
     "photos_sent": "Ella photos-um mela anupitten.",
+    "dates_for_availability": "Rooms available-a nu paakka check-in, check-out dates venum.",
     "rooms_plain": "{persons} perukku {rooms} room.",
     "rooms_note": "{persons} perukku {rooms} rooms venum. Illana {fewer} room-la extra bed vechu {persons} perum "
                   "thangalam (oru extra bed ₹{rate} per night).",
@@ -287,6 +290,7 @@ HN = {
     "anything_else": "Aur kuch chahiye?",
     "noted": "Theek hai, rooms abhi bhi available hain.",
     "photos_sent": "Saari photos upar bhej di hain.",
+    "dates_for_availability": "Rooms available hain ya nahi dekhne ke liye check-in aur check-out dates chahiye.",
     "rooms_plain": "{persons} logon ke liye {rooms} room.",
     "rooms_note": "{persons} logon ke liye {rooms} rooms chahiye. Ya {fewer} room mein extra bed ke saath {persons} "
                   "log reh sakte hain (ek extra bed ₹{rate} per night).",
