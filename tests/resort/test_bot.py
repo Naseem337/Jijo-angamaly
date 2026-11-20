@@ -423,23 +423,19 @@ def test_no_message_is_ever_sent_twice_in_a_conversation(world):
     say(w, "Is there a beach view?", GUEST, reply(line))
     say(w, "hmm?", GUEST, reply(line))
     assert w.wa.texts().count(line) == 1
-    w.clock.advance(minutes=60 * 25)  # a new conversation after a day of silence may say it again
+    n = len(w.wa.texts())
+    w.clock.advance(minutes=60 * 25)  # asked again a day later: the answer may go again
     say(w, "Is there a beach view?", GUEST, reply(line))
-    assert w.wa.texts().count(line) == 2
+    assert len(w.wa.texts()) == n + 1 and "beach view" in w.wa.texts()[-1]
 
 
-def test_an_essay_reply_gets_one_shorter_rewrite(world):
+def test_a_long_answer_is_sent_as_it_is_no_word_limit(world):
+    # no word limits of any kind (owner, 2026-11-20): a long answer is never rewritten shorter
     w = world
-    essay = " ".join(["Our resort is a lovely place by the backwaters with many things to enjoy."] * 8)  # a real essay (normal answers are never counted, owner 2026-11-20)
-    say(w, "tell me about the place", GUEST, reply(essay), reply("Backwater view rooms, pool and a houseboat jetty."))
-    assert w.wa.texts()[-1] == "Backwater view rooms, pool and a houseboat jetty."
-    assert "Too long" in w.llm.calls[-1].messages[-1].content
-
-
-def test_room_price_lines_do_not_count_as_chat_words():
-    from app.resort.chat import MAX_CHAT_WORDS, chatty_words
-    rooms = "\n".join(f"Deluxe room {i} with a lovely backwater view - ₹4,000 a night" for i in range(8))
-    assert chatty_words(rooms + "\nWhich one would you like?") == 5 < MAX_CHAT_WORDS
+    essay = " ".join(["Our resort is a lovely place by the backwaters with many things to enjoy."] * 8)
+    calls = len(w.llm.calls)
+    say(w, "tell me about the place", GUEST, reply(essay))
+    assert w.wa.texts()[-1] == essay and len(w.llm.calls) == calls + 1
 
 
 def test_booking_chat_end_to_end_with_payment_link(world):

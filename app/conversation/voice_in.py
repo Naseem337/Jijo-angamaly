@@ -83,7 +83,7 @@ class VoiceIn:
             return VoiceResult(problem="failed", detail=str(exc))
 
         duration = ogg_duration_seconds(audio)
-        if duration is not None and duration > self.max_seconds:
+        if self.max_seconds and duration is not None and duration > self.max_seconds:  # 0 = no limit
             return VoiceResult(problem="too_long", duration_s=duration)
         try:
             transcript = self.stt.transcribe(audio, mime)

@@ -527,3 +527,39 @@ def test_room_counts_always_come_from_the_code_never_the_ai(live):
     new = w.wa.texts(PHONE)[n:]
     assert not any("2 rooms with 1 extra bed" in x or "One moment" in x for x in new)
     assert any(seven in x for x in new)  # the AI's maths is replaced by the code's sentence
+
+
+def test_a_group_bigger_than_the_free_rooms_is_told_what_is_free(live):
+    # no fixed guest limit (owner, 2026-11-20): the real vacancy decides, and the guest is told what IS free
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14")
+    n = len(w.wa.texts(PHONE))
+    chat(w, "60 people")
+    new = w.wa.texts(PHONE)[n:]
+    assert any("enough for up to" in x and "60" in x for x in new), new
+
+
+def test_a_long_stay_has_no_night_limit(live):
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey")
+    n = len(w.wa.texts(PHONE))
+    chat(w, "dec 12 to jan 25, 2 people")  # 44 nights
+    assert "Yes, rooms are available for your dates." in w.wa.texts(PHONE)[n:]
+
+
+def test_after_a_long_gap_the_guest_decides_new_or_continued_conversation(live):
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey")
+    rows = w.repo.list_chat(PHONE, limit=50)
+    assert w.bot._session_start(rows) == 0
+    w.clock.advance(hours=50)
+    chat(w, "ok what was the price")  # continues: the earlier chat is still the same conversation
+    rows = w.repo.list_chat(PHONE, limit=50)
+    assert w.bot._session_start(rows) == 0
+    w.clock.advance(hours=50)
+    chat(w, "Hi")  # a greeting after a long gap starts afresh
+    rows = w.repo.list_chat(PHONE, limit=50)
+    assert w.bot._session_start(rows) > 0

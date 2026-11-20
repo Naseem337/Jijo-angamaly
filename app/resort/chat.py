@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 MAX_TOOL_ROUNDS = 6
 MAX_REPLY_TOKENS = 700
 HISTORY = 20  # real messages the AI sees (photo rows do not count)
-SESSION_GAP = timedelta(hours=24)  # a pause this long starts a new conversation: older chat is not shown to the AI
+SESSION_GAP = timedelta(hours=24)  # after a pause this long, a greeting starts a new conversation; anything else continues
 LINK = re.compile(r"https?://\S+")
 STYLE_LABELS = {"en": "English", "ml": "Malayalam script", "hi": "Hindi script", "ta": "Tamil script",
                 "manglish": "Manglish (Malayalam in English letters)", "hinglish": "Hinglish (Hindi in English letters)",
@@ -368,11 +368,11 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
     persons = [int(next(g for g in m.groups() if g)) for m in _PERSONS.finditer(text)]
     if not persons and re.fullmatch(r"\s*(\d{1,2})\s*", text):
         persons = [int(text.strip())]  # '3' on its own, answering 'Number of persons :'
-    if persons and 0 < persons[-1] <= 40:
+    if persons and 0 < persons[-1] <= 500:  # no 40 cap (owner, 2026-11-20); 500 only keeps a year out
         out["persons"] = persons[-1]  # the latest number they gave
     if kids := _kids_in(text):
         out["children"] = kids  # 'pinne oru kuttiyum' / '2 kids': children on top of the persons
-    if 0 < (rooms := _rooms_in(text)) <= 40:
+    if 0 < (rooms := _rooms_in(text)) <= 200:
         out["rooms"] = rooms  # '4 rooms': the group wants that many rooms (owner, 2026-11-19)
     return out
 
@@ -520,7 +520,6 @@ SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE
 MAX_ROOM_PHOTOS = None  # no limit (client, 2026-11-19): every photo uploaded for the room in the dashboard goes
 
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
-MAX_CHAT_WORDS = 80  # only real essays get a rewrite; no word counting on normal answers (owner, 2026-11-20)
 _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s", re.IGNORECASE)
 
 
@@ -931,6 +930,10 @@ class ChatMixin:
                 and re.search(r"\brooms?\b|\bbeds?\b|muri|kamr", guest_text, re.IGNORECASE) and line not in out:
             out = (out + "\n" + line).strip()
         return out
+
+    @staticmethod
+    def _rooms_line_in(st: dict[str, Any], text: str) -> bool:
+        return bool(line := st.get("rooms_line")) and line in text
 
     def _asks_location(self, sentence: str) -> bool:
         """'Ningalude location confirm cheyyamo, Alleppey aano?', 'Which place sir?': a question about the location."""
@@ -1675,14 +1678,18 @@ class ChatMixin:
     # ------------------------------------------------------------------ the conversation
 
     @staticmethod
-    def _session_start(rows: list[ChatMessage]) -> int:
-        """Index of the first message of the current conversation: a pause of SESSION_GAP, or the guest typing
-        'restart', starts a new one."""
+    def _session_start(rows: list[ChatMessage], by_time: bool = False) -> int:
+        """Index of the first message of the current conversation. 'restart' or a finished booking starts a new one.
+        After a pause of SESSION_GAP it depends on what the guest says (owner, 2026-11-20): 'Hi' / 'Hello' starts afresh,
+        a new booking request ('rooms for 20 Nov') starts afresh too; anything else ('ok book it', 'what about the
+        price you said?') continues the same conversation. by_time=True: any long pause starts afresh (repeat check)."""
         for i in range(len(rows) - 1, -1, -1):
             if rows[i].text == RESTART_MARK:
                 return i + 1
             if i and rows[i].at - rows[i - 1].at >= SESSION_GAP:
-                return i
+                first_in = next((m for m in rows[i:] if m.direction == "in"), None)
+                if by_time or first_in is None or GREETING.match(first_in.text) or BOOKING_WISH.search(first_in.text):
+                    return i
         return 0
 
     def _session_rows(self, phone: str) -> list[ChatMessage]:
@@ -1713,9 +1720,13 @@ class ChatMixin:
                     rows.append(replace(m, text="[photos sent: 1]"))
                 continue
             rows.append(m)
+        prev = None
         for m in rows[-HISTORY:]:  # the current conversation only; older chat is fetched on demand
             role = "user" if m.direction == "in" else "assistant"
             text = LINK.sub("[link]", m.text[:700])  # an old payment link must never be copied into a new chat
+            if prev is not None and m.at - prev.at >= SESSION_GAP and role == "user":
+                text = f"[{(m.at - prev.at).days or 1} day(s) later] {text}"  # the AI knows time passed
+            prev = m
             if merged and merged[-1].role == role:
                 merged[-1] = ChatMessage(role, merged[-1].content + "\n" + text)
             else:
@@ -1763,11 +1774,7 @@ class ChatMixin:
                 and latin_style(talk) == "en"):
             return ("Rewrite that reply in Manglish (Malayalam in English letters), the guest's language. Do not "
                     "answer in English; words like room, booking and payment are fine.")
-        if chatty_words(reply) > MAX_CHAT_WORDS:
-            return ("Too long. Rewrite it much shorter and simpler: answer only what the guest asked, in one or two "
-                    "short lines of easy words. "
-                    "Keep any room lines with prices as they are.")
-        return ""
+        return ""  # no word limits of any kind on answers (owner, 2026-11-20)
 
     def _fix_reply(self, llm, system: str, messages: list[ChatMessage], reply: str, guest_text: str,
                    st: dict[str, Any]) -> str:
@@ -1942,9 +1949,9 @@ class ChatMixin:
                     self._save(phone, st)
                     return "answered"
                 return "quiet"
-            # an answer to the guest's own message always goes, even when it repeats an earlier line ('how many
-            # rooms?' after the rooms sentence went once got silence, 2026-11-20)
-            self._text(phone, self._ease_sir(phone, clean), repeat_ok=True)
+            # the code's rooms sentence may go again when the guest asks about rooms ('how many rooms?' after it went
+            # once got silence, 2026-11-20); everything else follows the client rule: nothing is said twice
+            self._text(phone, self._ease_sir(phone, clean), repeat_ok=self._rooms_line_in(st, clean))
             return "answered"
         if not ctx.summary_message and (st.get("bk") or {}).get("check_in") and (contact := contact_in(text)):
             # the guest sent their number ('same number', '9876543210', 'Rahul 98470 12345') after rooms were found but
@@ -2035,8 +2042,8 @@ class ChatMixin:
             elif (dates := self._own_dates_ask(st, clean))[0]:  # it asked for dates / persons itself: the owner's form
                 self._strict_form(ctx, dates[1])
             elif clean := self._no_stale_payment(phone, text, self._no_repeat_ask(phone, self._tool_prices_only(ctx, no_unasked_prices(clean, text)))):
-                # an answer to the guest's own message always goes, even when it repeats an earlier line (2026-11-20)
-                self._text(phone, self._ease_sir(phone, clean), repeat_ok=True)
+                # the code's rooms sentence may repeat when asked again (2026-11-20); nothing else is said twice
+                self._text(phone, self._ease_sir(phone, clean), repeat_ok=self._rooms_line_in(st, clean))
                 if (m := ROOMS_OFFER_ASK.search(clean)) and (st.get("bk") or {}).get("check_in"):
                     # 'Shall I book 3 rooms?' in the AI's own words: 'Yes' / 'Ok' then re-checks with that many rooms
                     # in code (live chat 2026-11-20: 'Yes' and 'Ok' got silence)
@@ -2267,8 +2274,8 @@ class ChatMixin:
             return {"error": "the guest has not given the check-out date; the form was sent to ask it. Reply exactly "
                              "[no reply]."}
         adults, children = self._int(a, "adults"), self._int(a, "children")
-        if adults < 1 or adults + children > av.MAX_GUESTS:
-            return {"error": f"guests must be between 1 and {av.MAX_GUESTS}"}
+        if adults < 1:  # no fixed maximum (owner, 2026-11-20): the room check says what the free rooms can hold
+            return {"error": "at least 1 adult is needed"}
         bk = {"property_id": prop.id, "check_in": ci.isoformat(), "check_out": co.isoformat(),
               "adults": adults, "children": children, "rooms": self._int(a, "rooms")}
         st["bk"] = bk
@@ -2428,6 +2435,13 @@ class ChatMixin:
                         free, adults, children, n):
                     st["suggest_rooms"] = n
                     return t("beds_offer", lang, persons=adults + children, rooms=n, rate=f"{prop.extra_bed_rate:,}")
+        # a group bigger than every free room together (no fixed guest limit, owner 2026-11-20): say what IS free
+        now = self.clock.now()
+        free = [(rt, self.repo.free_rooms(rt, ci, co, now)) for rt in self.repo.list_room_types(prop.id)]
+        beds_ok = bool(prop.extra_bed_rate)
+        cap = sum(f * (rt.max_occupancy if beds_ok else av.base_per_room(rt, False)) for rt, f in free if f > 0)
+        if 0 < cap < adults + children:
+            return t("rooms_most", lang, rooms=sum(f for _, f in free if f > 0), cap=cap, persons=adults + children)
         nights, today = (co - ci).days, self._today()
         found: list[str] = []
         for shift in sorted((d for d in range(-7, 22) if d), key=abs):

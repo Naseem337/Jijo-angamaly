@@ -100,7 +100,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         """True when this exact message already went to the guest in the current conversation (client rule,
         2026-11-17: never send any message twice)."""
         rows = self.repo.list_chat(phone, limit=60)
-        rows = rows[self._session_start(rows):]
+        rows = rows[self._session_start(rows, by_time=True):]  # a day later the same answer may go again
         wanted = " ".join(text.split())
         return any(m.direction == "out" and " ".join(m.text.split()) == wanted for m in rows)
 

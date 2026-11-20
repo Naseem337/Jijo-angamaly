@@ -11,8 +11,6 @@ from datetime import date, datetime, timedelta
 
 from app.resort.models import BLOCKING, Booking, Property, RateRule, RoomType
 
-MAX_GUESTS = 40
-MAX_NIGHTS = 30
 
 
 # --------------------------------------------------------------------------- capacity
@@ -193,8 +191,6 @@ def check_dates(check_in: date, check_out: date, today: date) -> str | None:
         return "check-in is in the past"
     if check_out <= check_in:
         return "check-out must be after check-in"
-    if (check_out - check_in).days > MAX_NIGHTS:
-        return f"stays are limited to {MAX_NIGHTS} nights"
     return None
 
 

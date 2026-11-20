@@ -62,6 +62,8 @@ S: dict[str, dict[str, str]] = {
     "rooms_none_alt": _t(*["Sorry, rooms are not available for your dates. Rooms are free on {dates}."] * 4),
     "beds_offer": _t(*["{persons} persons fit in {rooms} rooms with extra beds (2 + 1 per room, ₹{rate} per extra bed "
                        "per night). Shall I go ahead with {rooms} rooms?"] * 4),
+    "rooms_most": _t(*["For your dates {rooms} room(s) are free, enough for up to {cap} persons. Please tell me how many "
+                       "persons will come, or send other dates for all {persons}."] * 4),
     "min_rooms": _t(*["Max 3 persons per room (2 + 1 extra bed), so {persons} persons need at least {rooms} rooms."] * 4),
     "or": _t("or", "അല്ലെങ്കിൽ", "அல்லது", "या"),
     # the client wants no talk about payment here (2026-11-17): just the link and "please pay"
@@ -188,6 +190,8 @@ MN = {
     "rooms_none_alt": "Sorry, ningalude dates-il rooms available alla. {dates} dates-il rooms und.",
     "beds_offer": "{persons} perkku {rooms} rooms-il extra bed vechu set aakam (oru room-il 2 + 1, extra bed-inu "
                   "₹{rate} per night). {rooms} rooms book cheyyatte?",
+    "rooms_most": "Ningalude dates-il {rooms} rooms free undu, {cap} perkku vare. Ethra per varum ennu parayamo, "
+                  "allenkil {persons} perkkum vere dates ayakkamo.",
     "min_rooms": "Oru room-il max 3 per (2 + 1 extra bed), athukond {persons} perkku kurachu {rooms} rooms venam.",
     "owner_will_help": "Owner udan ningale contact cheyyum.",
     "room_not_free": "Sorry, ningalude dates-il {room} free alla.",
@@ -248,6 +252,8 @@ TN = {
     "rooms_none_alt": "Sorry, unga dates-la rooms illa. {dates} dates-la rooms irukku.",
     "beds_offer": "{persons} perukku {rooms} rooms-la extra bed vechu adjust pannalam (2 + 1 per room, extra bed "
                   "₹{rate} per night). {rooms} rooms book pannatuma?",
+    "rooms_most": "Unga dates-la {rooms} rooms free irukku, {cap} per varaikkum. Evlo per varuvaanga nu sollunga, "
+                  "illa {persons} perukkum vera dates anuppunga.",
     "min_rooms": "Oru room-la max 3 per (2 + 1 extra bed), so {persons} perukku kammiyaa {rooms} rooms venum.",
     "failed": "Payment nadakkala pola irukku. Innoru thadava try pannunga:",
     "retry_link": "{url}",
@@ -288,6 +294,8 @@ HN = {
     "rooms_none_alt": "Sorry, aapki dates par rooms available nahi hain. {dates} ko rooms free hain.",
     "beds_offer": "{persons} logon ke liye {rooms} rooms mein extra bed ke saath ho jayega (2 + 1 per room, extra bed "
                   "₹{rate} per night). {rooms} rooms book karun?",
+    "rooms_most": "Aapki dates par {rooms} rooms free hain, {cap} logon tak. Kitne log aayenge bataiye, "
+                  "ya sabhi {persons} ke liye doosri dates bhejiye.",
     "min_rooms": "Ek room mein max 3 log (2 + 1 extra bed), isliye {persons} logon ke liye kam se kam {rooms} rooms chahiye.",
     "failed": "Lagta hai payment nahi hua. Ek baar phir try kijiye:",
     "retry_link": "{url}",
