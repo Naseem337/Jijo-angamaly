@@ -336,10 +336,30 @@ def test_too_few_rooms_asked_says_the_minimum(live):
     w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
     _live_setup(w)
     chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 8 people, 2 rooms")
-    assert w.wa.texts(PHONE)[-1] == "Max 3 persons per room (2 + 1 extra bed), so 8 persons need at least 3 rooms."
-    assert not any("not available" in x for x in w.wa.texts(PHONE))
-    chat(w, "ok 3 rooms")
+    texts = w.wa.texts(PHONE)
+    # never a dead end (live chat 2026-11-20): the minimum is said, and 3 rooms with extra beds are checked at once
+    assert "Max 3 persons per room (2 + 1 extra bed), so 8 persons need at least 3 rooms." in texts
+    assert "Yes, rooms are available for your dates." in texts
+    assert texts[-1] == "Please share your name and mobile number to proceed."
+    assert not any("not available" in x for x in texts)
     assert _plan(w) == [("Standard", 2, 2), ("2", 1, 0)]
+    chat(w, "Ok")  # 'Ok' never brings back the location question
+    assert not any("Kindly confirm the Location" in x for x in w.wa.texts(PHONE)[len(texts):])
+
+
+def test_form_with_bare_checkout_day_and_ok_never_asks_location_again(live):
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    _live_setup(w)
+    chat(w, "Room indo avde", "Alleppey")
+    n = len(w.wa.texts(PHONE))
+    chat(w, "Please share these details:\n\nCheck in :dec 29\nCheck out :30\nNumber of persons :3\nNumber of rooms:1")
+    new = w.wa.texts(PHONE)[n:]
+    assert not any(x.startswith("Please share these details") for x in new)  # 'Check out :30' = 30 Dec
+    assert any("rooms are available" in x.lower() or "rooms available" in x.lower() for x in new)
+    m = len(w.wa.texts(PHONE))
+    chat(w, "Ok")
+    assert not any("Kindly confirm the Location" in x for x in w.wa.texts(PHONE)[m:])
 
 
 def test_an_old_unpaid_enquiry_never_gets_a_reminder_after_a_new_booking(live):

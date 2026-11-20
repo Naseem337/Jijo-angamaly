@@ -129,7 +129,7 @@ _MON_DAY = re.compile(rf"\b{_MON}\s*(\d{{1,2}})(?:st|nd|rd|th)?\b"  # 'dec 12', 
                       r"(?!\s*(?:persons?|people|pax|per\b|peru|adults?|guests?|members|nights?|days?|aal|log|rooms?))",
                       re.IGNORECASE)
 _NUMERIC = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b")
-_DAY_ONLY = re.compile(r"\b(?:till|to|until|upto|up to|-|thru|through)\s*(\d{1,2})(?:st|nd|rd|th)?\b"
+_DAY_ONLY = re.compile(r"(?:\b(?:till|to|until|upto|up to|thru|through)|-|\bcheck[\s-]?out\s*[:=-]?)\s*(\d{1,2})(?:st|nd|rd|th)?\b"
                        r"(?!\s*(?:[/.-]\d|person|people|pax|per\b|adult|night|room|guest|member|aal|days?))", re.IGNORECASE)
 _PERSONS_LOOSE = re.compile(r"\b(?:for|of|we are|we're|total)\s+(\d{1,2})\b(?!\s*(?:nights?|days?|rooms?|dec|jan|feb|"
                             r"mar|apr|may|jun|jul|aug|sep|oct|nov|th|st|nd|rd))|\b(\d{1,2})\s*(?:of us|members)\b",
@@ -233,6 +233,10 @@ _WORD_NIGHTS = re.compile(r"\b(a|one|oru|ek|single|two|randu|rendu|do|three|moon
                           r"(?:nights?|days?|d?h?ivas\w*|disam|dhisam|raat\w*|din|naal\w*|ra+thri\w*)\b|\b(overnight)\b",
                           re.IGNORECASE)
 FORM_START = "Please share these details"
+ROOMS_OFFER_ASK = re.compile(r"\b(\d{1,2})\s*rooms?\b[^.?!\n]*\?", re.IGNORECASE)
+LOCATION_ASK = re.compile(r"\blocation\b|\bwhich (?:place|resort|property|town)\b|\bethu (?:sthalam|place|location)\b|"
+                          r"\bevide(?:ya|yaa|yanu|aanu)?\b.*\b(?:venam|vendath|stay)\b|സ്ഥലം|லொகேஷன்|लोकेशन",
+                          re.IGNORECASE)
 _OUT_CUE = re.compile(r"(?:till|until|upto|up to|to|check[\s-]?out\s*:?|vare|tak|varai|-)\s*$", re.IGNORECASE)
 
 
@@ -903,6 +907,17 @@ class ChatMixin:
             return None
         return t("ask_location", st.get("lang", "en"), towns=self._towns_text())
 
+    def _known_place(self, st: dict[str, Any]) -> Property | None:
+        """The resort this conversation already picked (the location answer, or the room check). Once known, the
+        location question is NEVER sent again in any path (live chat 2026-11-20: 'Ok' got it twice)."""
+        pid = st.get("form_place") or (st.get("bk") or {}).get("property_id")
+        return self.repo.get_property(pid) if pid else None
+
+    def _asks_location(self, sentence: str) -> bool:
+        """'Ningalude location confirm cheyyamo, Alleppey aano?', 'Which place sir?': a question about the location."""
+        s = sentence.lower()
+        return "?" in s and (bool(LOCATION_ASK.search(s)) or any(town.lower() in s for town in self._towns()))
+
     def _send_plan(self, phone: str, plan: list[tuple[RoomType | None, list[str]]]) -> int:
         """Each room's photos together, the room's name on its first photo (a guest seeing two rooms knows which is
         which). General photos go without a caption."""
@@ -921,6 +936,11 @@ class ChatMixin:
         if problem:
             self._text(phone, t(problem, lang, room=room), repeat_ok=True)
             return "photos"
+        if (st.get("checked") and OTHER_ROOM.search(text or "") and plan and plan[0][0] is not None
+                and not PHOTO_ASK.search(text or "")):
+            # 'any other room avail?': say plainly which other room is free, then its photos (a guest once got 'the
+            # owner will assign whichever is best', live chat 2026-11-20)
+            self._text(phone, t("other_room_free", lang, room=plan[0][0].name), repeat_ok=True)
         if not self._send_plan(phone, plan):
             self._text(phone, t("photos_sent", lang), repeat_ok=True)
             return "photos"
@@ -1065,7 +1085,7 @@ class ChatMixin:
         elif step := self.next_step(phone, st):
             msg = step if step != last else (t("fill_form", lang) if step == t("form", lang) else t("say_again", lang))
         elif wish and not (st.get("bk") or {}).get("check_in"):
-            if prop := self._named_place(text):
+            if prop := self._named_place(text) or self._known_place(st):
                 st["form_place"] = prop.id
                 self._save(phone, st)
                 msg = self._missing_form(lang, parse_stay(text, self._today()))
@@ -1179,7 +1199,7 @@ class ChatMixin:
         lang = st.get("lang", "en")
         if rest:
             self._text(phone, self._ease_sir(phone, rest))
-        prop = (self.repo.get_property(st["form_place"]) if st.get("form_place") else None) or self._named_place(
+        prop = self._known_place(st) or self._named_place(
             ctx.text) or (self._places()[0] if len(self._places()) == 1 else None)
         if prop is None:
             self._text(phone, t("ask_location", lang, towns=self._towns_text()))
@@ -1243,6 +1263,8 @@ class ChatMixin:
             return t("ask_contact", lang)
         if st.get("form_place") and not bk.get("check_in"):
             return t("form", lang)
+        if self._known_place(st) is not None:
+            return None  # the resort is picked: never the location question again (live chat 2026-11-20)
         asked_location = t("ask_location", lang, towns=self._towns_text())
         if any(m.direction == "out" and m.text == asked_location for m in self._session_rows(phone)):
             return asked_location
@@ -1264,9 +1286,11 @@ class ChatMixin:
             return None  # a booking is in progress: the AI carries on from there
         lang = st.get("lang", "en")  # the language was read in flow._dispatch, before any step answers
         prop = self._named_place(text)  # the owner always asks the location first, unless the guest named it
-        if prop is None and st.get("form_place"):
+        if prop is None and (known := self._known_place(st)):
             # the place is known and the form already went in this chat ('ok book' after the form): the open step,
             # never the location question again (N01, Step 3)
+            st["form_place"] = known.id
+            self._save(phone, st)
             form = t("form", lang)
             self._text(phone, t("fill_form", lang) if self._form_was_last(phone) else form, repeat_ok=True)
             return "form"
@@ -1311,7 +1335,7 @@ class ChatMixin:
         return got
 
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
-        if prop := self._named_place(ctx.text):  # 'rooms available in allepy?': the place is known, the form follows
+        if prop := self._named_place(ctx.text) or self._known_place(ctx.st):  # named or picked already: the form follows
             return self._tool_form(ctx, {"place": self._place_label(prop)})
         ctx.after.append(t("ask_location", ctx.st.get("lang", "en"), towns=self._towns_text()))
         ctx.silent = True
@@ -1472,8 +1496,10 @@ class ChatMixin:
             "- Always polite, concise and to the point.\n"
             "- You are the resort's booking agent: answer every question about the resort, the stay and the trip "
             "(parking, food, pool, beach, Wi-Fi, AC, check-in time, ID, distance, how to reach, places to see nearby, "
-            "weather, best season) helpfully, like a friendly person at the front desk. Use the FACTS; if a fact is "
-            "not there, say the owner will confirm and give the owner's numbers. Only for things that have nothing to "
+            "weather, best season) helpfully, like a friendly person at the front desk. Places to see, how to reach, "
+            "weather and best season: answer from what you know about the town (name 3-4 well-known places), never "
+            "'the owner will guide you'. For the resort's own rules and services (pets, alcohol, extra services) use "
+            "the FACTS; if a fact is not there, say the owner will confirm and give the owner's numbers. Only for things that have nothing to "
             "do with the trip (news, jokes, coding) say politely in one line that you help with stays at the resort.\n"
             "- When the guest's message also asks a question, ANSWER that question in one or two short lines even "
             "when a tool tells you to reply [no reply]: the booking messages still go automatically after your answer. "
@@ -1850,7 +1876,8 @@ class ChatMixin:
                 return "quiet"
             clean = LOG_LINE.sub("", self._without_name(reply.replace("—", "-").replace("**", "*"), "")).strip()
             keep = [x for x in re.split(r"(?<=[.?!])\s+|\n+", clean) if x.strip() and not CLOSING.match(x.strip())
-                    and not self._own_location_question(x) and not self._own_dates_ask(st, x)[0]
+                    and not self._own_location_question(x) and not self._asks_location(x)
+                    and not self._own_dates_ask(st, x)[0]
                     and not CONTACT_ASK.search(x) and not ROOM_FACT.search(x)]
             clean = no_unasked_prices(" ".join(keep), text)
             if not clean:
@@ -1938,13 +1965,23 @@ class ChatMixin:
             parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", clean) if x.strip()]
             if len(parts) > 1 and CLOSING.match(parts[-1].strip()):
                 clean = " ".join(parts[:-1])  # no 'Anything else?' tails (owner: very few words)
-            if self._own_location_question(clean):  # the AI asked "which location" in its own words: the owner's
+            if self._known_place(st) is not None:  # the resort is picked: the AI never asks the location again
+                clean = " ".join(x for x in re.split(r"(?<=[.?!])\s+|\n+", clean)
+                                 if x.strip() and not self._asks_location(x))
+            if not clean.strip():
+                pass
+            elif self._own_location_question(clean):  # the AI asked "which location" in its own words: the owner's
                 clean = t("ask_location", st.get("lang", "en"), towns=self._towns_text())  # wording only
                 self._text(phone, clean)
             elif (dates := self._own_dates_ask(st, clean))[0]:  # it asked for dates / persons itself: the owner's form
                 self._strict_form(ctx, dates[1])
             elif clean := self._no_stale_payment(phone, text, self._no_repeat_ask(phone, self._tool_prices_only(ctx, no_unasked_prices(clean, text)))):
                 self._text(phone, self._ease_sir(phone, clean))
+                if (m := ROOMS_OFFER_ASK.search(clean)) and (st.get("bk") or {}).get("check_in"):
+                    # 'Shall I book 3 rooms?' in the AI's own words: 'Yes' / 'Ok' then re-checks with that many rooms
+                    # in code (live chat 2026-11-20: 'Yes' and 'Ok' got silence)
+                    st["suggest_rooms"] = int(m.group(1))
+                    self._save(phone, st)
         if ctx.photos:
             self._send_photos(phone, ctx.photos)
         asked = {t("ask_contact", lang) for lang in ("en", "mn")}
@@ -2176,6 +2213,13 @@ class ChatMixin:
               "adults": adults, "children": children, "rooms": self._int(a, "rooms")}
         st["bk"] = bk
         wanted = self._int(a, "rooms")
+        if wanted and (least := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children)) \
+                and wanted < least:
+            # 8 persons in 2 rooms: at most 3 per room (2 + 1 extra bed), so the guest is told and the check goes on
+            # with the fewest rooms that work, extra beds included. Never a dead end (live chat 2026-11-20).
+            ctx.after.append(t("min_rooms", st.get("lang", "en"), persons=adults + children, rooms=least))
+            wanted = least
+            bk["rooms"] = least
         leads.save_lead(self.repo, ctx.phone, self.clock.now(), property_id=prop.id, check_in=ci.isoformat(),
                         check_out=co.isoformat(), adults=adults, children=children, rooms=wanted, room_type="",
                         stage="asked", booking_id="")
@@ -2220,13 +2264,6 @@ class ChatMixin:
                                "children": children, "options": options}
         out["note"] = ("Give the guest the total for their stay. Never mention that rates change, seasons, peak or high "
                        "season dates, or a price increase." + year_note)
-        if not options and wanted and (least := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children)) \
-                and wanted < least:
-            # 8 persons in 2 rooms: at most 3 per room (2 + 1 extra bed), so at least 3 rooms (owner, 2026-11-19)
-            ctx.after.append(t("min_rooms", st.get("lang", "en"), persons=adults + children, rooms=least))
-            ctx.silent = True
-            return {"error": f"at least {least} rooms are needed; the guest is told automatically. Reply exactly "
-                             "[no reply]."}
         if not options:
             ctx.none_found = True
             out["available"] = False

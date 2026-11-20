@@ -298,7 +298,8 @@ class BookingBot(IdProofMixin, ChatMixin):
                 return "next_step"
             if not self._bot_asked_something(phone, st):
                 return self._final_ok(phone, st, in_id)
-        if self._other_question(text) and (PHOTO_ASK.search(text) or BOOKING_WISH.search(text)
+        room_options_now = bool(st.get("checked") and ROOM_OPTIONS_ASK.search(text))
+        if not room_options_now and self._other_question(text) and (PHOTO_ASK.search(text) or BOOKING_WISH.search(text)
                                             or self._named_place(text) is not None):
             # 'Do you have rooms with a sea view?': the AI answers it first, then the fixed step below goes (owner,
             # 2026-11-20: answer like an agent). The question is never answered twice.
@@ -346,8 +347,7 @@ class BookingBot(IdProofMixin, ChatMixin):
                        for b in self.repo.list_bookings(phone=phone, limit=10))
             if BOOKING_WISH.search(text) and not (st.get("bk") or {}).get("check_in") and not live:
                 lang = st.get("lang", "en")
-                if prop := (self.repo.get_property(st["form_place"]) if st.get("form_place") else None) \
-                        or self._named_place(text):
+                if prop := self._known_place(st) or self._named_place(text):
                     st["form_place"] = prop.id
                     self._save(phone, st)
                     self._text(phone, self._missing_form(lang, self._stay_known(phone, st)), repeat_ok=True)
