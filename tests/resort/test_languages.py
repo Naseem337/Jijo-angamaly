@@ -364,3 +364,22 @@ def test_the_bot_never_sends_audio(world):
     voice(w, "டிசம்பர் இருபது ரெண்டு பேருக்கு ரூம் வேணும்", reply("Check out date sollunga?"))
     assert not [k for _, k, _ in w.wa.to(GUEST) if k in ("audio", "voice")]
     no_native_script(w)
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("text", ["Are pets allowed?", "Unmarried couples allowed?", "Is alcohol allowed?",
+                                  "Check in - 25th Nov\nCheck out - 26th Nov\n3 ppl", "can we bring a pet",
+                                  "Do you have rooms with a sea view?", "Any offer for 2 nights?"])
+def test_english_with_words_the_list_does_not_know_stays_english(text):
+    """2026-11-20: unknown English words ('pets', 'unmarried', 'ppl') made English guests get Manglish replies."""
+    from app.resort.chat import latin_style
+    assert latin_style(text) == "en"
+
+
+@pytest.mark.parametrize("text", ["Alleppey il 10 nu 2 divasam, 2 per", "enikk oru room venam", "ee room mathi",
+                                  "dec 12 nu varum", "njangal 4 per und"])
+def test_real_manglish_stays_manglish(text):
+    from app.resort.chat import latin_style
+    assert latin_style(text) == "manglish"

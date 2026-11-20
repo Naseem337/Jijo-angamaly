@@ -96,11 +96,11 @@ def latin_style(text: str, previous: str = "en") -> str:
     english, markers, unknown = _classify_latin([w for w in words if w not in names])
     if markers:
         return "manglish"
-    if english + unknown <= 2:  # a short message: English only if it has a real English word ('any pool nearby?')
-        if english and english >= unknown:
-            return "en"
-        return previous if previous in ("en", "manglish") else "en"  # '2 divasam', 'Asha, Kochi'
-    return "manglish" if unknown > english else "en"
+    # No Malayalam word at all: never Manglish. Words the English list does not know ('pets', 'unmarried', 'ppl',
+    # 'nov') once made 'Are pets allowed?' Manglish, and English guests got Malayalam replies (2026-11-20).
+    if english:
+        return "en"
+    return previous if previous in ("en", "manglish") else "en"  # '2 divasam', 'Asha, Kochi'
 
 
 MAX_GENERAL_PHOTOS = None  # no limit (client, 2026-11-19): every general photo uploaded in the dashboard goes
@@ -573,7 +573,14 @@ NO_OFFER = re.compile(
 HINGLISH_WORDS = re.compile(r"\b(?:milega|milegi|kya|kitne|kitna|raat|chahiye|karna|kar do|theek|nahi|hai|hain|aap|mujhe|hum|log)\b", re.IGNORECASE)
 MANGLISH_WORDS = re.compile(r"\b(?:und|undo|unda|aanu|aano|ethra|venam|venda|cheyyanam|cheyyam|cheyyamo|ippol|aakum|"
                             r"evide|ningal\w*|parayamo|parayu|mathi|enikk\w*|innu|naale|mattannal|tharo|tharamo|"
-                            r"vilikk\w*|kittumo|pattumo|kaanan|varunnund|varunnilla|koode|ivide|aduthu|enthokke)\b",
+                            r"vilikk\w*|kittumo|pattumo|kaanan|varunnund|varunnilla|koode|ivide|aduthu|enthokke|"
+                            # everyday Malayalam typed in English letters (2026-11-20: 'Alleppey il 10 nu 2 divasam'
+                            # must stay Manglish now that unknown words no longer count as Manglish)
+                            r"il|nu|nn|inu|ilekk\w*|divasam\w*|dhivasam\w*|disam|rathri|raathri|perkku|aalukal|"
+                            r"varum|varaam|pokum|vare|muthal|alla|alle|illa|ille|ano|aanenkil|aayirikkum|indavum|"
+                            r"njan|njangal|njmal|nammal|ente|entha|enthu|engane|evideya|sheri|kollam|kure|kurachu|"
+                            r"onnu|randu|moonnu|naalu|kayyil|kodukkam|kodukkanam|ayakkamo|ayakku|tharam|nokkam|"
+                            r"poyi|vannu|kazhinju|ninnu|kittum|pinne|oru|ee|aa)\b",
                             re.IGNORECASE)
 # Tamil typed in English letters (2026-11-18: "room irukka? evlo price?" was read as English and got English back)
 TANGLISH_WORDS = re.compile(r"\b(?:irukka|irukku|iruku|irukkum|irukkuma|evlo|evvalavu|ethana|ethanai|venum|vendum|"
