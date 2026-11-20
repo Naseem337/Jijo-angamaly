@@ -430,7 +430,7 @@ def test_no_message_is_ever_sent_twice_in_a_conversation(world):
 
 def test_an_essay_reply_gets_one_shorter_rewrite(world):
     w = world
-    essay = " ".join(["Our resort is a lovely place by the backwaters with many things to enjoy."] * 4)
+    essay = " ".join(["Our resort is a lovely place by the backwaters with many things to enjoy."] * 8)  # a real essay (normal answers are never counted, owner 2026-11-20)
     say(w, "tell me about the place", GUEST, reply(essay), reply("Backwater view rooms, pool and a houseboat jetty."))
     assert w.wa.texts()[-1] == "Backwater view rooms, pool and a houseboat jetty."
     assert "Too long" in w.llm.calls[-1].messages[-1].content

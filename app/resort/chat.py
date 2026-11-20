@@ -515,7 +515,7 @@ SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE
 MAX_ROOM_PHOTOS = None  # no limit (client, 2026-11-19): every photo uploaded for the room in the dashboard goes
 
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
-MAX_CHAT_WORDS = 40  # short but a real answer (owner, 2026-11-20: answer like an agent; was 15)
+MAX_CHAT_WORDS = 80  # only real essays get a rewrite; no word counting on normal answers (owner, 2026-11-20)
 _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s", re.IGNORECASE)
 
 
@@ -1497,8 +1497,8 @@ class ChatMixin:
             "Hinglish. If they switch, you switch. Short words like 'ok' or 'hi' keep the language so far.\n"
             "- Use ONE language per reply, the guest's own. Malayalam typed in English letters ('avde engane und', "
             "'room undo', 'evide', 'ethra aaya') is Manglish: answer in Manglish, in English letters only, NEVER in "
-            "Malayalam script. Malayalam script gets Manglish too. English gets English. Never mix languages or "
-            "languages in one reply; plain English words like room, booking, check-in, payment and price are fine "
+            "Malayalam script. Malayalam script gets Manglish too. English gets English. Never mix languages in "
+            "one reply; plain English words like room, booking, check-in, payment and price are fine "
             "inside Manglish. Example: guest 'avde parking undo' -> 'Und, parking und.'\n"
             "- Hindi typed in English letters ('kitne log', 'room milega', 'theek hai') is Hinglish: answer in Hinglish "
             "(Hindi in English letters), NEVER in Malayalam or Manglish. Tamil in English letters ('irukka', 'venum') "
@@ -1511,18 +1511,17 @@ class ChatMixin:
             "line \"REPLY LANGUAGE\" at the end of these instructions is the language to use now.\n"
             "- Pass the language style in the `language` field when you call check_availability.\n\n"
             "HOW TO TALK (the owner's rule: NO essays)\n"
-            "- Answer ONLY what the guest asked, in as few words as possible. Usually ONE short line; at most two or "
-            "three short lines. No introductions, no explanations they did not ask for, no repeating, no closing "
-            "lines like 'let me know if you need anything'. Simple, lively and friendly, like a quick WhatsApp reply "
-            "from a real person.\n"
+            "- Answer what the guest asked, simply and fully, like a quick WhatsApp reply from a real person who "
+            "thinks. Short when the answer is short; a little longer when they ask something that needs it (places "
+            "to see, how to reach). No introductions, no repeating, no closing lines like 'let me know if you need "
+            "anything'.\n"
             "- Asked about rooms? Never ask the dates or persons in your own words: call ask_location (resort not known) "
             "or ask_stay_details (resort known) and reply [no reply]. Asked the "
             "location? Send the Maps link with a few words. Asked a yes/no question? Start with yes or no.\n"
             "- Say \"sir\" at most ONCE in the whole chat (\"madam\" only if they are clearly a woman), never again after that. "
             "Never bro, dear, da, chetta, chechi, machane or their name.\n"
             "- The resort offers ONE room, chosen by the owner's priority. Never list room types or their prices.\n"
-            "- Every question you ask: ONE short line, at most 12 words, with no lead-in ('Got it', 'I see', 'Okay so'). "
-            "Ask only ONE thing at a time. No lists of options, no emoji piles (one is fine).\n"
+            "- Ask only ONE thing at a time, simply. No emoji piles (one is fine).\n"
             "- Do not paste the property description. Do not mention offers, discounts or 'special' deals. Just "
             "state the price.\n"
             "- Never repeat details the guest already gave, except in the final summary.\n"
@@ -1590,19 +1589,19 @@ class ChatMixin:
             "- Never ask the same thing twice.\n"
             "- Before the payment is received, NEVER say the room or booking is booked, confirmed, reserved or done. "
             "Say it will be confirmed once the payment is complete. The confirmation message arrives on its own.\n"
-            "- If the party does not fit or the dates are sold out, say so and suggest another date, fewer rooms "
-            "or the other place.\n\n"
+            "- If rooms are not free, the guest is told automatically with the nearest free dates or the extra-bed "
+            "way; help them with that. Never suggest a resort that is not in the FACTS.\n\n"
             "MONEY AND FACTS\n"
             "- Never tell the guest that rates change, that their dates are peak or high season, or that a price went "
             "up. Give only the total for their stay, and a per-night price only when the tool provides one. Never "
             "quote a price from memory: only from check_availability or prepare_booking. If they ask the price before "
             "you know their dates, call ask_stay_details.\n"
             "- Every price, date, room count and availability you state must come from the tool results or the "
-            "FACTS below. Never calculate your own totals. Never invent amenities or policies. If you do not "
-            "know something, say the owner will tell them and give the owner's number.\n"
-            "- Extra bed: never add one on your own. When a room would hold a third person (for example 3 persons "
-            "in 1 room), ask the guest whether they want an extra bed and tell them its price from the FACTS. "
-            "Pass extra_beds to prepare_booking only if they say yes; the tool adds the cost.\n\n"
+            "FACTS below. Never calculate your own totals. Never invent the resort's amenities or policies; a resort "
+            "fact you do not have: the owner will tell them (give the owner's number).\n"
+            "- Rooms and extra beds (the owner's rule): 2 persons per room. Fewer rooms only when the guest asks for "
+            "fewer: then up to 3 per room, the 3rd on an extra bed at the FACTS price. When the guest asks for a "
+            "number of rooms, call check_availability with that rooms number; the code adds the beds and the cost.\n\n"
             "PAYMENT\n"
             "- The payment link opens a secure Razorpay page. The guest can pay by UPI (GPay, PhonePe, Paytm, any UPI "
             "app or ID), debit or credit card, net banking or a wallet. Only the advance is paid online; the balance "
@@ -1648,7 +1647,7 @@ class ChatMixin:
 
     def _chosen_note(self, st: dict[str, Any]) -> str:
         """The resort the guest already picked (the form was sent for it): the AI must not ask again."""
-        prop = self.repo.get_property(st["form_place"]) if st.get("form_place") else None
+        prop = self._known_place(st)
         if prop is None:
             return ""
         return (f"CHOSEN RESORT: the guest picked {self._place_label(prop)} and got the booking form. When they "
