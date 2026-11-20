@@ -86,9 +86,9 @@ def test_the_whole_flow_exactly_as_the_owner_said(live):
     chat(w, "Hi", "Rooms", "Allepey", "dec 12 to dec 14, 2 people")
     lines = transcript(w)
     bot = [x for x in lines if x.startswith("BOT")]
-    assert bot[:5] == ["BOT: Hi, How may I assist you?", "BOT: Sure, Kindly confirm the Location 📍",
+    assert bot[:6] == ["BOT: Hi, How may I assist you?", "BOT: Sure, Kindly confirm the Location 📍",
                        "BOT: Please share these details:", "BOT: Yes, rooms are available for your dates.",
-                       "BOT: Your Beachfront Hideout Awaits!"]
+                       "BOT: For 2 persons: 1 room(s).", "BOT: Your Beachfront Hideout Awaits!"]
     assert photos(lines) == ["general"] * 12 + ["Basic"] * 9  # ALL general, then ONLY the free top-priority room
     assert lines[-1] == "BOT: Please share your name and mobile number to proceed."
     chat(w, "Naseem", "8136931505")
@@ -312,8 +312,9 @@ def test_fewer_rooms_only_when_asked_with_extra_beds_at_500(live):
     chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 8 people, 3 rooms")
     assert _plan(w) == [("Standard", 2, 2), ("2", 1, 0)]  # 2 Standard with an extra bed each + 1 Tiny Cottage
     texts = w.wa.texts(PHONE)
-    assert "2 extra bed(s) added: ₹500 per bed per night." in texts
-    assert texts.index("Yes, rooms are available for your dates.") < texts.index("2 extra bed(s) added: ₹500 per bed per night.")
+    line = "For 8 persons: 3 room(s) + 2 extra bed(s) (₹500 per extra bed per night)."
+    assert line in texts
+    assert texts.index("Yes, rooms are available for your dates.") < texts.index(line)
     chat(w, "Asha 9847012345")
     summary = next(x for x in w.wa.texts(PHONE) if x.startswith("Following are the glimpse of your enquiry"))
     assert "Extra Bed - 2,000" in summary and "3 Rooms" in summary  # 2 beds x 500 x 2 nights
@@ -396,7 +397,7 @@ def test_a_big_group_not_fitting_2_per_room_is_offered_extra_beds_then_ok_books(
     chat(w, "ok")
     lines = transcript(w)
     assert "BOT: Yes, rooms are available for your dates." in lines
-    assert "BOT: 5 extra bed(s) added: ₹500 per bed per night." in lines
+    assert "BOT: For 15 persons: 5 room(s) + 5 extra bed(s) (₹500 per extra bed per night)." in lines
 
 
 def test_not_available_suggests_the_nearest_free_dates(live):
@@ -577,3 +578,29 @@ def test_photos_before_dates_show_every_room_and_say_why_dates_are_needed(live):
     assert {"PHOTO:Standard", "PHOTO:2", "PHOTO:Basic", "PHOTO:general"} <= shown
     assert not any("no other room is free" in x for x in w.wa.texts(PHONE))
     assert w.wa.texts(PHONE).count("To check which rooms are available, we need your check-in and check-out dates.") == 1
+
+
+def test_live_chat_2026_11_21_past_date_price_and_oky(live):
+    # 'nov 20' typed at 12:50 am on 21 Nov was quietly read as 2027, then 'Price etreya' got the dates asked again
+    from app.core.clock import IST as _IST
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    w.clock.set(datetime(2026, 11, 21, 0, 50, tzinfo=_IST))
+    _live_setup(w)
+    chat(w, "Hi", "Allepey", "Check in :nov 20\nCheck out :30\nNumber of persons :5\nNumber of rooms:2")
+    assert w.wa.texts(PHONE)[-1] == "20 Nov has already passed. Please send your check-in and check-out dates again."
+    chat(w, "Check in :nov 22\nCheck out :30\nNumber of persons :5\nNumber of rooms:2")
+    assert "For 5 persons: 2 room(s) + 1 extra bed(s) (₹500 per extra bed per night)." in w.wa.texts(PHONE)
+    n = len(w.wa.texts(PHONE))
+    chat(w, "Price etreya")  # 2 rooms x ₹3,000 x 8 nights + 1 extra bed x ₹500 x 8 nights
+    assert w.wa.texts(PHONE)[n:] == ["2 room(s), Beach View Standard Rooms at First Floor + 1 extra bed(s), "
+                                     "22 Nov to 30 Nov 2026 (8 nights): total ₹52,000."]
+    chat(w, "Oky")  # any spelling of ok goes on to the open step
+    assert w.wa.texts(PHONE)[-1] == "Please share your name and mobile number to proceed."
+
+
+def test_the_rooms_sentence_always_follows_a_room_check(live):
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14", "4 people")
+    assert "For 4 persons: 2 room(s)." in w.wa.texts(PHONE)

@@ -303,6 +303,8 @@ class BookingBot(IdProofMixin, ChatMixin):
                 return "next_step"
             if not self._bot_asked_something(phone, st):
                 return self._final_ok(phone, st, in_id)
+        if outcome := self._price_now(phone, st, text):
+            return outcome  # the price of the checked stay, from the code: the dates are never asked again
         room_options_now = bool(st.get("checked") and ROOM_OPTIONS_ASK.search(text))
         if not room_options_now and self._other_question(text) and (PHOTO_ASK.search(text) or BOOKING_WISH.search(text)
                                             or self._named_place(text) is not None):

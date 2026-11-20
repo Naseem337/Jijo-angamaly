@@ -137,7 +137,8 @@ def test_native_script_guest_full_flow(world, hello, wants, dates, rooms_ok, ask
     assert w.wa.texts()[-1] == FORM
     # the AI asks for dates in its own words although they were all given: rooms are checked in code
     say(w, dates, GUEST, reply("Evlo per varuvinga? Check out date sollunga."))
-    assert w.wa.texts()[-2:] == [rooms_ok, ask_contact]
+    texts = w.wa.texts()  # rooms ok, the rooms sentence (owner, 2026-11-21), the name ask
+    assert texts[-3] == rooms_ok and texts[-1] == ask_contact and "1 room" in texts[-2]
     assert w.repo.get_state(GUEST)["bk"]["check_out"] == "2026-12-15"
     say(w, "Asha, 9847012345", GUEST, tool("create_booking", guest_name="Asha", mobile="9847012345"), reply("[no reply]"))
     texts = w.wa.texts()
@@ -232,8 +233,8 @@ def test_a_price_the_ai_made_up_is_replaced_by_the_real_one(world):
     say(w, "Alleppey, 10 nov to 12 nov, 2 persons", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", check_out="2026-11-12", adults=2),
         reply("[no reply]"))
-    say(w, "how much is it?", GUEST, reply("It is Rs 2,000 a night, Rs 4,000 in total."))  # no tool: made up
-    assert w.wa.texts()[-1] == "Deluxe: ₹4,000 per night, ₹8,000 for 2 nights."
+    say(w, "how much is it?", GUEST, reply("It is Rs 2,000 a night, Rs 4,000 in total."))  # the AI is not asked
+    assert w.wa.texts()[-1] == "1 room(s), Deluxe, 10 Nov to 12 Nov 2026 (2 nights): total ₹8,000."
 
 
 def test_the_ai_does_not_ask_name_and_mobile_again_after_the_fixed_ask(world):

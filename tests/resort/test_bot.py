@@ -274,9 +274,10 @@ def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then
         tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-15", adults=2),
         reply("[no reply]"))
     sent = [(k, p) for _, k, p in w.wa.to(GUEST)][start:]
-    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 8 + ["text"] + ["image"] * 2 + ["text"]  # ALL 8 general, the room's label, its 2
+    assert [k for k, _ in sent] == ["text", "text", "text"] + ["image"] * 8 + ["text"] + ["image"] * 2 + ["text"]  # ALL 8 general, the room's label, its 2
     assert sent[0][1] == "Yes, rooms are available for your dates."
-    assert sent[1][1] == "Your Beachfront Hideout Awaits!\nDeluxe - ₹4,000/Night/Room"
+    assert sent[1][1] == "For 2 persons: 1 room(s)."  # the rooms sentence always follows a check (owner, 2026-11-21)
+    assert sent[2][1] == "Your Beachfront Hideout Awaits!\nDeluxe - ₹4,000/Night/Room"
     assert sent[-1][1] == "Please share your name and mobile number to proceed."
     logged = [m.text[len("[photo] "):] for m in w.repo.list_chat(GUEST, limit=100) if m.text.startswith("[photo] ")]
     assert logged == general + room  # all general photos in the owner's order, then ONLY the offered room's own
@@ -564,7 +565,8 @@ def test_dates_in_the_past_are_refused(world):
     w = world
     say(w, "yesterday", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-01", nights=1, adults=2), reply("Which date?"))
-    assert "past" in last_tool(w)["error"]
+    assert "passed" in last_tool(w)["error"]
+    assert w.wa.texts()[-1] == "1 Nov has already passed. Please send your check-in and check-out dates again."
 
 
 def test_season_rates_and_extra_bed(world):
@@ -1415,7 +1417,8 @@ def test_casual_words_get_no_reply_but_real_talk_does(world):
         assert say(w, casual) == "quiet", casual
     assert len(w.wa.to(GUEST)) == before and len(w.llm.calls) == calls
     # anything with real content goes to the AI, even when it starts with "ok"
-    assert say(w, "ok how much for 3 nights?", GUEST, reply("3 nights is ₹12,000.")) == "answered"
+    # a price question once the stay is checked: the code gives the real price (owner, 2026-11-21)
+    assert say(w, "ok how much for 3 nights?", GUEST, reply("3 nights is ₹12,000.")) == "price"
     assert say(w, "ok book it", GUEST, reply("Sure, which room type?")) == "answered"
 
 
@@ -1552,7 +1555,8 @@ def test_the_form_then_glimpse_then_ask_name_in_the_clients_order(world):
         tool("check_availability", place="Pozhiyoram", check_in="2026-11-10", check_out="2026-11-12", adults=2),
         reply("Rooms are available sir. Beach View AC Room - 3000 per night, total 6000. Name and mobile please."))
     assert "3000" not in " ".join(w.wa.texts())  # the AI's own availability line (with prices) is never sent
-    assert w.wa.texts()[-3:] == ["Yes, rooms are available for your dates.",
+    assert w.wa.texts()[-4:] == ["Yes, rooms are available for your dates.",
+                                 "For 2 persons: 1 room(s).",
                                  "Your Beachfront Hideout Awaits!\nRoom - ₹4,000/Night/Room",
                                  "Please share your name and mobile number to proceed."]
     say(w, "Asha, same number", GUEST, tool("create_booking", guest_name="Asha", mobile="same"), reply("[no reply]"))
@@ -1602,7 +1606,7 @@ def test_a_date_with_a_year_that_has_passed_rolls_to_the_next_time_it_comes(worl
 def test_yesterday_is_still_refused_not_moved_a_year(world):
     w = world
     say(w, "yesterday", GUEST, tool("check_availability", place="Alleppey", check_in="2026-11-01", nights=1, adults=2), reply("?"))
-    assert "past" in last_tool(w)["error"]
+    assert "passed" in last_tool(w)["error"]
 
 
 def test_the_guest_is_never_called_by_name(world):

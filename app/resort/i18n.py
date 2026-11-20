@@ -60,6 +60,10 @@ S: dict[str, dict[str, str]] = {
     "rooms_note": _t(*["For {persons} persons, {rooms} rooms are needed. Or {persons} persons can stay in {fewer} "
                        "room(s) with extra beds (₹{rate} per extra bed per night)."] * 4),
     "extra_bed": _t(*["{beds} extra bed(s) added: ₹{rate} per bed per night."] * 4),
+    "price_answer": _t(*["{rooms} room(s), {room}{beds}, {dates} ({nights} nights): total {total}."] * 4),
+    "price_beds": _t(*[" + {beds} extra bed(s)"] * 4),
+    "past_date": _t(*["{day} has already passed. Please send your check-in and check-out dates again."] * 4),
+    "rooms_beds": _t(*["For {persons} persons: {rooms} room(s) + {beds} extra bed(s) (₹{rate} per extra bed per night)."] * 4),
     "rooms_none_alt": _t(*["Sorry, rooms are not available for your dates. Rooms are free on {dates}."] * 4),
     "beds_offer": _t(*["{persons} persons fit in {rooms} rooms with extra beds (2 + 1 per room, ₹{rate} per extra bed "
                        "per night). Shall I go ahead with {rooms} rooms?"] * 4),
@@ -189,6 +193,10 @@ MN = {
     "rooms_note": "{persons} perkku {rooms} rooms venam. Allenkil {fewer} room-il extra bed vechu {persons} perkkum "
                   "nikkam (oru extra bed-inu ₹{rate} per night).",
     "extra_bed": "{beds} extra bed add cheyyum: oru bed-inu ₹{rate} per night.",
+    "price_answer": "{rooms} room, {room}{beds}, {dates} ({nights} night): motham {total}.",
+    "price_beds": " + {beds} extra bed",
+    "past_date": "{day} kazhinju poyi. Check-in, check-out dates onnu koodi ayakkamo?",
+    "rooms_beds": "{persons} perkku {rooms} room + {beds} extra bed venam (oru extra bed-inu ₹{rate} per night).",
     "rooms_none_alt": "Sorry, ningalude dates-il rooms available alla. {dates} dates-il rooms und.",
     "beds_offer": "{persons} perkku {rooms} rooms-il extra bed vechu set aakam (oru room-il 2 + 1, extra bed-inu "
                   "₹{rate} per night). {rooms} rooms book cheyyatte?",
@@ -252,6 +260,10 @@ TN = {
     "rooms_note": "{persons} perukku {rooms} rooms venum. Illana {fewer} room-la extra bed vechu {persons} perum "
                   "thangalam (oru extra bed ₹{rate} per night).",
     "extra_bed": "{beds} extra bed add pannuvom: oru bed-ku ₹{rate} per night.",
+    "price_answer": "{rooms} room, {room}{beds}, {dates} ({nights} night): total {total}.",
+    "price_beds": " + {beds} extra bed",
+    "past_date": "{day} mudinjiduchu. Check-in, check-out dates innoru thadava anuppunga.",
+    "rooms_beds": "{persons} perukku {rooms} room + {beds} extra bed venum (oru extra bed ₹{rate} per night).",
     "rooms_none_alt": "Sorry, unga dates-la rooms illa. {dates} dates-la rooms irukku.",
     "beds_offer": "{persons} perukku {rooms} rooms-la extra bed vechu adjust pannalam (2 + 1 per room, extra bed "
                   "₹{rate} per night). {rooms} rooms book pannatuma?",
@@ -295,6 +307,10 @@ HN = {
     "rooms_note": "{persons} logon ke liye {rooms} rooms chahiye. Ya {fewer} room mein extra bed ke saath {persons} "
                   "log reh sakte hain (ek extra bed ₹{rate} per night).",
     "extra_bed": "{beds} extra bed add karenge: ek bed ka ₹{rate} per night.",
+    "price_answer": "{rooms} room, {room}{beds}, {dates} ({nights} night): total {total}.",
+    "price_beds": " + {beds} extra bed",
+    "past_date": "{day} nikal chuka hai. Check-in aur check-out dates phir se bhejiye.",
+    "rooms_beds": "{persons} logon ke liye {rooms} room + {beds} extra bed chahiye (ek extra bed ₹{rate} per night).",
     "rooms_none_alt": "Sorry, aapki dates par rooms available nahi hain. {dates} ko rooms free hain.",
     "beds_offer": "{persons} logon ke liye {rooms} rooms mein extra bed ke saath ho jayega (2 + 1 per room, extra bed "
                   "₹{rate} per night). {rooms} rooms book karun?",

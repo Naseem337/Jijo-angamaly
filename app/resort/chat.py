@@ -158,13 +158,15 @@ _PERSONS = re.compile(r"(?:number of persons|persons|pax|guests|people)[ \t]*[:=
 
 
 def _upcoming(day: int, month: int, today: date, year: int | None = None) -> date | None:
-    """The day/month on or after today (a booking date is never in the past)."""
+    """The day/month on or after today. A date that passed only days ago ('nov 20' typed just after midnight on 21 Nov)
+    stays in this year, so the guest is told it has passed; it is never quietly moved a year ahead (live chat,
+    2026-11-21: 'nov 20 to 30' became 2027 and the bot then kept asking for the dates)."""
     for y in ([year] if year else [today.year, today.year + 1]):
         try:
             d = date(y, month, day)
         except ValueError:
             continue
-        if d >= today or year:
+        if d >= today or year or 0 < (today - d).days <= 14:
             return d
     return None
 
@@ -236,6 +238,13 @@ FORM_START = "Please share these details"
 ROOMS_OFFER_ASK = re.compile(r"\b(\d{1,2})\s*rooms?\b[^.?!\n]*\?", re.IGNORECASE)
 ROOMS_MATH = re.compile(r"\b\d+\s*(?:rooms?|room\(s\)|extra beds?|beds?)\b|\bextra beds?\b|"
                         r"\b(?:rooms?|beds?)\s*(?:needed|venam|venum|chahiye)\b", re.IGNORECASE)
+# 'Price etreya', 'Prive ethra', 'how much', 'rate?': the price of the stay. Payment words (advance, discount, refund)
+# stay with the AI. 'ethra' alone only in a short message ('ethra per' asks how many people).
+PRICE_Q = re.compile(r"\b(?:price|prices|prize|prise|prive|pricee|rate|rates|tariff|cost|how much|charges?|rent|vila|"
+                     r"kitna|kitne ka|evlo|evvalavu)\b|വില|எவ்வளவு|कितना", re.IGNORECASE)
+PRICE_SHORT = re.compile(r"^\W*(?:ethra|etra|ethraya|etreya|ethreya|ethrayaa|ethra aakum|ethra aavum|ethrayaakum)\W*$",
+                         re.IGNORECASE)
+NOT_PRICE = re.compile(r"discount|offer|reduce|advance|balance|refund|cancel|paid|extra bed|early", re.IGNORECASE)
 # how the code picks rooms is internal: never 'The resort will assign the room based on its own priority' (owner,
 # 2026-11-21)
 INTERNAL_RULE = re.compile(r"\bpriority\b|\b(?:assign|allot|allocat)\w*\b[^.?!\n]{0,40}\brooms?\b|"
@@ -628,6 +637,9 @@ def looks_unfinished(text: str) -> bool:
     return words[-1].strip(".,") in DANGLING and not s.endswith(".")
 
 
+OK_SPELLING = re.compile(r"o+k+(?:a+y*|e+y*|i+e*|y+)?|k+")
+
+
 def is_ack(text: str) -> bool:
     """Only an acknowledgement: 'ok', 'okay thanks', 'sheri', '👍'. Nothing to answer."""
     s = text.strip().lower()
@@ -636,7 +648,8 @@ def is_ack(text: str) -> bool:
     if not re.search(r"\w", s):  # emoji or punctuation only
         return True
     words = [w.strip(".,!?;:()-'\"") for w in s.split() if re.search(r"\w", w)]  # not \w: it would cut Malayalam vowel signs
-    return 0 < len(words) <= 5 and all(w in ACK_WORDS for w in words)
+    # every spelling of ok counts: 'Oky', 'okyy', 'oki', 'okkk', 'okaay' (live chat 2026-11-21: 'Oky' got 'type that again')
+    return 0 < len(words) <= 5 and all(w in ACK_WORDS or OK_SPELLING.fullmatch(w) for w in words)
 
 
 def display_phone(e164: str) -> str:
@@ -942,6 +955,43 @@ class ChatMixin:
                 and re.search(r"\brooms?\b|\bbeds?\b|muri|kamr", guest_text, re.IGNORECASE) and line not in out:
             out = (out + "\n" + line).strip()
         return out
+
+    def _price_now(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """'Price etreya' once the dates and persons are checked: the price of THAT stay, from the code (live chat
+        2026-11-21: the AI asked for the dates again although the guest had given them). None = not a price question,
+        or the stay is not checked yet (then the AI / the form asks what is missing)."""
+        bk = st.get("bk") or {}
+        if not (st.get("checked") and bk.get("check_in") and bk.get("check_out") and bk.get("adults")):
+            return None
+        if not (PRICE_Q.search(text) or PRICE_SHORT.match(text)) or NOT_PRICE.search(text):
+            return None
+        ctx = _Turn(phone, st, text=text)
+        st.setdefault("turn", 0)
+        before = bk.get("chosen")
+        out = self._tool_prepare(ctx, {"rooms": bk.get("rooms") or 0} if bk.get("rooms") else {})
+        if "error" in out:
+            out = self._tool_prepare(ctx, {})
+        beds_chosen = int((bk.get("chosen") or {}).get("extra_beds") or 0)
+        if before is None:  # only the price was asked: the booking flow (name ask next) is unchanged
+            bk.pop("chosen", None)
+        else:
+            bk["chosen"] = before
+        lang = st.get("lang", "en")
+        if "error" in out:
+            for message in ctx.after:  # e.g. the rooms were just taken: the fixed 'not available' line
+                self._text(phone, message)
+            self._save(phone, st)
+            return "price" if ctx.after else None
+        ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
+        beds = int(out.get("extra_beds") or beds_chosen)
+        self._text(phone, t("price_answer", lang, rooms=out["rooms"], room=out["room_type"],
+                            beds=t("price_beds", lang, beds=beds) if beds else "", dates=av.fmt_range(ci, co),
+                            nights=(co - ci).days, total=_money(int(out["total"]))), repeat_ok=True)
+        step = self._open_step(phone, st)
+        if step and step != (self.repo.last_outbound_text(phone) or ""):
+            self._text(phone, step)  # back to the booking (the name ask), never twice in a row
+        self._save(phone, st)
+        return "price"
 
     @staticmethod
     def _rooms_line_in(st: dict[str, Any], text: str) -> bool:
@@ -2274,6 +2324,11 @@ class ChatMixin:
                     year_note = f" The guest gave no future year, so the dates were taken as {ci.isoformat()} to {co.isoformat()}."
                     break
         if problem := av.check_dates(ci, co, today):
+            if ci < today:  # a date that just passed: told in code, the dates are asked again (owner, 2026-11-21)
+                ctx.after.append(t("past_date", st.get("lang", "en"), day=f"{ci.day} {ci.strftime('%b')}"))
+                ctx.silent = True
+                return {"error": "the check-in date has passed; the guest is told automatically. Reply exactly "
+                                 "[no reply]."}
             return {"error": problem}
         said = self._recent_guest_text(ctx.phone)
         got = self._stay_known(ctx.phone, st)
@@ -2378,7 +2433,9 @@ class ChatMixin:
         # the AI never does this maths (live chat 2026-11-20: '7 people ... 2 rooms with 1 extra bed in each')
         quoted = int(options[0].get("quoted_for_rooms") or 1)
         if beds := options[0].get("extra_beds"):
-            rooms_line = t("extra_bed", lang, beds=beds, rate=f"{prop.extra_bed_rate:,}")
+            # owner, 2026-11-21: always say plainly how many rooms AND extra beds ('2 rooms + 1 extra bed')
+            rooms_line = t("rooms_beds", lang, persons=adults + children, rooms=quoted, beds=beds,
+                           rate=f"{prop.extra_bed_rate:,}")
         elif (not wanted and prop.extra_bed_rate
               and (fewer := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children))
               and fewer < quoted):
@@ -2386,9 +2443,9 @@ class ChatMixin:
             # with an extra bed at the extra-bed rate; 'one room' from the guest then re-checks with extra beds
             rooms_line = t("rooms_note", lang, persons=adults + children, rooms=quoted, fewer=fewer,
                            rate=f"{prop.extra_bed_rate:,}")
-        else:
-            rooms_line = ""
-        st["rooms_line"] = rooms_line or t("rooms_plain", lang, persons=adults + children, rooms=quoted)
+        else:  # the number of rooms is always said after a room check (owner, 2026-11-21)
+            rooms_line = t("rooms_plain", lang, persons=adults + children, rooms=quoted)
+        st["rooms_line"] = rooms_line
         out["rooms_line"] = st["rooms_line"]
         if st.get("checked") != key and same_dates:
             # only the number of guests changed ('pinne oru kuttiyum'): nothing is said twice (live chat, 2026-11-19).

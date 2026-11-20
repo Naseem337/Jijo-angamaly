@@ -29,8 +29,14 @@ def test_stay_details_in_any_language(text, ci, co, persons):
 
 
 def test_a_date_already_past_this_year_means_next_year():
+    got = parse_stay("10 oct to 12 oct", TODAY)
+    assert got["check_in"] == date(2027, 10, 10) and got["check_out"] == date(2027, 10, 12)
+
+
+def test_a_date_that_passed_only_days_ago_stays_this_year_so_the_guest_is_told():
+    # 'nov 20' typed just after midnight on 21 Nov was read as 2027 (live chat, 2026-11-21)
     got = parse_stay("10 nov to 12 nov", TODAY)
-    assert got["check_in"] == date(2027, 11, 10) and got["check_out"] == date(2027, 11, 12)
+    assert got["check_in"] == date(2026, 11, 10) and got["check_out"] == date(2026, 11, 12)
 
 
 def test_check_out_before_check_in_is_refused():
