@@ -234,6 +234,11 @@ _WORD_NIGHTS = re.compile(r"\b(a|one|oru|ek|single|two|randu|rendu|do|three|moon
                           re.IGNORECASE)
 FORM_START = "Please share these details"
 ROOMS_OFFER_ASK = re.compile(r"\b(\d{1,2})\s*rooms?\b[^.?!\n]*\?", re.IGNORECASE)
+ROOMS_MATH = re.compile(r"\b\d+\s*(?:rooms?|room\(s\)|extra beds?|beds?)\b|\bextra beds?\b|"
+                        r"\b(?:rooms?|beds?)\s*(?:needed|venam|venum|chahiye)\b", re.IGNORECASE)
+STALLING = re.compile(r"\b(?:one moment|just a moment|a moment|let me (?:check|see|confirm)|i will check|"
+                      r"i'll check|please wait|wait a (?:moment|minute|sec)|checking now|"
+                      r"give me a (?:moment|minute|sec))\b", re.IGNORECASE)
 LOCATION_ASK = re.compile(r"\blocation\b|\bwhich (?:place|resort|property|town)\b|\bethu (?:sthalam|place|location)\b|"
                           r"\bevide(?:ya|yaa|yanu|aanu)?\b.*\b(?:venam|vendath|stay)\b|സ്ഥലം|லொகேஷன்|लोकेशन",
                           re.IGNORECASE)
@@ -912,6 +917,20 @@ class ChatMixin:
         location question is NEVER sent again in any path (live chat 2026-11-20: 'Ok' got it twice)."""
         pid = st.get("form_place") or (st.get("bk") or {}).get("property_id")
         return self.repo.get_property(pid) if pid else None
+
+    @staticmethod
+    def _code_facts_only(st: dict[str, Any], guest_text: str, reply: str) -> str:
+        """The AI's reply without what only the code may say (live chat 2026-11-20): its own room / extra-bed maths
+        once rooms were checked (the code's rooms sentence goes instead when the guest asked about rooms), and 'let
+        me check, one moment' promises (the code answers at once, nothing comes later)."""
+        parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", reply) if x.strip()]
+        checked = bool(st.get("checked")) and bool((st.get("bk") or {}).get("check_in"))
+        keep = [x for x in parts if not STALLING.search(x) and not (checked and ROOMS_MATH.search(x))]
+        out = " ".join(keep).strip()
+        if checked and len(keep) < len(parts) and (line := st.get("rooms_line")) \
+                and re.search(r"\brooms?\b|\bbeds?\b|muri|kamr", guest_text, re.IGNORECASE) and line not in out:
+            out = (out + "\n" + line).strip()
+        return out
 
     def _asks_location(self, sentence: str) -> bool:
         """'Ningalude location confirm cheyyamo, Alleppey aano?', 'Which place sir?': a question about the location."""
@@ -1805,8 +1824,13 @@ class ChatMixin:
         mine = parse_stay(text, self._today())
         if not force and not (mine.get("check_in") or _STAY_LENGTH.search(text) or _WORD_NIGHTS.search(text)
                               or _DAY_ONLY.search(text) or _UNTIL.search(text)
-                              or (mine.get("persons") and not bk.get("check_in")) or mine.get("children") or mine.get("rooms")):
-            return False  # persons alone after the rooms were checked ('goa 2 people') stay with the AI
+                              or (mine.get("persons") and not bk.get("check_in"))
+                              or (mine.get("persons") and len(_words(text)) <= 5
+                                  and mine["persons"] != int(bk.get("adults") or 0) + int(bk.get("children") or 0))
+                              or mine.get("children") or mine.get("rooms")):
+            # a new number of persons after the check ('7 ppl', 'now we are 7') is re-checked HERE, so the rooms and
+            # extra beds always come from the code (live chat 2026-11-20: the AI did that maths wrong)
+            return False
         prop = self.repo.get_property(place_id)
         if prop is None:
             return False
@@ -1864,8 +1888,6 @@ class ChatMixin:
                                      "dates, location, persons, name or mobile, and do not say whether rooms are "
                                      "available.]")
         reply = ""
-        if self._over_ai_cap(phone, st):  # one guest flooding messages: the team takes over, no more AI calls
-            return "handoff"
         coded = False if answer_only else self._stay_in_code(ctx, text)
         if coded and self._other_question(text):
             # '25-27 Dec, 3 people, is parking free?': the AI answers the parking question first, then the room
@@ -1913,14 +1935,16 @@ class ChatMixin:
                     and not self._own_location_question(x) and not self._asks_location(x)
                     and not self._own_dates_ask(st, x)[0]
                     and not CONTACT_ASK.search(x) and not ROOM_FACT.search(x)]
-            clean = no_unasked_prices(" ".join(keep), text)
+            clean = self._code_facts_only(st, text, no_unasked_prices(" ".join(keep), text))
             if not clean:
                 if any(self._own_dates_ask(st, x)[0] for x in re.split(r"(?<=[.?!])\s+|\n+", reply)):
                     self._strict_form(ctx, "")  # it only asked for the dates: the owner's form, never silence
                     self._save(phone, st)
                     return "answered"
                 return "quiet"
-            self._text(phone, self._ease_sir(phone, clean))
+            # an answer to the guest's own message always goes, even when it repeats an earlier line ('how many
+            # rooms?' after the rooms sentence went once got silence, 2026-11-20)
+            self._text(phone, self._ease_sir(phone, clean), repeat_ok=True)
             return "answered"
         if not ctx.summary_message and (st.get("bk") or {}).get("check_in") and (contact := contact_in(text)):
             # the guest sent their number ('same number', '9876543210', 'Rahul 98470 12345') after rooms were found but
@@ -1999,6 +2023,7 @@ class ChatMixin:
             parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", clean) if x.strip()]
             if len(parts) > 1 and CLOSING.match(parts[-1].strip()):
                 clean = " ".join(parts[:-1])  # no 'Anything else?' tails (owner: very few words)
+            clean = self._code_facts_only(st, text, clean)
             if self._known_place(st) is not None:  # the resort is picked: the AI never asks the location again
                 clean = " ".join(x for x in re.split(r"(?<=[.?!])\s+|\n+", clean)
                                  if x.strip() and not self._asks_location(x))
@@ -2010,7 +2035,8 @@ class ChatMixin:
             elif (dates := self._own_dates_ask(st, clean))[0]:  # it asked for dates / persons itself: the owner's form
                 self._strict_form(ctx, dates[1])
             elif clean := self._no_stale_payment(phone, text, self._no_repeat_ask(phone, self._tool_prices_only(ctx, no_unasked_prices(clean, text)))):
-                self._text(phone, self._ease_sir(phone, clean))
+                # an answer to the guest's own message always goes, even when it repeats an earlier line (2026-11-20)
+                self._text(phone, self._ease_sir(phone, clean), repeat_ok=True)
                 if (m := ROOMS_OFFER_ASK.search(clean)) and (st.get("bk") or {}).get("check_in"):
                     # 'Shall I book 3 rooms?' in the AI's own words: 'Yes' / 'Ok' then re-checks with that many rooms
                     # in code (live chat 2026-11-20: 'Yes' and 'Ok' got silence)
@@ -2326,11 +2352,29 @@ class ChatMixin:
         # whose photos go: ONLY the one room offered (top priority AND free). Both room types only when the group is
         # split over two (1 Basic + 1 Standard). A live chat got Basic + Standard photos together (owner, 2026-11-19).
         shown = offered if mix else offered[:1]
+        # the ONE sentence about rooms and extra beds for these dates and persons, always worked out here in code;
+        # the AI never does this maths (live chat 2026-11-20: '7 people ... 2 rooms with 1 extra bed in each')
+        quoted = int(options[0].get("quoted_for_rooms") or 1)
+        if beds := options[0].get("extra_beds"):
+            rooms_line = t("extra_bed", lang, beds=beds, rate=f"{prop.extra_bed_rate:,}")
+        elif (not wanted and prop.extra_bed_rate
+              and (fewer := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children))
+              and fewer < quoted):
+            # owner, 2026-11-20: before the photos say how many rooms are needed, or that 3 can share one room
+            # with an extra bed at the extra-bed rate; 'one room' from the guest then re-checks with extra beds
+            rooms_line = t("rooms_note", lang, persons=adults + children, rooms=quoted, fewer=fewer,
+                           rate=f"{prop.extra_bed_rate:,}")
+        else:
+            rooms_line = ""
+        st["rooms_line"] = rooms_line or t("rooms_plain", lang, persons=adults + children, rooms=quoted)
+        out["rooms_line"] = st["rooms_line"]
         if st.get("checked") != key and same_dates:
             # only the number of guests changed ('pinne oru kuttiyum'): nothing is said twice (live chat, 2026-11-19).
             # A different room now fits: its photos only. Then the name question, unless it is already the last ask.
             st["checked"] = key
             ctx.silent = True
+            if rooms_line:  # the persons changed: the rooms sentence for the NEW number, from the code
+                ctx.after.append(rooms_line)
             sent = self._sent_photos(ctx.phone)
             fresh = False
             for rt in shown:  # each room's number and name as a text, then its photos (owner, 2026-11-20)
@@ -2346,16 +2390,8 @@ class ChatMixin:
         elif st.get("checked") != key:
             st["checked"] = key
             ctx.after.append(t("rooms_ok", lang))
-            if beds := options[0].get("extra_beds"):
-                ctx.after.append(t("extra_bed", lang, beds=beds, rate=f"{prop.extra_bed_rate:,}"))
-            elif (not wanted and prop.extra_bed_rate
-                  and (fewer := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children))
-                  and fewer < int(options[0].get("quoted_for_rooms") or 1)):
-                # owner, 2026-11-20: before the photos say how many rooms are needed, or that 3 can share one room
-                # with an extra bed at the extra-bed rate; 'one room' from the guest then re-checks with extra beds
-                ctx.after.append(t("rooms_note", lang, persons=adults + children,
-                                   rooms=int(options[0].get("quoted_for_rooms") or 1), fewer=fewer,
-                                   rate=f"{prop.extra_bed_rate:,}"))
+            if rooms_line:
+                ctx.after.append(rooms_line)
             ctx.silent = True
             if prop.intro and st.get("intro_sent") != prop.id:
                 price = options[0].get("price_per_night") or round(
@@ -2795,20 +2831,6 @@ class ChatMixin:
         if paid_now:
             out["note"] = "a payment was just found and the confirmation message was sent automatically; do not repeat its details"
         return out
-
-    def _over_ai_cap(self, phone: str, st: dict[str, Any]) -> bool:
-        """True when this guest has used up MAX_AI_TURNS_PER_HOUR: the chat is handed to the team once (pause + one
-        staff alert) instead of calling the AI again. Counted per clock hour in the guest's state."""
-        from app.resort.flow import MAX_AI_TURNS_PER_HOUR
-        hour = self.clock.now().strftime("%Y%m%d%H")
-        used = st.get("ai_hour") if isinstance(st.get("ai_hour"), list) else [hour, 0]
-        if used[0] != hour:
-            used = [hour, 0]
-        if used[1] >= MAX_AI_TURNS_PER_HOUR:
-            self.handoff(phone, st, f"too many messages ({used[1]} AI replies in an hour); please take over")
-            return True
-        st["ai_hour"] = [hour, used[1] + 1]
-        return False
 
     def _tool_owner(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         """The guest wants the owner (owner, 2026-11-18): pause the bot, send the owner a short summary."""

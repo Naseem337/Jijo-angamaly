@@ -47,7 +47,7 @@ def live(tmp_path, monkeypatch):
     llm.script.extend([MockLLM.text("[no reply]")] * 300)  # the worst AI: silent on every turn
     wa = FakeWA()
     bot = BookingBot(load_resort_config(), repo, wa, MockPayments(), clock, llm=lambda: llm)
-    return type("L", (), dict(repo=repo, bot=bot, wa=wa, prop=p, general=general, rooms=rooms, clock=clock))()
+    return type("L", (), dict(repo=repo, bot=bot, wa=wa, prop=p, general=general, rooms=rooms, clock=clock, llm=llm))()
 
 
 def chat(w, *texts):
@@ -505,3 +505,25 @@ def test_yes_to_the_bots_own_question_is_never_silent(live):
     n = len(w.wa.to(PHONE))
     chat(w, "Yes")
     assert len(w.wa.to(PHONE)) > n  # something always goes back
+
+
+def test_room_counts_always_come_from_the_code_never_the_ai(live):
+    # live chat 2026-11-20: 6 people, then '7 ppl', then 'how many rooms' -> the AI said '2 rooms with 1 extra bed
+    # in each' (only 6 fit) and 'Let me check ... One moment'. Room maths is the code's, for every number of persons.
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14", "6 people")
+    assert "For 6 persons, 3 rooms are needed. Or 6 persons can stay in 2 room(s) with extra beds (₹500 per extra " \
+           "bed per night)." in w.wa.texts(PHONE)
+    chat(w, "7 ppl")
+    seven = "For 7 persons, 4 rooms are needed. Or 7 persons can stay in 3 room(s) with extra beds (₹500 per extra " \
+            "bed per night)."
+    assert seven in w.wa.texts(PHONE)  # the new number of persons gets the code's sentence too
+    n = len(w.wa.texts(PHONE))
+    bad = "For 7 people, you need 4 rooms. Or you can take 2 rooms with 1 extra bed in each. One moment."
+    w.llm.script[:0] = [MockLLM.text(bad)] * 3
+    chat(w, "how many rooms")
+    new = w.wa.texts(PHONE)[n:]
+    assert not any("2 rooms with 1 extra bed" in x or "One moment" in x for x in new)
+    assert any(seven in x for x in new)  # the AI's maths is replaced by the code's sentence

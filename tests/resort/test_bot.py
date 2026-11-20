@@ -662,9 +662,12 @@ def test_payment_link_failure_hands_off(world, monkeypatch):
 
     monkeypatch.setattr(w.pay, "create_payment_link", boom)
     say(w, "yes, Asha", GUEST, tool("create_booking", guest_name="Asha", mobile="same"), reply("never shown"))
-    assert w.repo.is_paused(GUEST)[0] and "payment link" in w.wa.texts(STAFF)[-1]
+    assert not w.repo.is_paused(GUEST)[0] and "payment link" in w.wa.texts(STAFF)[-1]
     assert "payment link" in w.wa.texts()[-1] and "never shown" not in " ".join(w.wa.texts())
     assert w.repo.list_bookings(phone=GUEST)[0].status == "failed"
+    # the bot never pauses itself (owner, 2026-11-20): the guest's 'Hi' afterwards still gets an answer
+    assert say(w, "Hi", GUEST, reply("Hi, how can I help?")) != "paused"
+    assert w.wa.texts()[-1] != "We could not create the payment link just now. Our team will contact you shortly."
 
 
 # --------------------------------------------------------------------------- languages and voice
@@ -709,15 +712,11 @@ def test_voice_problem_gets_text_reply(world):
 # --------------------------------------------------------------------------- staff, opt-out
 
 
-def test_staff_handoff_pauses_chat(world):
+def test_staff_handoff_alerts_staff_and_never_pauses_the_bot(world):
     w = world
     w.bot.handoff(GUEST, {"lang": "en"}, "guest asked for the team")
-    assert w.repo.is_paused(GUEST)[0] and "needs the team" in w.wa.texts(STAFF)[-1]
-    before = len(w.wa.to(GUEST))
-    assert say(w, "hello?") == "paused"
-    assert len(w.wa.to(GUEST)) == before  # the bot stays quiet while staff own the chat
-    w.clock.advance(hours=25)
-    assert say(w, "hello again", GUEST, reply("Hi, how can I help?")) != "paused"
+    assert not w.repo.is_paused(GUEST)[0] and "needs the team" in w.wa.texts(STAFF)[-1]
+    assert say(w, "hello?", GUEST, reply("Hi, how can I help?")) != "paused"  # owner, 2026-11-20: never silent
 
 
 def _echo(text, phone="919847012345", mid="e1"):
@@ -801,16 +800,15 @@ def test_a_status_question_gets_no_unasked_money_talk(world):
     assert w.wa.texts()[-1] == "Sir, booking confirmed aanu."
 
 
-def test_talk_to_owner_pauses_the_bot_and_sends_the_owner_a_summary(world):
+def test_talk_to_owner_sends_the_owner_a_summary_and_the_bot_keeps_answering(world):
     w = world
     say(w, "I want to talk to the owner", GUEST, tool("talk_to_owner", reason="guest asked for the owner"),
         reply("[no reply]"))
     assert w.wa.texts()[-1] == "Thank you. Our team will message you here shortly."
     staff = w.wa.texts(STAFF)[-1]
     assert staff.startswith("Guest needs the team: guest asked for the owner") and GUEST in staff
-    calls = len(w.llm.calls)
-    say(w, "hello?")  # paused: the owner talks now, the bot stays out
-    assert len(w.llm.calls) == calls and w.wa.texts()[-1] == "Thank you. Our team will message you here shortly."
+    assert not w.repo.is_paused(GUEST)[0]  # the bot never pauses itself (owner, 2026-11-20)
+    assert say(w, "hello?", GUEST, reply("Hi, how can I help?")) != "paused"
 
 
 def test_a_cancel_request_gets_the_policy_charge_from_code(world):

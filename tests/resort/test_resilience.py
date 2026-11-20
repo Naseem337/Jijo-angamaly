@@ -211,16 +211,14 @@ def test_sql_like_text_is_just_text(world):
     assert w.repo.list_bookings() == [] and w.repo.list_chat(GUEST)
 
 
-def test_one_guest_flooding_messages_is_capped(world):
+def test_a_guest_sending_many_messages_gets_every_one_answered(world):
+    # no limit on replies (owner, 2026-11-20): every message is answered, the bot never pauses
     w = world
-    calls = 0
     for i in range(70):
         w.llm.script.append(reply(f"Answer {i}."))
         w.bot.handle(msg(f"question {i} about the pool?"))
-    calls = len(w.llm.calls)
-    assert calls <= flow.MAX_AI_TURNS_PER_HOUR  # one guest cannot burn unlimited AI calls
-    assert w.repo.is_paused(GUEST)[0]  # handed to the team once the cap is hit
-    assert sum("too many messages" in x for x in w.wa.texts(STAFF)) == 1
+    assert not w.repo.is_paused(GUEST)[0]
+    assert w.wa.texts()[-1] == "Answer 69."
     w.llm.script.clear()
 
 

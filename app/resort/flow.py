@@ -53,9 +53,6 @@ BOOKING_ID = re.compile(r"\s*\(?\b(?:id\s*:?\s*)?RB-[A-Z0-9]{6}\b\)?", re.IGNORE
 AUTO_RESUME = timedelta(hours=24)
 SILENT_TYPES = ("reaction", "sticker", "unsupported", "system", "request_welcome", "edit", "revoke", "ephemeral",
                 "text", "button", "interactive")  # the last three only get here when their text is empty
-# One guest cannot burn unlimited AI calls (pre-launch, 2026-11-19): past this many AI turns in an hour the chat goes to
-# the team (bot paused, one staff alert). A real guest never needs this many.
-MAX_AI_TURNS_PER_HOUR = 40
 INDIC = re.compile(r"[ऀ-ॿ஀-௿ഀ-ൿ]")
 
 
@@ -388,7 +385,8 @@ class BookingBot(IdProofMixin, ChatMixin):
         lines = [f"{'Guest' if m.direction == 'in' else 'Bot'}: {m.text[:120]}" for m in recent]
         summary = (f"Guest needs the team: {reason}\n{guest.name if guest and guest.name else 'Unknown'} {phone}\n"
                    f"Language: {st.get('lang', 'en')}\n" + "\n".join(lines))
-        self.repo.set_paused(phone, True, now)
+        # the bot never pauses itself (owner, 2026-11-20: a guest's 'Hi' after a failed payment link got silence for
+        # 24 h): staff get the summary and the bot keeps answering. Only staff pause a chat (dashboard / their reply).
         if notify_guest:
             self._text(phone, t("handoff", st.get("lang", "en")))
         self.alert_staff(summary, st.get("property_id"))
