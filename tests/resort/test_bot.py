@@ -247,7 +247,7 @@ def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_t
     w.repo.set_state(GUEST, st)
     say(w, "deluxe room photos undo?", GUEST, tool("send_photos", place="Pozhiyoram", room_type="Deluxe"), reply("[no reply]"))
     images = [p for _, k, p in w.wa.to(GUEST) if k == "image"]
-    assert images and len(images) == 2 and w.wa.texts() == []  # the room's own photos only, never the general ones
+    assert images and len(images) == 2 and w.wa.texts() == ["*Deluxe*"]  # the room's own photos only, its name first
     say(w, "more?", GUEST, tool("send_photos", place="Pozhiyoram"), reply("That's all the photos we have sir."))
     assert w.wa.texts()[-1] == "All the photos are sent above."  # fixed line, never the AI's own
     assert len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 2
@@ -272,7 +272,7 @@ def test_after_the_form_rooms_ok_then_glimpse_then_general_then_room_photos_then
         tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-15", adults=2),
         reply("[no reply]"))
     sent = [(k, p) for _, k, p in w.wa.to(GUEST)][start:]
-    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 10 + ["text"]  # ALL 8 general + the room's 2
+    assert [k for k, _ in sent] == ["text", "text"] + ["image"] * 8 + ["text"] + ["image"] * 2 + ["text"]  # ALL 8 general, the room's label, its 2
     assert sent[0][1] == "Yes, rooms are available for your dates."
     assert sent[1][1] == "Your Beachfront Hideout Awaits!\nDeluxe - ₹4,000/Night/Room"
     assert sent[-1][1] == "Please share your name and mobile number to proceed."

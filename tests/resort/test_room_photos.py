@@ -45,7 +45,8 @@ def test_room_photos_are_the_free_top_priority_rooms_then_the_booking_goes_on(ch
     w = checked
     assert say(w, text) == "photos"  # in code, the AI is not needed
     assert sent_photos(w) == w.refs["deluxe"]
-    [ask] = w.wa.texts()
+    label, ask = w.wa.texts()
+    assert label == "*Deluxe*"  # which room the photos are (owner, 2026-11-20)
     assert "name" in ask and "mobile" in ask  # back to the booking (in the guest's language)
 
 

@@ -22,7 +22,7 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import BOOKING_WISH, CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, YES_REPLY, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
+from app.resort.chat import BOOKING_WISH, CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, ROOMS_OFFER_ASK, YES_REPLY, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
@@ -288,6 +288,14 @@ class BookingBot(IdProofMixin, ChatMixin):
             return "quiet"  # 'Is there anything else?' -> 'no' / 'nothing' / 'ok': no reply (owner, 2026-11-19)
         if st.get("suggest_rooms") and (is_ack(text) or YES_REPLY.match(text)):
             return self._converse(phone, st, text, in_id)  # 'ok' to 'Shall I go ahead with 5 rooms?': checked in code
+        last_out = self.repo.last_outbound_text(phone) or ""
+        if (is_ack(text) or YES_REPLY.match(text)) and "?" in last_out and last_out != self.next_step(phone, st) \
+                and last_out not in ANYTHING_ELSE:
+            # 'Yes' / 'Ok' answering the bot's own question ('Shall I book 3 rooms?') is an ANSWER: it is acted on,
+            # never silence (live chat 2026-11-20: 'Yes' and 'Ok' got nothing)
+            if (m := ROOMS_OFFER_ASK.search(last_out)) and (st.get("bk") or {}).get("check_in"):
+                st["suggest_rooms"] = int(m.group(1))  # 'Shall I book 3 rooms?' -> 'Yes': checked in code, 3 rooms
+            return self._converse(phone, st, text, in_id)
         if is_ack(text) and "?" not in text:  # "ok" mid-chat ("?" is a question, not an ok) (owner, 2026-11-18): carry on to the step still open, else stay quiet
             if step := self.next_step(phone, st):
                 if step == (self.repo.last_outbound_text(phone) or "") or st.get("ok_reminded") == step:

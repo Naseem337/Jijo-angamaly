@@ -478,3 +478,30 @@ def test_a_question_nothing_fixed_fits_gets_an_ai_answer_not_type_again(live):
     _ai_says(w, "[no reply]", "Alleppey beach is 2 minutes walk from the resort.")
     chat(w, "how far is the beach?")
     assert transcript(w)[-1] == "BOT: Alleppey beach is 2 minutes walk from the resort."
+
+
+def test_two_rooms_photos_each_start_with_the_room_number_and_name(live):
+    # owner, 2026-11-20: between two rooms' photos a text says which room and number they are
+    w = live
+    _live_setup(w)
+    rt = w.repo.get_room_type(w.rooms["Standard"].id)
+    own = {n: [ph.save_photo(PNG + b"num" + n.encode() + bytes([i])) for i in range(2)] for n in rt.room_list}
+    w.repo.save_room_type(RoomType(**{**rt.__dict__, "photo_urls": [], "number_photos": own}))
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 4 people")
+    sent = [(k, p) for _, k, p in w.wa.to(PHONE)]
+    label_108 = sent.index(("text", f"*Room 108 - {rt.name}*"))
+    label_109 = sent.index(("text", f"*Room 109 - {rt.name}*"))
+    assert [k for k, _ in sent[label_108 + 1:label_109]] == ["image", "image"]  # 108's photos between the labels
+    assert [k for k, _ in sent[label_109 + 1:label_109 + 3]] == ["image", "image"]
+
+
+def test_yes_to_the_bots_own_question_is_never_silent(live):
+    # live chat 2026-11-20: 'Shall I book 3 rooms?' -> 'Yes' -> 'Ok' got nothing
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 8 people")
+    w.bot.flow._text(PHONE, "8 guests need 3 rooms. Shall I book 3 rooms?") if hasattr(w.bot, "flow") else \
+        w.bot._text(PHONE, "8 guests need 3 rooms. Shall I book 3 rooms?")
+    n = len(w.wa.to(PHONE))
+    chat(w, "Yes")
+    assert len(w.wa.to(PHONE)) > n  # something always goes back

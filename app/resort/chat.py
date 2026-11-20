@@ -918,10 +918,40 @@ class ChatMixin:
         s = sentence.lower()
         return "?" in s and (bool(LOCATION_ASK.search(s)) or any(town.lower() in s for town in self._towns()))
 
+    @staticmethod
+    def _label_sets(rt: RoomType, refs: list[str]) -> list[tuple[str, list[str]]]:
+        """A room type's photos split by room number, each with its label: [('Room 108 - Beach View Standard', [..]),
+        ('Room 109 - Beach View Standard', [..])]. Photos of no number go under the room type's name (owner,
+        2026-11-20: a text between two rooms' photos says which room and number they are)."""
+        out: list[tuple[str, list[str]]] = []
+        left = list(refs)
+        for num in rt.room_list:
+            mine = [r for r in left if r in set(rt.number_photos.get(num, []))]
+            if mine:
+                out.append((f"*Room {num} - {rt.name}*", mine))
+                left = [r for r in left if r not in mine]
+        if left:
+            out.append((f"*{rt.name}*", left))
+        return out
+
+    def _queue_room_photos(self, ctx: _Turn, rt: RoomType, refs: list[str]) -> None:
+        """Each room's label as a text, then that room's photos, in the turn's order."""
+        for label, part in self._label_sets(rt, refs):
+            ctx.after.append(label)
+            ctx.after.append(part)
+
     def _send_plan(self, phone: str, plan: list[tuple[RoomType | None, list[str]]]) -> int:
-        """Each room's photos together, the room's name on its first photo (a guest seeing two rooms knows which is
-        which). General photos go without a caption."""
-        return sum(self._send_photos(phone, refs, rt.name if rt else "") for rt, refs in plan)
+        """Each room's photos together, a text with the room number and name before them (a guest seeing two rooms
+        knows which is which). General photos go without a label."""
+        sent = 0
+        for rt, refs in plan:
+            if rt is None:
+                sent += self._send_photos(phone, refs)
+                continue
+            for label, part in self._label_sets(rt, refs):
+                self._text(phone, label, repeat_ok=True)
+                sent += self._send_photos(phone, part)
+        return sent
 
     def _photos_now(self, phone: str, st: dict[str, Any], text: str) -> str | None:
         """A photo request at any stage, answered in code (never the AI): the photos by _photo_plan, then the open
@@ -961,7 +991,10 @@ class ChatMixin:
             ctx.silent = True
             return {"error": "the guest is told automatically. Reply exactly [no reply]."}
         for rt, refs in plan:  # queued, so the turn knows something was sent (never a stray extra question)
-            ctx.after.append((rt.name if rt else "", refs))
+            if rt is None:
+                ctx.after.append(refs)
+            else:
+                self._queue_room_photos(ctx, rt, refs)
         ctx.silent = True
         return {"ok": True, "note": "the photos are sent automatically; reply exactly [no reply]"}
 
@@ -1062,9 +1095,10 @@ class ChatMixin:
         Casual messages ('ok', 'thanks', 'will tell my family') may stay quiet: returns None for them."""
         phone, st = ctx.phone, ctx.st
         lang = st.get("lang", "en")
-        if ((is_ack(text) and "?" not in text) or (NOT_NOW.search(text) and "?" not in text)) \
+        asked = "?" in (self.repo.last_outbound_text(phone) or "")
+        if ((is_ack(text) and "?" not in text and not asked) or (NOT_NOW.search(text) and "?" not in text)) \
                 and not CHANGE_ASK.search(text):
-            return None
+            return None  # an 'ok' to OUR question is an answer: it is never left silent (live chat 2026-11-20)
         wish = (BOOKING_WISH.search(text) or PHOTO_ASK.search(text) or contact_in(text) is not None
                 or bool(parse_stay(text, self._today())) or self._named_place(text) is not None)
         # a question, a request, booking details, or one unclear word ('asdfgh'); remarks like 'nice place' may stay quiet
@@ -1513,7 +1547,8 @@ class ChatMixin:
             "the beach?' -> 'Yes, right on the beach.'\n"
             "- Reply only when it is necessary: a question, a request, a booking detail, a payment problem, a complaint, "
             "or an answer to something you asked. For anything else send no reply at all, answer with exactly "
-            "[no reply]: 'ok', 'thanks', a thumbs up, compliments, jokes, 'will tell my family', 'let me check and "
+            "[no reply]: 'ok' or 'thanks' that answer nothing (an 'ok' / 'yes' to a question YOU just asked is an "
+            "answer: act on it at once, e.g. book or check what you offered), a thumbs up, compliments, jokes, 'will tell my family', 'let me check and "
             "tell you', 'will see', a closing remark. Do not chase the guest or fill the silence. If they want more, they "
             "will write. It is fine for the guest to have the last message in the chat.\n"
             "- If the guest's message is cut off or you cannot tell what they mean (for example 'njan udheshikkunath "
@@ -2298,10 +2333,11 @@ class ChatMixin:
             st["checked"] = key
             ctx.silent = True
             sent = self._sent_photos(ctx.phone)
-            fresh = [r for rt in shown for r in [x for x in self._room_refs(rt, st, self._rooms_of(rt, bk, options))
-                                                 if x not in sent][:MAX_ROOM_PHOTOS]]
-            if fresh:
-                ctx.after.append(fresh)
+            fresh = False
+            for rt in shown:  # each room's number and name as a text, then its photos (owner, 2026-11-20)
+                if refs := [x for x in self._room_refs(rt, st, self._rooms_of(rt, bk, options)) if x not in sent]:
+                    self._queue_room_photos(ctx, rt, refs[:MAX_ROOM_PHOTOS])
+                    fresh = True
             asks = {t("ask_contact", lg) for lg in ("en", "mn", "tn", "hn")}
             if fresh or (self.repo.last_outbound_text(ctx.phone) or "") not in asks:
                 ctx.after.append(t("ask_contact", lang))
@@ -2330,10 +2366,11 @@ class ChatMixin:
             # the owner's order (2026-11-19): rooms available -> glimpse -> general photos -> the offered room's photos
             general = self._general_photos(ctx.phone, prop)
             sent = self._sent_photos(ctx.phone) | set(general)
-            room_photos = [r for rt in shown for r in [x for x in self._room_refs(rt, st, self._rooms_of(rt, bk, options))
-                                                       if x not in sent][:MAX_ROOM_PHOTOS]]
-            if general + room_photos:
-                ctx.after.append(general + room_photos)
+            if general:
+                ctx.after.append(general)
+            for rt in shown:  # each room's number and name as a text, then its photos (owner, 2026-11-20)
+                if refs := [x for x in self._room_refs(rt, st, self._rooms_of(rt, bk, options)) if x not in sent]:
+                    self._queue_room_photos(ctx, rt, refs[:MAX_ROOM_PHOTOS])
             ctx.after.append(t("ask_contact", lang))
             out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
         else:
