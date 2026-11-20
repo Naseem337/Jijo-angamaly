@@ -11,7 +11,7 @@ from test_bot import GUEST, InboundMessage, _ids, last_tool, reply, say, tool, w
 
 from app.resort.chat import INDIC, ChatMixin, contact_in, no_unasked_prices, parse_stay
 
-FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
+FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
 TODAY = date(2026, 11, 2)
 
 

@@ -39,7 +39,7 @@ S: dict[str, dict[str, str]] = {
     # the client's words (2026-11-17); {towns} comes from the properties in the dashboard
     "ask_location": _t(*["Sure, Kindly confirm the Location 📍\n{towns} ?"] * 4),
     # the client's booking form (2026-11-17), always this English template
-    "form": _t(*["Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"] * 4),
+    "form": _t(*["Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"] * 4),
     "ask_contact": _t(*["Please share your name and mobile number to proceed."] * 4),
     "ask_name": _t(*["Please share your name."] * 4),
     "closed_place": _t(*["Sorry, {place} is currently not available."] * 4),
@@ -54,6 +54,8 @@ S: dict[str, dict[str, str]] = {
     "anything_else": _t(*["Is there anything else?"] * 4),
     "noted": _t(*["Noted, rooms are still available."] * 4),
     "photos_sent": _t(*["All the photos are sent above."] * 4),
+    "rooms_note": _t(*["For {persons} persons, {rooms} rooms are needed. Or {persons} persons can stay in {fewer} "
+                       "room(s) with extra beds (₹{rate} per extra bed per night)."] * 4),
     "extra_bed": _t(*["{beds} extra bed(s) added: ₹{rate} per bed per night."] * 4),
     "rooms_none_alt": _t(*["Sorry, rooms are not available for your dates. Rooms are free on {dates}."] * 4),
     "beds_offer": _t(*["{persons} persons fit in {rooms} rooms with extra beds (2 + 1 per room, ₹{rate} per extra bed "
@@ -177,6 +179,8 @@ MN = {
     "anything_else": "Vere enthenkilum veno?",
     "noted": "Sheri, rooms ippozhum available aanu.",
     "photos_sent": "Ella photos-um mukalil ayachittund.",
+    "rooms_note": "{persons} perkku {rooms} rooms venam. Allenkil {fewer} room-il extra bed vechu {persons} perkkum "
+                  "nikkam (oru extra bed-inu ₹{rate} per night).",
     "extra_bed": "{beds} extra bed add cheyyum: oru bed-inu ₹{rate} per night.",
     "rooms_none_alt": "Sorry, ningalude dates-il rooms available alla. {dates} dates-il rooms und.",
     "beds_offer": "{persons} perkku {rooms} rooms-il extra bed vechu set aakam (oru room-il 2 + 1, extra bed-inu "
@@ -232,6 +236,8 @@ TN = {
     "anything_else": "Vera edhavadhu venuma?",
     "noted": "Sari, rooms innum available.",
     "photos_sent": "Ella photos-um mela anupitten.",
+    "rooms_note": "{persons} perukku {rooms} rooms venum. Illana {fewer} room-la extra bed vechu {persons} perum "
+                  "thangalam (oru extra bed ₹{rate} per night).",
     "extra_bed": "{beds} extra bed add pannuvom: oru bed-ku ₹{rate} per night.",
     "rooms_none_alt": "Sorry, unga dates-la rooms illa. {dates} dates-la rooms irukku.",
     "beds_offer": "{persons} perukku {rooms} rooms-la extra bed vechu adjust pannalam (2 + 1 per room, extra bed "
@@ -268,6 +274,8 @@ HN = {
     "anything_else": "Aur kuch chahiye?",
     "noted": "Theek hai, rooms abhi bhi available hain.",
     "photos_sent": "Saari photos upar bhej di hain.",
+    "rooms_note": "{persons} logon ke liye {rooms} rooms chahiye. Ya {fewer} room mein extra bed ke saath {persons} "
+                  "log reh sakte hain (ek extra bed ₹{rate} per night).",
     "extra_bed": "{beds} extra bed add karenge: ek bed ka ₹{rate} per night.",
     "rooms_none_alt": "Sorry, aapki dates par rooms available nahi hain. {dates} ko rooms free hain.",
     "beds_offer": "{persons} logon ke liye {rooms} rooms mein extra bed ke saath ho jayega (2 + 1 per room, extra bed "

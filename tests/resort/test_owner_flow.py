@@ -299,7 +299,10 @@ def test_8_people_get_4_rooms_at_2_per_room(live):
     _live_setup(w)
     chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 8 people")
     assert _plan(w) == [("Standard", 2, 0), ("2", 2, 0)]
-    assert not any("extra bed" in x for x in w.wa.texts(PHONE))  # no extra beds unless the guest asks fewer rooms
+    # no extra beds unless the guest asks fewer rooms; the note before the photos says the other way (owner 2026-11-20)
+    assert ("For 8 persons, 4 rooms are needed. Or 8 persons can stay in 3 room(s) with extra beds (₹500 per extra "
+            "bed per night).") in w.wa.texts(PHONE)
+    assert not any("extra bed(s) added" in x for x in w.wa.texts(PHONE))
 
 
 def test_fewer_rooms_only_when_asked_with_extra_beds_at_500(live):
@@ -324,7 +327,8 @@ def test_one_room_type_fewer_rooms_asked(live):
     assert w.repo.get_state(PHONE)["bk"]["rooms"] == 0 and _plan(w) is None
     assert "Please share your name and mobile number to proceed." in w.wa.texts(PHONE)
     texts_before = len(w.wa.texts(PHONE))
-    assert not any("extra bed" in x for x in w.wa.texts(PHONE))  # 3 people -> 2 rooms, no bed talk
+    assert any(x.startswith("For 3 persons, 2 rooms are needed. Or 3 persons can stay in 1 room(s)")
+               for x in w.wa.texts(PHONE))  # 3 people -> 2 rooms, and the extra-bed way is offered before photos
 
 
 def test_too_few_rooms_asked_says_the_minimum(live):

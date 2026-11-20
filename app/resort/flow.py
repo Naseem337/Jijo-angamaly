@@ -313,7 +313,9 @@ class BookingBot(IdProofMixin, ChatMixin):
             return outcome  # photos at any stage (owner, 2026-11-19): the free room by priority, else the top one
         if PHOTO_ASK.search(text) and not st.get("checked"):
             # photos come with the glimpse once rooms are found (owner's flow); before that, the next step
-            step = self.next_step(phone, st) or t("ask_location", st.get("lang", "en"), towns=self._towns_text())
+            step = self._open_step(phone, st)
+            if step is None:
+                return self._converse(phone, st, text, in_id)  # nothing open: the AI answers about the photos
             if step == (self.repo.last_outbound_text(phone) or "") and step == t("form", st.get("lang", "en")):
                 step = t("fill_form", st.get("lang", "en"))  # the form is just above: point to it, never silence
             self._text(phone, step, repeat_ok=True)

@@ -189,13 +189,13 @@ def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
     w = world
     assert say(w, "hi") == "greeting"
     say(w, "need a room in Pozhiyoram", GUEST, reply("Sure. Which dates?"))
-    form = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
+    form = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
     assert w.wa.texts()[-1] == form  # never the AI's own 'Which dates?' (client, 2026-11-18)
     assert say(w, "hi") == "greeting"  # mid-chat: the owner's greeting, no AI call (2026-11-18)
     assert w.wa.texts()[-2:] == [form, "Hi, How may I assist you?"]
     say(w, "2 people", GUEST, reply("[no reply]"))
     # the chat is remembered: the resort is still known, so only the missing dates are asked (in code, 2026-11-19)
-    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :"
+    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :\nNumber of rooms:"
 
 
 def test_english_with_place_and_room_words_stays_english():
@@ -290,7 +290,7 @@ def test_a_misspelt_place_is_understood_and_the_form_follows(world, answer, plac
     assert w.wa.texts()[-1].startswith("Please share these details")
 
 
-FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
+FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
 
 
 def test_restart_starts_a_fresh_conversation_and_keeps_bookings(world):
@@ -329,7 +329,7 @@ def test_the_ai_never_asks_dates_in_its_own_words_the_form_goes(world):
     say(w, "2 people", GUEST, reply("Yes, right on the beach. Please share your check-in and check-out dates."))
     # the answer stays, the ask becomes the form with only the missing lines (they gave '2 people')
     # '2 people' is stay details: the code asks only the missing lines, the AI is not needed (2026-11-19)
-    assert w.wa.texts()[-2:] == [FORM, "Please share these details:\n\nCheck in :\nCheck out :"]
+    assert w.wa.texts()[-2:] == [FORM, "Please share these details:\n\nCheck in :\nCheck out :\nNumber of rooms:"]
     w.llm.script.clear()
 
 
@@ -350,10 +350,12 @@ def test_details_spread_over_messages_are_checked_in_code_not_asked_again(world)
     w = world
     say(w, "need a room in Alleppey", GUEST, tool("ask_stay_details", place="Alleppey"), reply("[no reply]"))
     say(w, "dec 12", GUEST)
-    assert w.wa.texts() == [FORM, "Please share these details:\n\nCheck out :\nNumber of persons :"]  # only what is missing
+    assert w.wa.texts() == [FORM, "Please share these details:\n\nCheck out :\nNumber of persons :\nNumber of rooms:"]  # only what is missing
     say(w, "3 persons, till 15", GUEST)
-    assert w.wa.texts()[-2:] == ["Yes, rooms are available for your dates.",
-                                 "Please share your name and mobile number to proceed."]
+    texts = w.wa.texts()
+    assert "Yes, rooms are available for your dates." in texts[-3:]
+    assert texts[-2].startswith("For 3 persons, 2 rooms are needed.")  # the rooms note before the ask
+    assert texts[-1] == "Please share your name and mobile number to proceed."
     assert w.repo.get_state(GUEST)["bk"]["check_out"] == "2026-12-15"
 
 
@@ -1549,7 +1551,7 @@ def test_the_form_then_glimpse_then_ask_name_in_the_clients_order(world):
         if rt.name != "Deluxe":
             w.repo.save_room_type(RoomType(**{**rt.__dict__, "active": False}))
     say(w, "Pozhiyoram", GUEST, tool("ask_stay_details", place="Pozhiyoram"), reply("[no reply]"))
-    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
+    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
     say(w, "Check in : 10 Nov\nCheck out : 12 Nov\nNumber of persons : 2", GUEST,
         tool("check_availability", place="Pozhiyoram", check_in="2026-11-10", check_out="2026-11-12", adults=2),
         reply("Rooms are available sir. Beach View AC Room - 3000 per night, total 6000. Name and mobile please."))

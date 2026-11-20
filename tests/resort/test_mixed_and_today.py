@@ -9,7 +9,7 @@ from app.resort.chat import MSG_SEP, parse_stay
 from app.resort.models import Booking
 from test_bot import GUEST, reply, say, tool, world  # noqa: F401  (fixture)
 
-FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"
+FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
 TODAY = date(2026, 11, 2)
 
 
@@ -36,7 +36,7 @@ def test_the_live_chat_today_gets_a_room_check_for_today_not_old_dates(world):
     say(w, "Hi")
     say(w, "Need room", GUEST, reply("[no reply]"))
     say(w, "Today", GUEST, reply("The check-in is 12 December."))  # the AI is not asked: code reads 'today'
-    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck out :"  # 3 persons were said earlier
+    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck out :\nNumber of rooms:"  # 3 persons were said earlier
     say(w, "Iw ill bethere for a day", GUEST, reply("I can help with resort bookings only."))
     bk = w.repo.get_state(GUEST)["bk"]
     assert (bk["check_in"], bk["check_out"]) == (TODAY.isoformat(), (TODAY + timedelta(days=1)).isoformat())

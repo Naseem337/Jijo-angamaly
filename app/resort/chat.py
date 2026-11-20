@@ -433,7 +433,8 @@ LOG_LINE = re.compile(r"\[(?:invoice|photos? sent|photo|image|template|restart|n
 PAYMENT_ASK = re.compile(r"\b(?:pay\w*|paid|link|advance|refund|razorpay|upi|gpay|transaction|amount|balance)\b",
                          re.IGNORECASE)
 STALE_PAY = re.compile(r"\b(?:payment|pay|paid|link|advance)\b|confirm aak", re.IGNORECASE)
-FORM_LABELS = re.compile(r"check[\s-]?in\s*:|check[\s-]?out\s*:|(?:number of )?persons\s*:", re.IGNORECASE)
+FORM_LABELS = re.compile(r"check[\s-]?in\s*:|check[\s-]?out\s*:|(?:number of )?persons\s*:|(?:number of )?rooms\s*:",
+                         re.IGNORECASE)
 QUESTION_WORD = re.compile(r"\b(?:what|how|when|where|which|why|who|is|are|do|does|can|price|rate|cost|ethra|evlo|"
                            r"kitna|entha|enthu|enna|yenna|kya|evide|enga|kahan)\b", re.IGNORECASE)
 NUDGE = re.compile(r"\b(?:respond|reply|answer|anyone|any update|update|waiting|there\?|marupadi|parayu|"
@@ -889,6 +890,18 @@ class ChatMixin:
             return None
         return prop
 
+    def _open_step(self, phone: str, st: dict[str, Any]) -> str | None:
+        """The booking step still open (form, name and mobile...). The location question ONLY when no resort is picked
+        yet and the guest has no booking going: a guest with a payment link out once got 'Kindly confirm the Location'
+        after the photos (live chat 2026-11-20)."""
+        if step := self.next_step(phone, st):
+            return step
+        bk = st.get("bk") or {}
+        if st.get("form_place") or bk.get("property_id") or any(
+                b.status in ("hold", "paid", "checked_in") for b in self.repo.list_bookings(phone=phone, limit=5)):
+            return None
+        return t("ask_location", st.get("lang", "en"), towns=self._towns_text())
+
     def _send_plan(self, phone: str, plan: list[tuple[RoomType | None, list[str]]]) -> int:
         """Each room's photos together, the room's name on its first photo (a guest seeing two rooms knows which is
         which). General photos go without a caption."""
@@ -910,8 +923,9 @@ class ChatMixin:
         if not self._send_plan(phone, plan):
             self._text(phone, t("photos_sent", lang), repeat_ok=True)
             return "photos"
-        step = self.next_step(phone, st) or t("ask_location", lang, towns=self._towns_text())
-        self._text(phone, step, repeat_ok=True)  # back to the booking: the open step (location, form, name)
+        step = self._open_step(phone, st)
+        if step and step != (self.repo.last_outbound_text(phone) or ""):
+            self._text(phone, step, repeat_ok=True)  # back to the booking: the step still open, if any
         return "photos"
 
     def _tool_photos(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
@@ -1194,7 +1208,8 @@ class ChatMixin:
         """'Please share these details:' with only the lines the guest has not given yet ('dec 20 nu' leaves Check out and
         Number of persons). With nothing given it is the full form."""
         lines = t("form", lang).split("\n")
-        have = {"check in": "check_in", "check out": "check_out", "number of persons": "persons"}
+        have = {"check in": "check_in", "check out": "check_out", "number of persons": "persons",
+                "number of rooms": "rooms"}  # rooms is optional: left blank, 2 persons per room are planned
         keep = [ln for ln in lines if not any(ln.lower().startswith(k) and got.get(v) for k, v in have.items())]
         return "\n".join(keep)
 
@@ -2259,6 +2274,14 @@ class ChatMixin:
             ctx.after.append(t("rooms_ok", lang))
             if beds := options[0].get("extra_beds"):
                 ctx.after.append(t("extra_bed", lang, beds=beds, rate=f"{prop.extra_bed_rate:,}"))
+            elif (not wanted and prop.extra_bed_rate
+                  and (fewer := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children))
+                  and fewer < int(options[0].get("quoted_for_rooms") or 1)):
+                # owner, 2026-11-20: before the photos say how many rooms are needed, or that 3 can share one room
+                # with an extra bed at the extra-bed rate; 'one room' from the guest then re-checks with extra beds
+                ctx.after.append(t("rooms_note", lang, persons=adults + children,
+                                   rooms=int(options[0].get("quoted_for_rooms") or 1), fewer=fewer,
+                                   rate=f"{prop.extra_bed_rate:,}"))
             ctx.silent = True
             if prop.intro and st.get("intro_sent") != prop.id:
                 price = options[0].get("price_per_night") or round(
