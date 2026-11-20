@@ -35,6 +35,12 @@ from app.whatsapp.parse import EchoMessage, InboundMessage
 
 ANYTHING_ELSE = {t("anything_else", lg) for lg in ("en", "mn", "tn", "hn")}
 # the answer to 'Is there anything else?' that needs no reply
+# asking for the resort's location / map ('Location send pannunga', 'send location', 'google map', 'where is the
+# resort', 'evide aanu resort'), not the 'Kindly confirm the Location' answer
+MAP_ASK = re.compile(r"\b(?:location|map|maps|google ?map|pin|directions?|route)\b.*\b(?:send|share|pannunga|ayakk\w*|"
+                     r"tharo|link|please|pls|venam|kodukk\w*|bhejo|bhej\w*)\b|\b(?:send|share)\b.*\b(?:location|map|pin)\b|"
+                     r"\bwhere (?:is|are) (?:the |your )?(?:resort|property|place|you)\b|\bevide(?:yaa?nu| aanu)\b.*"
+                     r"\b(?:resort|stalam|place)\b|\bmaps?\s*\??$|\blocation\s*\?+$", re.IGNORECASE)
 NOTHING = re.compile(r"^\s*(?:no+|nope|nah|nothing(?: else)?|no thanks?|no thank you|that'?s (?:all|it)|thats (?:all|it)|"
                      r"illa|ella|onnum (?:illa|venda)|onnumilla|venda|vendaa|nahi|kuch nahi|nahi chahiye|onnum vendaa|"
                      r"edhuvum (?:illa|venam)|illai|vendam|all good|done)(?:\s+(?:sir|bro|thanks?|thank you|ok))*[\s.!]*$",
@@ -300,12 +306,14 @@ class BookingBot(IdProofMixin, ChatMixin):
             st = self.repo.get_state(phone)
         else:
             answered = False
+        if MAP_ASK.search(text) and (outcome := self._send_map(phone, st, text)):
+            return outcome
         if (PHOTO_ASK.search(text) or (st.get("checked") and ROOM_OPTIONS_ASK.search(text))) \
                 and (outcome := self._photos_now(phone, st, text)):
             return outcome  # photos at any stage (owner, 2026-11-19): the free room by priority, else the top one
         if PHOTO_ASK.search(text) and not st.get("checked"):
             # photos come with the glimpse once rooms are found (owner's flow); before that, the next step
-            step = self.next_step(phone, st) or t("ask_location", st.get("lang", "en"), towns=" or ".join(self._towns()))
+            step = self.next_step(phone, st) or t("ask_location", st.get("lang", "en"), towns=self._towns_text())
             if step == (self.repo.last_outbound_text(phone) or "") and step == t("form", st.get("lang", "en")):
                 step = t("fill_form", st.get("lang", "en"))  # the form is just above: point to it, never silence
             self._text(phone, step, repeat_ok=True)
@@ -342,7 +350,7 @@ class BookingBot(IdProofMixin, ChatMixin):
                     self._save(phone, st)
                     self._text(phone, self._missing_form(lang, self._stay_known(phone, st)), repeat_ok=True)
                 else:
-                    self._text(phone, t("ask_location", lang, towns=" or ".join(self._towns())), repeat_ok=True)
+                    self._text(phone, t("ask_location", lang, towns=self._towns_text()), repeat_ok=True)
             return "answered"  # the AI already answered this message above
         return self._converse(phone, st, text, in_id)
 
@@ -529,6 +537,24 @@ class BookingBot(IdProofMixin, ChatMixin):
                          f"{b.guest_name} {b.guest_phone}. Paid Rs {sum(x.paid_amount for x in parts)} of Rs "
                          f"{sum(x.total for x in parts)} "
                          f"({method_label(b.payment_method)}).", b.property_id)
+
+    def _send_map(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """'Location send pannunga' / 'map?' / 'where is the resort': the resort's Google Maps link (the chosen resort,
+        the one named, else the only open one). None when no link is set (the AI answers)."""
+        bk = st.get("bk") or {}
+        prop = self.repo.get_property(bk.get("property_id") or st.get("form_place") or "") if (
+            bk.get("property_id") or st.get("form_place")) else None
+        if prop is None:
+            places = self._places()
+            prop = self._named_place(text) or (places[0] if len(places) == 1 else None)
+        if prop is None or not prop.map_url:
+            return None
+        self._save(phone, st)  # keep the language read from this message
+        self._text(phone, f"📍 {prop.name}\n{prop.map_url}", repeat_ok=True)
+        if step := self.next_step(phone, st):
+            if step != (self.repo.last_outbound_text(phone) or ""):
+                self._text(phone, step, repeat_ok=True)
+        return "map"
 
     def _final_ok(self, phone: str, st: dict[str, Any], in_id: int) -> str:
         """A last 'ok' with nothing open (owner, 2026-11-19): if the guest writes nothing more for followup_s seconds,

@@ -772,6 +772,12 @@ class ChatMixin:
             names.append(p.name if not town or town.lower() in p.name.lower() else f"{p.name}, {town}")
         return names
 
+    def _towns_text(self) -> str:
+        """'Alleppey or Kanthalloor', 'Alleppey, Kanthalloor or Munnar': every resort in the dashboard (a new one shows
+        up by itself), for the owner's 'Sure, Kindly confirm the Location 📍' question."""
+        towns = self._towns()
+        return towns[0] if len(towns) == 1 else ", ".join(towns[:-1]) + " or " + towns[-1]
+
     def _towns(self) -> list[str]:
         """Where the resorts are, from the dashboard: 'Alleppey', 'Kanthalloor' (city's first part, or the name)."""
         towns: list[str] = []
@@ -896,13 +902,15 @@ class ChatMixin:
             return None
         lang = st.get("lang", "en")
         plan, problem, room = self._photo_plan(phone, st, prop, text)
+        if problem == "photos_sent" and not self._sent_photos(phone):
+            return None  # no photo uploaded yet: nothing was 'sent above'; the next step / the AI answers instead
         if problem:
             self._text(phone, t(problem, lang, room=room), repeat_ok=True)
             return "photos"
         if not self._send_plan(phone, plan):
             self._text(phone, t("photos_sent", lang), repeat_ok=True)
             return "photos"
-        step = self.next_step(phone, st) or t("ask_location", lang, towns=" or ".join(self._towns()))
+        step = self.next_step(phone, st) or t("ask_location", lang, towns=self._towns_text())
         self._text(phone, step, repeat_ok=True)  # back to the booking: the open step (location, form, name)
         return "photos"
 
@@ -954,7 +962,7 @@ class ChatMixin:
     def _location_answer(self, phone: str, st: dict[str, Any], text: str) -> str | None:
         """The guest answered our location question with just a place: send the form at once (no AI guesswork)."""
         last = self.repo.last_outbound_text(phone) or ""
-        if "Kindly confirm the Location" not in last and last != " or ".join(self._towns()) + " ?":
+        if "Kindly confirm the Location" not in last and last != self._towns_text() + " ?":
             return None
         if len(text.split()) > 4:
             return None
@@ -974,7 +982,7 @@ class ChatMixin:
                     or is_ack(text) or NOT_NOW.search(text) or RESTART.match(text):
                 return None  # not a place answer: the normal handling goes on
             # not understood: ask once more, short, never silence (owner, 2026-11-18)
-            again = " or ".join(self._towns()) + " ?"
+            again = self._towns_text() + " ?"
             if (self.repo.last_outbound_text(phone) or "") == again:
                 return None  # asked twice already: let the AI help
             self._text(phone, again, repeat_ok=True)
@@ -1047,7 +1055,7 @@ class ChatMixin:
                 self._save(phone, st)
                 msg = self._missing_form(lang, parse_stay(text, self._today()))
             else:
-                msg = t("ask_location", lang, towns=" or ".join(self._towns()))
+                msg = t("ask_location", lang, towns=self._towns_text())
         else:
             # nothing fixed fits: the AI answers it like an agent; 'please type that once more' only if it can't
             if self.answer_question(phone, st, text) == "answered":
@@ -1159,7 +1167,7 @@ class ChatMixin:
         prop = (self.repo.get_property(st["form_place"]) if st.get("form_place") else None) or self._named_place(
             ctx.text) or (self._places()[0] if len(self._places()) == 1 else None)
         if prop is None:
-            self._text(phone, t("ask_location", lang, towns=" or ".join(self._towns())))
+            self._text(phone, t("ask_location", lang, towns=self._towns_text()))
             return
         st["form_place"] = prop.id
         got = self._stay_known(phone, st)
@@ -1219,7 +1227,7 @@ class ChatMixin:
             return t("ask_contact", lang)
         if st.get("form_place") and not bk.get("check_in"):
             return t("form", lang)
-        asked_location = t("ask_location", lang, towns=" or ".join(self._towns()))
+        asked_location = t("ask_location", lang, towns=self._towns_text())
         if any(m.direction == "out" and m.text == asked_location for m in self._session_rows(phone)):
             return asked_location
         return None
@@ -1247,7 +1255,7 @@ class ChatMixin:
             self._text(phone, t("fill_form", lang) if self._form_was_last(phone) else form, repeat_ok=True)
             return "form"
         if prop is None:
-            self._text(phone, t("ask_location", lang, towns=" or ".join(self._towns())), repeat_ok=True)
+            self._text(phone, t("ask_location", lang, towns=self._towns_text()), repeat_ok=True)
             self._save(phone, st)
             return "location"
         st["form_place"] = prop.id
@@ -1289,7 +1297,7 @@ class ChatMixin:
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         if prop := self._named_place(ctx.text):  # 'rooms available in allepy?': the place is known, the form follows
             return self._tool_form(ctx, {"place": self._place_label(prop)})
-        ctx.after.append(t("ask_location", ctx.st.get("lang", "en"), towns=" or ".join(self._towns())))
+        ctx.after.append(t("ask_location", ctx.st.get("lang", "en"), towns=self._towns_text()))
         ctx.silent = True
         return {"ok": True, "note": "the location question is sent automatically; reply exactly [no reply]"}
 
@@ -1444,8 +1452,7 @@ class ChatMixin:
             "- Do not paste the property description. Do not mention offers, discounts or 'special' deals. Just "
             "state the price.\n"
             "- Never repeat details the guest already gave, except in the final summary.\n"
-            "- A greeting ('hi', 'hello', 'Hi bro'), also in the middle of a chat, always gets exactly 'Hi, How may I "
-            "assist you?' (never [no reply]). Never ask again what they already told you.\n"
+            "- Never ask again what they already told you.\n"
             "- Always polite, concise and to the point.\n"
             "- You are the resort's booking agent: answer every question about the resort, the stay and the trip "
             "(parking, food, pool, beach, Wi-Fi, AC, check-in time, ID, distance, how to reach, places to see nearby, "
@@ -1807,6 +1814,9 @@ class ChatMixin:
                 response = llm.complete(system, messages, tools, MAX_REPLY_TOKENS)
             if not coded and not response.tool_calls:
                 reply = self._fix_reply(llm, system, messages, response.text.strip(), text, st)
+                if not GREETING.match(text) and reply.strip().rstrip(".!?").lower() in {
+                        t("greet", lg).rstrip(".!?").lower() for lg in ("en", "mn", "tn", "hn")}:
+                    reply = NO_REPLY  # 'Any places nearby?' once got 'Hi, How may I assist you?' (Sarvam, 2026-11-20)
                 if SOLD_OUT_CLAIM.search(reply) and not ctx.none_found and not answer_only:
                     # 'today is fully booked' with no room check behind it (live chat 2026-11-19, rooms were free)
                     reply = NO_REPLY
@@ -1912,7 +1922,7 @@ class ChatMixin:
             if len(parts) > 1 and CLOSING.match(parts[-1].strip()):
                 clean = " ".join(parts[:-1])  # no 'Anything else?' tails (owner: very few words)
             if self._own_location_question(clean):  # the AI asked "which location" in its own words: the owner's
-                clean = t("ask_location", st.get("lang", "en"), towns=" or ".join(self._towns()))  # wording only
+                clean = t("ask_location", st.get("lang", "en"), towns=self._towns_text())  # wording only
                 self._text(phone, clean)
             elif (dates := self._own_dates_ask(st, clean))[0]:  # it asked for dates / persons itself: the owner's form
                 self._strict_form(ctx, dates[1])
