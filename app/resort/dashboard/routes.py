@@ -821,6 +821,18 @@ def properties_list(request: Request, auth: Auth = Depends(require_user)):
     return page(request, "properties.html", auth, nav="properties", rows=rows)
 
 
+@router.get("/ai-status")
+def ai_status(request: Request, auth: Auth = Depends(require_owner)):
+    """Owner only: which AI the bot uses right now, in order (names and models, never keys)."""
+    from app.resort.services import get_services
+    try:
+        llm = get_services().llm
+        chain = [{"name": x.name, "model": getattr(x, "model", "")} for x in getattr(llm, "providers", [llm])]
+        return JSONResponse({"llm_chain": chain})
+    except Exception as exc:  # no usable provider: say why, still without keys
+        return JSONResponse({"llm_chain": [], "error": str(exc)[:300]})
+
+
 @router.post("/delete-all-bookings")
 async def delete_all_bookings(request: Request, auth: Auth = Depends(require_owner)):
     """Owner only: delete every booking (chats, guests, rooms and settings stay). Needs confirm=DELETE."""
