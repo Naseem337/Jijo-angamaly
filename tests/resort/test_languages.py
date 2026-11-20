@@ -98,7 +98,8 @@ def test_a_reply_in_native_script_is_never_sent(world):
 def test_a_tanglish_guest_answered_in_manglish_gets_a_tanglish_rewrite(world):
     w = world
     say(w, "room irukka? beach pakkam irukka?", GUEST, reply("Und, beach aduthu aanu."), reply("Irukku, beach pakkam thaan."))
-    assert w.wa.texts()[-1] == "Irukku, beach pakkam thaan."
+    # the answer in Tanglish, then the booking moves on with the location question (owner, 2026-11-20)
+    assert w.wa.texts()[-2] == "Irukku, beach pakkam thaan." and w.wa.texts()[-1].startswith("Sure, Kindly confirm")
 
 
 def test_a_hinglish_guest_answered_in_english_gets_a_hinglish_rewrite(world):

@@ -22,7 +22,7 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, YES_REPLY, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
+from app.resort.chat import BOOKING_WISH, CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, YES_REPLY, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
@@ -284,12 +284,22 @@ class BookingBot(IdProofMixin, ChatMixin):
             return self._converse(phone, st, text, in_id)  # 'ok' to 'Shall I go ahead with 5 rooms?': checked in code
         if is_ack(text) and "?" not in text:  # "ok" mid-chat ("?" is a question, not an ok) (owner, 2026-11-18): carry on to the step still open, else stay quiet
             if step := self.next_step(phone, st):
-                if step == (self.repo.last_outbound_text(phone) or ""):
-                    return "quiet"  # the open step is the last thing we said: wait for their answer
+                if step == (self.repo.last_outbound_text(phone) or "") or st.get("ok_reminded") == step:
+                    return "quiet"  # already said or already reminded once: wait for their answer (2026-11-20)
+                st["ok_reminded"] = step
+                self._save(phone, st)
                 self._text(phone, step, repeat_ok=True)
                 return "next_step"
             if not self._bot_asked_something(phone, st):
                 return self._final_ok(phone, st, in_id)
+        if self._other_question(text) and (PHOTO_ASK.search(text) or BOOKING_WISH.search(text)
+                                            or self._named_place(text) is not None):
+            # 'Do you have rooms with a sea view?': the AI answers it first, then the fixed step below goes (owner,
+            # 2026-11-20: answer like an agent). The question is never answered twice.
+            answered = self.answer_question(phone, st, text) == "answered"
+            st = self.repo.get_state(phone)
+        else:
+            answered = False
         if (PHOTO_ASK.search(text) or (st.get("checked") and ROOM_OPTIONS_ASK.search(text))) \
                 and (outcome := self._photos_now(phone, st, text)):
             return outcome  # photos at any stage (owner, 2026-11-19): the free room by priority, else the top one
@@ -320,6 +330,20 @@ class BookingBot(IdProofMixin, ChatMixin):
             return outcome
         if outcome := self._location_answer(phone, st, text):
             return outcome
+        if answered:
+            # the AI answered the question; the booking still moves on: the open step, else location / form
+            live = any(b.status in ("paid", "checked_in", "hold") and b.check_out >= self._today()
+                       for b in self.repo.list_bookings(phone=phone, limit=10))
+            if BOOKING_WISH.search(text) and not (st.get("bk") or {}).get("check_in") and not live:
+                lang = st.get("lang", "en")
+                if prop := (self.repo.get_property(st["form_place"]) if st.get("form_place") else None) \
+                        or self._named_place(text):
+                    st["form_place"] = prop.id
+                    self._save(phone, st)
+                    self._text(phone, self._missing_form(lang, self._stay_known(phone, st)), repeat_ok=True)
+                else:
+                    self._text(phone, t("ask_location", lang, towns=" or ".join(self._towns())), repeat_ok=True)
+            return "answered"  # the AI already answered this message above
         return self._converse(phone, st, text, in_id)
 
     # ------------------------------------------------------------------ staff handoff

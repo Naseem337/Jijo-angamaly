@@ -438,6 +438,44 @@ QUESTION_WORD = re.compile(r"\b(?:what|how|when|where|which|why|who|is|are|do|do
                            r"kitna|entha|enthu|enna|yenna|kya|evide|enga|kahan)\b", re.IGNORECASE)
 NUDGE = re.compile(r"\b(?:respond|reply|answer|anyone|any update|update|waiting|there\?|marupadi|parayu|"
                    r"bolo|sollunga)\b", re.IGNORECASE)
+# words that are only booking details, greetings or fillers: a message made of these is not a question to answer
+_DETAIL_WORDS = set("""
+for to from till until the a an in on at of and or with is it are am i we us our my me you your this that these those
+there here be do does did can could would will shall pls please plz ok okay yes no sir madam bro hi hello hai hey
+room rooms bed beds bedroom booking book booked need want wanted needed looking available availability free vacancy
+vacant check checkin checkout out date dates day days night nights stay persons person people ppl pax per adults adult
+kids kid child children members guests guest total only also just any some one two three four five six seven eight
+nine ten jan january feb february mar march apr april may jun june jul july aug august sep sept september oct october
+nov november dec december today tomorrow tonight weekend week next this coming th st nd rd photos photo pics pictures
+images image show send see please share details resort resorts place location same number mobile name
+undo und unde undoo ano aano alle alley allo illa ille illey venam veno venda kittumo kittum aanu aan aayirikkum
+venum irukka iruka kidaikkuma chahiye hai hain kya milega mil sakta sakti
+nale naale innu inn kal aaj naalai mattannal parso varum pokum vare muthal tak ninnu
+""".split())
+# a question: '?', an English question word that STARTS the message ('ok will book later' is not one), or a
+# Malayalam / Tamil / Hindi question word anywhere ('pool undo', 'parking evide')
+_QUESTION_SIGNAL = re.compile(r"\?|^\W*(?:what|how|when|where|which|why|who|is|are|do|does|can|could|will|any|whats)\b|"
+                              r"\b(?:ethra|entha|enthu|evide|engane|enna|evlo|enga|eppadi|kya|kitna|kahan|kaise|kab|"
+                              r"undo|ano|aano|ille|alle)\b", re.IGNORECASE)
+
+
+def other_question(text: str, extra_detail_words: set[str] = frozenset()) -> bool:
+    """True when the guest asks something besides booking details ('Do you have rooms with a sea view?', '25-27 Dec,
+    3 people, is parking free?', 'pool undo?'). Pure details ('25 Dec 3 ppl', 'Alleppey.?', 'rooms undo?') are False.
+    Such a question is answered by the AI like an agent, and the fixed booking step still goes (owner, 2026-11-20)."""
+    if not _QUESTION_SIGNAL.search(text or ""):
+        return False
+    words = [w for w in re.findall(r"[a-z]+", (text or "").lower()) if len(w) >= 3]
+    return any(w not in _DETAIL_WORDS and w not in extra_detail_words for w in words)
+
+
+# a sentence about whether rooms are free or about the guest's dates: only the fixed steps say these, never the
+# AI beside them (it once said 'Rooms are available' / 'fits 3 people' against the code's own check)
+ROOM_FACT = re.compile(r"\brooms?\b[^.?!]{0,30}\b(?:available|free|booked|full|vacant)\b|"
+                       r"\b(?:available|free|booked|vacant)\b[^.?!]{0,20}\brooms?\b|\bfully booked\b|\bsold out\b|"
+                       r"\bavailability\b|\bfits?\b[^.?!]{0,20}\b(?:people|persons|guests|pax|\d)|"
+                       r"check[\s-]?in date|check[\s-]?out date|available alla|free alla|\brooms? und\b",
+                       re.IGNORECASE)
 YES_REPLY = re.compile(r"^\W*(?:yes|yeah|yep|ya|yaa|s|sure|ok\w*|go ahead|proceed|book|book it|do it|fine|done|"
                        r"sheri|seri|sari|athe|aam|aanu|mathi|cheyyu|cheytho|haan|ha|haa|theek|thik|aamaa|ama|seri da)"
                        r"(?:\s+(?:please|pls|sir|bro|cheyyu|cheytho|karo|pannunga|go ahead|book))*\W*$", re.IGNORECASE)
@@ -471,7 +509,7 @@ SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE
 MAX_ROOM_PHOTOS = None  # no limit (client, 2026-11-19): every photo uploaded for the room in the dashboard goes
 
 # The owner wants no essays (2026-11-17): more words than this, outside the room/price lines, gets one shorter rewrite.
-MAX_CHAT_WORDS = 15  # "reply in so few words" (client, 2026-11-18; was 30)
+MAX_CHAT_WORDS = 40  # short but a real answer (owner, 2026-11-20: answer like an agent; was 15)
 _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s", re.IGNORECASE)
 
 
@@ -1004,6 +1042,9 @@ class ChatMixin:
             else:
                 msg = t("ask_location", lang, towns=" or ".join(self._towns()))
         else:
+            # nothing fixed fits: the AI answers it like an agent; 'please type that once more' only if it can't
+            if self.answer_question(phone, st, text) == "answered":
+                return "answered"
             msg = t("say_again", lang)
         if msg == last:
             msg = t("say_again", lang) if msg != t("say_again", lang) else ""
@@ -1399,11 +1440,14 @@ class ChatMixin:
             "- A greeting ('hi', 'hello', 'Hi bro'), also in the middle of a chat, always gets exactly 'Hi, How may I "
             "assist you?' (never [no reply]). Never ask again what they already told you.\n"
             "- Always polite, concise and to the point.\n"
-            "- Talk ONLY about our resorts: rooms, prices, dates, bookings, payment, the stay, location and facilities. "
-            "For anything else (general questions, other places, news, jokes, coding, personal chat) say politely in "
-            "one short line that you can help only with resort bookings. Questions about the stay itself (parking, food, "
-            "pool, beach, Wi-Fi, AC, check-in time, ID, distance, places nearby) ARE resort questions: answer from the "
-            "FACTS, or say the owner will confirm and give the owner's numbers. Never refuse them.\n"
+            "- You are the resort's booking agent: answer every question about the resort, the stay and the trip "
+            "(parking, food, pool, beach, Wi-Fi, AC, check-in time, ID, distance, how to reach, places to see nearby, "
+            "weather, best season) helpfully, like a friendly person at the front desk. Use the FACTS; if a fact is "
+            "not there, say the owner will confirm and give the owner's numbers. Only for things that have nothing to "
+            "do with the trip (news, jokes, coding) say politely in one line that you help with stays at the resort.\n"
+            "- When the guest's message also asks a question, ANSWER that question in one or two short lines even "
+            "when a tool tells you to reply [no reply]: the booking messages still go automatically after your answer. "
+            "Never repeat those booking messages yourself.\n"
             "- A price, total or advance only from a tool result in THIS turn (call check_availability); never from "
             "memory or the welcome message.\n"
             "- When the guest's message carries a note that they swiped to reply to an earlier message, answer about "
@@ -1686,8 +1730,20 @@ class ChatMixin:
         self._save(phone, st)
         return bool(ctx.after or ctx.summary_message)
 
+    def _other_question(self, text: str) -> bool:
+        """other_question() with our town, resort and room type names counted as booking details."""
+        names: set[str] = set()
+        for p in self.repo.list_properties(active_only=False):
+            names |= self._place_words(p)
+            names |= {w for rt in self.repo.list_room_types(p.id) for w in re.findall(r"[a-z]+", rt.name.lower())}
+        return other_question(text, names)
+
+    def answer_question(self, phone: str, st: dict[str, Any], text: str) -> str:
+        """The AI answers only the guest's question; the fixed booking step goes separately (owner, 2026-11-20)."""
+        return self._converse(phone, st, text, 0, answer_only=True)
+
     def _converse(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0,
-                  images: list[tuple[str, str]] | None = None) -> str:
+                  images: list[tuple[str, str]] | None = None, answer_only: bool = False) -> str:
         if self.debounce_s and in_id:  # a second message may follow: wait, and let the newest one answer
             time.sleep(self.patience_s if looks_unfinished(text) else self.debounce_s)
             if self.repo.last_chat_id(phone, "in") != in_id:
@@ -1711,10 +1767,21 @@ class ChatMixin:
         quote = getattr(self, "_quotes", {}).pop(phone, None)
         if quote and messages and messages[-1].role == "user":
             messages[-1].content += "\n\n" + quote
+        if answer_only and messages and messages[-1].role == "user":
+            messages[-1].content += ("\n\n[The booking steps for this message are sent automatically. Answer ONLY "
+                                     "the guest's question in one or two short, friendly lines. Do not ask for "
+                                     "dates, location, persons, name or mobile, and do not say whether rooms are "
+                                     "available.]")
         reply = ""
         if self._over_ai_cap(phone, st):  # one guest flooding messages: the team takes over, no more AI calls
             return "handoff"
-        coded = self._stay_in_code(ctx, text)
+        coded = False if answer_only else self._stay_in_code(ctx, text)
+        if coded and self._other_question(text):
+            # '25-27 Dec, 3 people, is parking free?': the AI answers the parking question first, then the room
+            # check's messages go (owner, 2026-11-20: answer like an agent, never drop a question)
+            self.answer_question(phone, st, text)
+        # answering only: tools that just READ (the guest's bookings, earlier chat), never ones that send steps
+        tools = [x for x in TOOLS if x.name in ("my_bookings", "recall_old_chat")] if answer_only else TOOLS
         try:
             if coded:
                 reply = NO_REPLY  # the stay details were handled in code: rooms checked or the missing lines asked
@@ -1722,7 +1789,7 @@ class ChatMixin:
                 raise LLMError("none", "no LLM configured")
             if not coded:
                 llm = self._llm()
-                response = llm.complete(system, messages, TOOLS, MAX_REPLY_TOKENS)
+                response = llm.complete(system, messages, tools, MAX_REPLY_TOKENS)
             for _ in range(0 if coded else MAX_TOOL_ROUNDS):
                 if not response.tool_calls or ctx.handed_off:
                     break
@@ -1730,10 +1797,10 @@ class ChatMixin:
                 for call in response.tool_calls:
                     content, is_error = self._run_tool(ctx, call)
                     messages.append(ChatMessage.tool_result(call.id, content, is_error=is_error))
-                response = llm.complete(system, messages, TOOLS, MAX_REPLY_TOKENS)
+                response = llm.complete(system, messages, tools, MAX_REPLY_TOKENS)
             if not coded and not response.tool_calls:
                 reply = self._fix_reply(llm, system, messages, response.text.strip(), text, st)
-                if SOLD_OUT_CLAIM.search(reply) and not ctx.none_found:
+                if SOLD_OUT_CLAIM.search(reply) and not ctx.none_found and not answer_only:
                     # 'today is fully booked' with no room check behind it (live chat 2026-11-19, rooms were free)
                     reply = NO_REPLY
                     self._stay_in_code(ctx, text, force=True)
@@ -1744,6 +1811,22 @@ class ChatMixin:
         self._save(phone, st)
         if ctx.handed_off:
             return "handoff"
+        if answer_only:  # only the AI's answer: no fixed steps, no fallbacks (the caller sends those)
+            if not reply or NO_REPLY in reply.lower() or SOLD_OUT_CLAIM.search(reply):
+                return "quiet"
+            clean = LOG_LINE.sub("", self._without_name(reply.replace("—", "-").replace("**", "*"), "")).strip()
+            keep = [x for x in re.split(r"(?<=[.?!])\s+|\n+", clean) if x.strip() and not CLOSING.match(x.strip())
+                    and not self._own_location_question(x) and not self._own_dates_ask(st, x)[0]
+                    and not CONTACT_ASK.search(x) and not ROOM_FACT.search(x)]
+            clean = no_unasked_prices(" ".join(keep), text)
+            if not clean:
+                if any(self._own_dates_ask(st, x)[0] for x in re.split(r"(?<=[.?!])\s+|\n+", reply)):
+                    self._strict_form(ctx, "")  # it only asked for the dates: the owner's form, never silence
+                    self._save(phone, st)
+                    return "answered"
+                return "quiet"
+            self._text(phone, self._ease_sir(phone, clean))
+            return "answered"
         if not ctx.summary_message and (st.get("bk") or {}).get("check_in") and (contact := contact_in(text)):
             # the guest sent their number ('same number', '9876543210', 'Rahul 98470 12345') after rooms were found but
             # the AI did not book: the code does, so the summary and the payment link go (client, 2026-11-18)
@@ -1805,8 +1888,15 @@ class ChatMixin:
             return "ai_down"
         # the client's order: the AI's short line, then the fixed messages (form / glimpse / ask name), then the
         # enquiry summary, then the payment link
-        if ctx.silent or any(isinstance(m, str) and m.startswith(FORM_START) for m in ctx.after):
-            quiet = True  # a fixed step (location, form, rooms available) goes: never the AI's own line beside it
+        if (ctx.silent or any(isinstance(m, str) and m.startswith(FORM_START) for m in ctx.after)) \
+                and not (reply and not quiet and self._other_question(text)):
+            quiet = True  # a fixed step goes: the AI's own line only when it answers a real question (2026-11-20)
+        elif reply and not quiet and (ctx.silent or ctx.after):
+            # it answers the guest's question; anything it says about rooms, dates or contact the fixed steps say
+            reply = " ".join(x for x in re.split(r"(?<=[.?!])\s+|\n+", reply) if x.strip()
+                             and not ROOM_FACT.search(x)
+                             and not CONTACT_ASK.search(x) and not self._own_dates_ask(st, x)[0])
+            quiet = not reply
         if reply and not quiet:
             guest = self.repo.get_guest(phone)
             clean = self._without_name(reply.replace("—", "-").replace("**", "*"), guest.name if guest else "")

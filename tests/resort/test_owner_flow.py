@@ -398,3 +398,59 @@ def test_a_lone_date_after_check_out_is_asked_is_the_check_out_and_nudges_get_a_
     n = len(w.wa.texts(PHONE))
     chat(w, "Please respond")
     assert len(w.wa.texts(PHONE)) > n
+
+
+# ------------------------------------------------- answer like an agent (owner, 2026-11-20)
+from app.providers.llm import MockLLM  # noqa: E402
+
+
+def _ai_says(w, *lines):
+    llm = w.bot._llm()
+    llm.script[:0] = [MockLLM.text(x) for x in lines]
+
+
+def test_a_question_with_a_room_request_is_answered_then_the_location_is_asked(live):
+    w = live
+    _ai_says(w, "Yes, every room has a sea view.")
+    chat(w, "Do you have rooms with a sea view?")
+    lines = transcript(w)
+    assert lines[-2:] == ["BOT: Yes, every room has a sea view.", "BOT: Sure, Kindly confirm the Location 📍"]
+
+
+def test_details_and_a_question_in_one_message_both_get_an_answer(live):
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey")
+    _ai_says(w, "Yes, parking is free for guests.")
+    chat(w, "25 dec to 27 dec, 2 people, is parking free?")
+    lines = transcript(w)
+    i = lines.index("BOT: Yes, parking is free for guests.")
+    assert "BOT: Yes, rooms are available for your dates." in lines[i:]  # the answer first, then the room check
+
+
+def test_the_ai_never_states_room_facts_beside_the_fixed_steps(live):
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey")
+    _ai_says(w, "Rooms are available and the room fits 3 people. The pool is open 7 am to 7 pm.")
+    chat(w, "25 dec to 27 dec, 3 ppl, pool timing?")
+    lines = transcript(w)
+    assert "BOT: The pool is open 7 am to 7 pm." in lines
+    assert not any("fits 3" in x for x in lines)
+
+
+def test_plain_details_never_call_the_ai(live):
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey")
+    calls = len(w.bot._llm().calls)
+    chat(w, "25 Dec\n3 ppl", "26 Dec")
+    assert len(w.bot._llm().calls) == calls  # pure booking details are handled in code, fast and exact
+    assert "BOT: Yes, rooms are available for your dates." in transcript(w)
+
+
+def test_a_question_nothing_fixed_fits_gets_an_ai_answer_not_type_again(live):
+    w = live
+    _ai_says(w, "[no reply]", "Alleppey beach is 2 minutes walk from the resort.")
+    chat(w, "how far is the beach?")
+    assert transcript(w)[-1] == "BOT: Alleppey beach is 2 minutes walk from the resort."
