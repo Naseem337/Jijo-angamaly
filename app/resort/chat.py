@@ -747,6 +747,10 @@ _STRAY_ML = {"tanglish": {"und": "irukku", "undo": "irukka", "aanu": "thaan", "v
              "hinglish": {"und": "hai", "undo": "hai kya", "aanu": "hai", "venam": "chahiye", "ippol": "abhi",
                           "ethra": "kitna", "mathi": "chalega"}}
 LINK_ASK = re.compile(r"\blink\b|\bpay\w*|\bpaid\b|\badvance\b|razorpay|upi|gpay", re.IGNORECASE)
+# 'The link opens a secure Razorpay page where you can use ...' -> 'You can use ...'
+PAY_PAGE_TALK = re.compile(r"\b(?:the\s+)?(?:payment\s+)?link\s+(?:opens|takes you to|leads to)\s+(?:a\s+|the\s+)?"
+                           r"(?:secure\s+)?(?:razorpay\s+)?(?:payment\s+)?page[,]?\s*(?:where\s+)?(?:you\s+can\s+(?:use|pay\s+"
+                           r"(?:by|with|using))\s+)?", re.IGNORECASE)
 LINK_REMINDER = re.compile(r"payment link (?:is )?(?:still )?(?:active|open|valid)|link is still|link ippozhum|"
                            r"if you would like to go ahead", re.IGNORECASE)
 SORRY_FILLER = re.compile(r"\bi wish i could\b|\bi hear you\b|\bi understand (?:your|that)\b|\bunfortunately\b|"
@@ -1425,8 +1429,19 @@ class ChatMixin:
     def _negotiation_guard(self, phone: str, guest_text: str, reply: str) -> str:
         """A request for a lower price (owner, 2026-11-21): the first time only the value is said (owner numbers and
         payment-link reminders are dropped); when they ask again, the owner's numbers always go. A payment-link
-        reminder the guest did not ask for is dropped from any reply."""
-        parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", reply) if x.strip()]
+        reminder the guest did not ask for is dropped from any reply. How the payment page works is never told
+        (owner, 2026-11-21: no 'Razorpay', no 'secure'; only 'You can use UPI, card, net banking or wallet')."""
+        parts = []
+        for x in (x for x in re.split(r"(?<=[.?!])\s+|\n+", reply) if x.strip()):
+            if re.search(r"razorpay|\bsecure", x, re.IGNORECASE):
+                if not re.search(r"\bupi\b|\bcards?\b|net ?banking|wallet", x, re.IGNORECASE):
+                    continue  # only about the payment page: dropped
+                x = PAY_PAGE_TALK.sub("You can use ", x)
+                x = re.sub(r"\s*\b(?:via |through |on |using )?(?:a |the )?(?:secure\s+)?razorpay(?:\s+(?:page|link|"
+                           r"gateway))?\b", "", x, flags=re.IGNORECASE)
+                x = re.sub(r"\bsecure(?:ly)?\s+", "", x, flags=re.IGNORECASE).strip()
+                x = x[:1].upper() + x[1:]
+            parts.append(x)
         if not LINK_ASK.search(guest_text):
             parts = [x for x in parts if not LINK_REMINDER.search(x)]
         if ASKS_REDUCE.search(guest_text):
@@ -1945,9 +1960,9 @@ class ChatMixin:
             "fewer: then up to 3 per room, the 3rd on an extra bed at the FACTS price. When the guest asks for a "
             "number of rooms, call check_availability with that rooms number; the code adds the beds and the cost.\n\n"
             "PAYMENT\n"
-            "- The payment link opens a secure Razorpay page. The guest can pay by UPI (GPay, PhonePe, Paytm, any UPI "
-            "app or ID), debit or credit card, net banking or a wallet. Only the advance is paid online; the balance "
-            "is paid at the property. The rooms are held for a limited time while they pay.\n"
+            "- Asked how to pay: say only 'You can use UPI, card, net banking or wallet.' Never mention Razorpay, "
+            "'secure', the payment page or how it works. Only the advance is paid online; the balance is paid at the "
+            "property (say it only if asked).\n"
             "- If they say the link is lost, did not open or they want it again, call send_payment_link. If the hold "
             "ran out, offer to book again (check the dates again). Explain any payment doubt simply and patiently. "
             "A confirmation message arrives here automatically as soon as the payment goes through.\n"

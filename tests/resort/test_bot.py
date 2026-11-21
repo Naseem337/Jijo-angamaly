@@ -1139,7 +1139,8 @@ def test_system_prompt_explains_payment_methods_and_stuck_payments(world):
     w = world
     say(w, "can I pay by gpay?", GUEST, reply("Yes, UPI works."))
     system = w.llm.calls[0].system
-    assert "UPI (GPay, PhonePe, Paytm" in system and "money was deducted" in system and "Never promise a refund" in system
+    assert "You can use UPI, card, net banking or wallet." in system and "Never mention Razorpay" in system
+    assert "money was deducted" in system and "Never promise a refund" in system
 
 
 def test_razorpay_link_takes_all_methods_and_returns_the_guest_to_whatsapp():
@@ -1863,3 +1864,14 @@ def test_a_mixed_language_voice_note_is_used_not_rejected():
 
     assert VoiceIn(WA(), STT(), max_seconds=0, strict=False).process("m1").text == "njan jan 10 nu varum, 3 people"
     assert VoiceIn(WA(), STT(), max_seconds=0).process("m1").problem == "unclear"  # the strict check (car bot) stays
+
+
+def test_the_payment_page_is_never_explained(world):
+    # owner, 2026-11-21: no 'Razorpay', no 'secure'; only 'You can use UPI, card, net banking or wallet'
+    w = world
+    for ai, want in (("The link opens a secure Razorpay page where you can use UPI, card, net banking or wallet.",
+                      "You can use UPI, card, net banking or wallet."),
+                     ("Payment is through a secure Razorpay link. UPI, cards and net banking work.",
+                      "UPI, cards and net banking work.")):
+        say(w, "how can i pay?", GUEST, reply(ai))
+        assert w.wa.texts()[-1] == want

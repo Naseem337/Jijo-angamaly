@@ -241,12 +241,12 @@ def test_image_without_an_open_request_gets_no_reply_and_no_ai_call(world):
 def test_image_reading_can_be_switched_back_on(world, monkeypatch):
     w = world
     monkeypatch.setattr(type(w.bot), "READ_IMAGES", True)
-    llm = MockLLM([MockLLM.text("Thanks sir, the booking is confirmed once Razorpay shows the payment.")])
+    llm = MockLLM([MockLLM.text("Thanks sir, the booking is confirmed once the payment shows up.")])
     w.bot._llm = lambda: llm
     assert send_image(w) == "answered"
     sent = [m for m in llm.calls[-1].messages if m.role == "user"][-1]
     assert sent.images and sent.images[0][0] == "image/jpeg"  # the AI was shown the screenshot
-    assert "Razorpay" in w.wa.of("text")[-1]
+    assert "payment shows up" in w.wa.of("text")[-1]
 
 
 # --------------------------------------------------------------------------- reminder and purge
