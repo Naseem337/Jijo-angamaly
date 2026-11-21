@@ -1678,7 +1678,8 @@ class ChatMixin:
             "- Asked about rooms? Never ask the dates or persons in your own words: call ask_location (resort not known) "
             "or ask_stay_details (resort known) and reply [no reply]. Asked the "
             "location? Send the Maps link with a few words. Asked a yes/no question? Start with yes or no.\n"
-            "- Say \"sir\" at most ONCE in the whole chat (\"madam\" only if they are clearly a woman), never again after that. "
+            "- Say \"sir\" only once, at the very start of the chat (\"madam\" only if they are clearly a woman); never "
+            "again after that, and never in the middle of the chat. "
             "Never bro, dear, da, chetta, chechi, machane or their name.\n"
             "- The resort offers ONE room, chosen by the owner's priority. Never list room types or their prices.\n"
             "- Ask only ONE thing at a time, simply. No emoji piles (one is fine).\n"
@@ -1949,7 +1950,11 @@ class ChatMixin:
         sir or madam, every later one is sent without it ('Yes sir.' -> 'Yes.', 'Hi sir, how' -> 'Hi, how')."""
         rows = self.repo.list_chat(phone, limit=120)
         said = any(m.direction == "out" and SIR.search(m.text) for m in rows[self._session_start(rows):])
-        if not said or not SIR.search(reply):
+        # 'sir' only at the start of a conversation (owner, 2026-11-21: 'just initial only'): once it was said, or
+        # after the bot's first 3 messages, it is never said again
+        started = sum(1 for m in rows[self._session_start(rows):] if m.direction == "out" and m.source != "staff"
+                      and not m.text.startswith("[")) > 3
+        if not SIR.search(reply) or not (said or started):
             return reply
         eased = re.sub(rf"^\s*(?:{SIR.pattern})[,.!]?\s*", "", reply, flags=re.IGNORECASE)
         eased = re.sub(rf"\s*,?\s*(?:{SIR.pattern})", "", eased, flags=re.IGNORECASE).strip()

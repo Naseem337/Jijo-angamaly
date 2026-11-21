@@ -107,6 +107,7 @@ class BookingBot(IdProofMixin, ChatMixin):
     def _text(self, phone: str, text: str, *, repeat_ok: bool = False) -> bool:
         text = english_letters_only(text)  # never Malayalam / Tamil / Hindi letters in a text (owner, 2026-11-18)
         text = BOOKING_ID.sub("", text).replace(" .", ".").strip()  # guests never see a booking id (owner, 2026-11-18)
+        text = self._ease_sir(phone, text)  # 'sir' only at the start of the chat, on EVERY message (owner, 2026-11-21)
         if not repeat_ok and self._already_sent(phone, text):
             log.info("Not sending a message twice to %s", mask_phone(phone))
             return False

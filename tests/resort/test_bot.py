@@ -1248,7 +1248,7 @@ def test_ok_and_thanks_get_a_polite_reply_from_the_ai(world):
     # owner, 2026-11-21: no fixed replies to fixed words; the AI answers whatever the guest says, politely
     w = world
     hold(w, rooms=1)  # the last message to the guest is the payment link: no step is open
-    for ack, answer in (("Okay thanks", "You're welcome!"), ("adipoli", "Thank you, sir!")):
+    for ack, answer in (("Okay thanks", "You're welcome!"), ("adipoli", "Thank you so much!")):
         assert say(w, ack, GUEST, reply(answer)) == "answered", ack
         assert w.wa.texts()[-1] == answer
     say(w, "any pool nearby?", GUEST, reply("Not sure about that. Want me to check?"))  # a question from us
@@ -1413,7 +1413,7 @@ def test_casual_words_get_no_reply_but_real_talk_does(world):
     assert w.wa.texts()[-1] == "Interested aanenkil ningalude name-um mobile number-um ayakkamo?"
     before, calls = len(w.wa.to(GUEST)), len(w.llm.calls)
     # owner, 2026-11-21: the AI replies politely in its own words; the code adds the name ask still open
-    for casual, answer in (("thanks a lot", "Santhosham!"), ("adipoli", "Thank you sir!"), ("ok will see", "Sure, no problem.")):
+    for casual, answer in (("thanks a lot", "Santhosham!"), ("adipoli", "Thank you so much!"), ("ok will see", "Sure, no problem.")):
         n = len(w.wa.texts())
         assert say(w, casual, GUEST, reply(answer)) == "next_step", casual
         new = w.wa.texts()[n:]
@@ -1487,7 +1487,7 @@ def test_the_prompt_says_sir_and_treats_an_offers_question_as_a_plain_question(w
     w = world
     say(w, "offer undo?", GUEST, reply("Which dates, sir?"))
     system = w.llm.calls[0].system
-    assert 'Say "sir" at most ONCE' in system and "Never bro" in system and "Und bro" not in system
+    assert 'Say "sir" only once, at the very start' in system and "Never bro" in system and "Und bro" not in system
     assert "Asking about offers, deals or the price is only a question, NOT a request to reduce" in system
     assert "Never say there is no offer, never say you cannot reduce" in system
     assert "Only when the guest asks for a lower price" in system
@@ -1796,3 +1796,22 @@ def test_the_bot_never_explains_how_rooms_are_picked(world):
         reply("Every room has a beach view. The resort will assign the room based on its own priority."))
     sent = " ".join(w.wa.texts())
     assert "priority" not in sent and "assign" not in sent and "Every room has a beach view." in sent
+
+
+def test_sir_only_at_the_start_of_the_chat(world):
+    # owner, 2026-11-21: 'dont use sir too many times, just initial only'
+    w = world
+    say(w, "is there a pool?", GUEST, reply("Yes sir, there is a pool."))
+    assert w.wa.texts()[-1] == "Yes sir, there is a pool."  # the start of the chat: sir is fine once
+    for q, a in (("parking?", "Yes sir, free parking."), ("wifi?", "Sir, Wi-Fi is free."), ("food?", "Swiggy works, sir.")):
+        say(w, q, GUEST, reply(a))
+        assert "sir" not in w.wa.texts()[-1].lower(), w.wa.texts()[-1]
+
+
+def test_no_sir_in_the_middle_of_a_chat_even_if_never_said_before(world):
+    w = world
+    for q, a in (("pool?", "Yes, a pool."), ("parking?", "Free parking."), ("wifi?", "Wi-Fi is free."),
+                 ("ac?", "All rooms have AC.")):
+        say(w, q, GUEST, reply(a))
+    say(w, "beach?", GUEST, reply("Yes sir, beach view."))
+    assert w.wa.texts()[-1] == "Yes, beach view."

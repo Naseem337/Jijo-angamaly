@@ -98,7 +98,7 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 - Never the same message twice in a conversation. Allowed again: the code's rooms sentence after a change, the name
   ask after new photos, "rooms available" for new dates, a payment link the guest asks for, an answer asked a day later.
 - No word limits on answers: simple, complete answers. One thing asked at a time.
-- "sir" / "madam" at most now and then; never bro, dear, chetta, chechi or the guest's name.
+- "sir" / "madam" only once, at the start of the chat; never bro, dear, chetta, chechi or the guest's name.
 - Places to see, how to reach and the weather are answered from knowledge; "the owner will tell" only for the resort's
   own facts that are not in the dashboard (pets, alcohol, couples ... can be added in the dashboard).
 - A guest asking for the owner: the owner gets a summary; the bot keeps answering.
