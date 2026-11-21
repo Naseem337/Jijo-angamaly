@@ -279,7 +279,9 @@ class BookingBot(IdProofMixin, ChatMixin):
                 self._text(phone, t("opt_out", st.get("lang", "en")))
                 return "opt_out"
             if RESTART.match(text):  # 'restart': a fresh conversation (owner, 2026-11-18). Bookings and records stay.
-                keep = {k: st[k] for k in ("lang", "style", "gs", "opted_out") if k in st}
+                # the language starts fresh too (owner, 2026-11-21: 'yes' after restart got Manglish from the old
+                # chat): English until the guest writes in another language
+                keep = {k: st[k] for k in ("opted_out",) if k in st}
                 st.clear()
                 st.update(keep)
                 self._save(phone, st)

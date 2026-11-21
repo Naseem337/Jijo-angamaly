@@ -790,3 +790,14 @@ def test_a_lower_price_ask_first_gets_the_value_then_the_owner(live):
     chat(w, "please give some discount")
     new = w.wa.texts(PHONE)[n:]
     assert len(new) == 1 and "owner can speak with you directly" in new[0]
+
+
+def test_restart_starts_the_language_fresh(live):
+    # live chat 2026-11-21: after Malayalam voice notes, 'restart' then 'yes' got 'Yes, sir. Enthu help cheyyam?'
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "jan 1 muthal 3 vare 2 per")
+    assert w.repo.get_state(PHONE).get("style") == "manglish"
+    chat(w, "restart")
+    st = w.repo.get_state(PHONE)
+    assert st.get("lang", "en") == "en" and st.get("style") in (None, "en")
