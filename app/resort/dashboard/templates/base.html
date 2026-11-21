@@ -34,7 +34,7 @@
     </div>
     <nav>
       <div class="nav-label">Dashboard</div>
-      {% set nav_items = [("home","Home","home",""),("bookings","Bookings","book","/bookings"),("calendar","Calendar","cal","/calendar"),("stay","Arrivals & departures","door","/stay"),
+      {% set nav_items = [("home","Home","home",""),("bookings","Bookings","book","/bookings"),("chats","WhatsApp chats","whatsapp","/conversations"),("calendar","Calendar","cal","/calendar"),("stay","Arrivals & departures","door","/stay"),
         ("properties","Properties","building","/properties"),("guests","Guests & leads","users","/guests"),("reports","Reports","report","/reports/collections")] %}
       {% for key, label, ic, path in nav_items %}
         {% if key == 'properties' %}<div class="nav-label">Management</div>{% endif %}
@@ -68,7 +68,7 @@
       </div>
     </header>
     <main class="content">
-      {% set crumbs = {"home":"Dashboard","bookings":"Bookings","calendar":"Calendar","stay":"Arrivals & departures","properties":"Properties","guests":"Guests & leads","reports":"Reports","users":"Users"} %}
+      {% set crumbs = {"home":"Dashboard","bookings":"Bookings","chats":"WhatsApp chats","calendar":"Calendar","stay":"Arrivals & departures","properties":"Properties","guests":"Guests & leads","reports":"Reports","users":"Users"} %}
       {% if nav in crumbs %}<nav class="crumbs" aria-label="Breadcrumb">{{ icon('home') }}<a href="{{ BASE }}/">Home</a><span>›</span><b>{{ crumbs[nav] }}</b></nav>{% endif %}
       {% block content %}{% endblock %}</main>
   </div>
