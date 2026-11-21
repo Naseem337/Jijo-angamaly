@@ -1244,14 +1244,13 @@ def test_a_native_script_reply_is_rewritten_to_english_letters_for_a_script_gues
     assert "only English letters (Manglish)" in w.llm.calls[1].messages[-1].content
 
 
-def test_ok_after_a_statement_gets_no_reply_but_ok_after_a_question_does(world):
+def test_ok_and_thanks_get_a_polite_reply_from_the_ai(world):
+    # owner, 2026-11-21: no fixed replies to fixed words; the AI answers whatever the guest says, politely
     w = world
-    hold(w, rooms=1)  # the last message to the guest is the payment link: nothing is being asked
-    before = len(w.wa.to(GUEST))
-    calls = len(w.llm.calls)
-    for ack in ("ok", "Okay thanks", "👍", "sheri", "ശരി"):
-        assert say(w, ack) == "quiet", ack
-    assert len(w.wa.to(GUEST)) == before and len(w.llm.calls) == calls  # no spam, no AI cost
+    hold(w, rooms=1)  # the last message to the guest is the payment link: no step is open
+    for ack, answer in (("Okay thanks", "You're welcome!"), ("adipoli", "Thank you, sir!")):
+        assert say(w, ack, GUEST, reply(answer)) == "answered", ack
+        assert w.wa.texts()[-1] == answer
     say(w, "any pool nearby?", GUEST, reply("Not sure about that. Want me to check?"))  # a question from us
     assert say(w, "ok", GUEST, reply("Sure, I will ask the owner.")) == "answered"
 
@@ -1413,9 +1412,14 @@ def test_casual_words_get_no_reply_but_real_talk_does(world):
     assert say(w, "ok") == "next_step"  # 'ok' mid-chat carries on to the open step (owner, 2026-11-18)
     assert w.wa.texts()[-1] == "Interested aanenkil ningalude name-um mobile number-um ayakkamo?"
     before, calls = len(w.wa.to(GUEST)), len(w.llm.calls)
-    for casual in ("ok", "thanks a lot", "nice", "adipoli", "haha 😄", "okay then", "ok will see", "super bro", "kollam", "👍"):
-        assert say(w, casual) == "quiet", casual
-    assert len(w.wa.to(GUEST)) == before and len(w.llm.calls) == calls
+    # owner, 2026-11-21: the AI replies politely in its own words; the code adds the name ask still open
+    for casual, answer in (("thanks a lot", "Santhosham!"), ("adipoli", "Thank you sir!"), ("ok will see", "Sure, no problem.")):
+        n = len(w.wa.texts())
+        assert say(w, casual, GUEST, reply(answer)) == "next_step", casual
+        new = w.wa.texts()[n:]
+        assert new[0] == answer and "name" in new[-1], new
+    assert say(w, "ok") == "next_step"  # the AI said nothing (or is down): the code's step still goes
+    assert "name" in w.wa.texts()[-1]
     # anything with real content goes to the AI, even when it starts with "ok"
     # a price question once the stay is checked: the code gives the real price (owner, 2026-11-21)
     assert say(w, "ok how much for 3 nights?", GUEST, reply("3 nights is ₹12,000.")) == "price"

@@ -604,3 +604,39 @@ def test_the_rooms_sentence_always_follows_a_room_check(live):
     _live_setup(w)
     chat(w, "Rooms", "Alleppey", "dec 12 to dec 14", "4 people")
     assert "For 4 persons: 2 room(s)." in w.wa.texts(PHONE)
+
+
+def test_the_location_question_is_always_the_owners_exact_message(live):
+    # live chat 2026-11-21: 'Rooms needed' got the AI's own 'Sure, I can help with that. Kindly confirm the Location -
+    # Alleppey or Kanthalloor?'. Whoever handles the message, the guest sees the owner's fixed wording.
+    w = live
+    _live_setup(w)
+    exact = "Sure, Kindly confirm the Location 📍\nAlleppey or Kanthalloor ?"
+    chat(w, "Rooms needed")
+    assert w.wa.texts(PHONE)[-1] == exact
+    chat(w, "restart")
+    w.llm.script[:0] = [MockLLM.text("Sure, I can help with that. Kindly confirm the Location - Alleppey or "
+                                     "Kanthalloor?")] * 3
+    chat(w, "I am planning a trip with family next month, can you help me")
+    assert w.wa.texts(PHONE)[-1] == exact
+    assert not any("I can help with that" in x for x in w.wa.texts(PHONE))
+
+
+def test_live_chat_2026_11_21_rooms_change_and_every_ok_answered(live):
+    # 'റൂംസ് ഒരു 2 റൂം മതി' in a voice note was not read; '2 rooms mathi' got the AI's 'Appol booking details ready
+    # aakkam' and then 'Ok' got silence. Every message must get an answer, and room counts come from the code.
+    from app.core.clock import IST as _IST
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    w.clock.set(datetime(2026, 11, 21, 13, 3, tzinfo=_IST))
+    _live_setup(w)
+    w.llm.script[:0] = [MockLLM.text("Appol booking details ready aakkam.")] * 3
+    chat(w, "Rooms needed", "ആ, അലപ്പിയിലാ നോക്കുന്നത്, അലപ്പി.",
+         "ആ ഞാൻ ജനുവരി 1 മുതൽ ജനുവരി 4 വരെ ഉണ്ടാവും, പിന്നെ നമ്മൾ 5 പേരാണ് ഉള്ളത്, പിന്നെ റൂംസ് ഒരു 2 റൂം മതി.")
+    assert "5 perkku 2 room + 1 extra bed venam (oru extra bed-inu ₹500 per night)." in w.wa.texts(PHONE)
+    for text in ("Ok", "3 rooms mathi", "Ok", "2 rooms mathi", "Ok", "Ok"):
+        n = len(w.wa.texts(PHONE))
+        chat(w, text)
+        assert len(w.wa.texts(PHONE)) > n, f"silence after {text!r}"
+    assert not any("ready aakkam" in x for x in w.wa.texts(PHONE))
+    assert w.wa.texts(PHONE).count("5 perkku 2 room + 1 extra bed venam (oru extra bed-inu ₹500 per night).") == 2

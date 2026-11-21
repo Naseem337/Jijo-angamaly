@@ -30,7 +30,7 @@ from app.providers.llm import ChatMessage, LLMError, ToolCall, ToolSpec
 from app.resort import availability as av
 from app.resort import leads
 from app.resort.db import SoldOut
-from app.resort.i18n import status_name, t
+from app.resort.i18n import S as _STRINGS, status_name, t
 from app.resort.models import Booking, Property, RoomType
 from app.resort.payments import PaymentError
 
@@ -180,6 +180,7 @@ _NATIVE_STAY_WORDS = [
     ("oct", "ഒക്ടോബർ|அக்டோபர்|अक्टूबर|अक्तूबर"), ("nov", "നവംബർ|நவம்பர்|नवंबर|नवम्बर"),
     ("dec", "ഡിസംബർ|டிசம்பர்|दिसंबर|दिसम्बर"),
     ("per", "പേരാണ്|പേരുണ്ട്|പേർ|പേര്|ആളുകൾ|ആൾക്കാർ|ആൾ|பேர்|நபர்கள்|நபர்|लोगों|लोग|व्यक्ति|आदमी|जन"),
+    ("rooms", "റൂമുകൾ|റൂംസ്|റൂമ്|റൂം|മുറികൾ|മുറി|ரூம்கள்|ரூம்|அறைகள்|अरै|रूम्स|रूम|कमरे|कमरा"),
     ("nights", "രാത്രി|ராத்திரி|இரவு|इरवु|रातें|रात"), ("vare", "വരെ|வரை|तक"),
     ("days", "ദിവസം|ദിവസത്തേക്ക്|ദിവസ|நாள்|நாட்கள்|दिन"), ("kid", "കുട്ടി\\S*|குழந்தை\\S*|बच्च\\S*"),
     ("one", "ഒരു|ஒரு|एक"),
@@ -272,7 +273,9 @@ INTERNAL_RULE = re.compile(r"\bpriority\b|\b(?:assign|allot|allocat)\w*\b[^.?!\n
                            re.IGNORECASE)
 STALLING = re.compile(r"\b(?:one moment|just a moment|a moment|let me (?:check|see|confirm)|i will check|"
                       r"i'll check|please wait|wait a (?:moment|minute|sec)|checking now|"
-                      r"give me a (?:moment|minute|sec))\b", re.IGNORECASE)
+                      r"give me a (?:moment|minute|sec)|ready aakk\w*|nokkatte|check cheyy(?:atte|am|aam|unnu)|"
+                      r"onnu nokk\w*|wait cheyy\w*|kurachu samayam|details ready|prepare cheyy\w*|"
+                      r"i will (?:prepare|arrange|send)|i'll (?:prepare|arrange|send))\b", re.IGNORECASE)
 LOCATION_ASK = re.compile(r"\blocation\b|\bwhich (?:place|resort|property|town)\b|\bethu (?:sthalam|place|location)\b|"
                           r"\bevide(?:ya|yaa|yanu|aanu)?\b.*\b(?:venam|vendath|stay)\b|സ്ഥലം|லொகேஷன்|लोकेशन",
                           re.IGNORECASE)
@@ -311,6 +314,10 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
             out["children"] = got["children"]
         if "rooms" in got:
             out["rooms"] = got["rooms"]
+            out.pop("more_rooms", None)
+        if "more_rooms" in got:  # 'one more room': added on top later (_stay_known), the latest message wins
+            out["more_rooms"] = got["more_rooms"]
+            out.pop("rooms", None)
     return out
 
 
@@ -324,6 +331,27 @@ _ROOMS_ASKED = re.compile(r"(?<!to )(?<!till )(?<!-)(?<!- )\b(\d{1,2}|one|two|th
                           r"nights?|days?|pax)\b)", re.IGNORECASE)  # 'rooms 2' from a voice note (no ':')
 _ROOM_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "oru": 1, "randu": 2, "rendu": 2,
                   "moonu": 3, "moonnu": 3, "naalu": 4, "anju": 5, "ek": 1, "do": 2, "teen": 3, "char": 4, "paanch": 5}
+
+
+_MORE_ROOMS = re.compile(
+    r"\b(\d{1,2}|one|oru|two|randu|rendu)?[ \t]*(?:more|extra|additional|koode|kude|koodi|kudi)[ \t]*rooms?\b|"
+    r"\b(\d{1,2}|one|oru|two|randu|rendu)?[ \t]*rooms?[ \t]*(?:koode|kude|koodi|kudi|more|extra|additional)\b|"
+    r"\b(?:another|add(?:[ \t]+(?:a|one))?)[ \t]+rooms?\b", re.IGNORECASE)
+_MORE_WORD = {"one": 1, "oru": 1, "two": 2, "randu": 2, "rendu": 2}
+
+
+# the code's rooms sentences in every language ('For 5 persons: 2 room(s) + 1 extra bed(s) ...')
+ROOMS_LINE_RX = [re.compile("^" + re.sub(r"\\\{\w+\\\}", ".+?", re.escape(v)) + "$", re.DOTALL)
+                 for k in ("rooms_plain", "rooms_beds", "rooms_note") for v in _STRINGS[k].values()]
+
+
+def _more_rooms_in(text: str) -> int:
+    """'one more room' / '1 room koode venam' / 'add a room' -> 1 extra room on top of those already quoted."""
+    m = _MORE_ROOMS.search(text)
+    if not m:
+        return 0
+    n = (m.group(1) or m.group(2) or "1").lower()
+    return int(n) if n.isdigit() else _MORE_WORD.get(n, 1)
 
 
 def _rooms_in(text: str) -> int:
@@ -407,7 +435,9 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
         out["persons"] = persons[-1]  # the latest number they gave
     if kids := _kids_in(text):
         out["children"] = kids  # 'pinne oru kuttiyum' / '2 kids': children on top of the persons
-    if 0 < (rooms := _rooms_in(text)) <= 200:
+    if more := _more_rooms_in(text):
+        out["more_rooms"] = more  # rooms ADDED to the ones already quoted (owner, 2026-11-21: 'add rooms')
+    elif 0 < (rooms := _rooms_in(text)) <= 200:
         out["rooms"] = rooms  # '4 rooms': the group wants that many rooms (owner, 2026-11-19)
     return out
 
@@ -548,7 +578,9 @@ WISH_WORDS = WISH_CORE | {"a", "an", "any", "is", "are", "there", "i", "we", "ne
                           "kittumo", "chahiye", "hai", "kya", "milega", "vendum", "irukka", "iruka", "do", "you", "have",
                           "to", "the", "some", "can", "get", "me", "my", "ok", "now", "today", "one", "ondo", "aano",
                           "cheyyan", "cheyyanam", "enquiry", "details", "info", "information", "in", "at", "on",
-                          "near", "il", "le", "mein", "la", "le", "from"}
+                          "near", "il", "le", "mein", "la", "le", "from", "needed", "required", "require", "wants",
+                          "urgent", "urgently", "free", "vacant", "vacancy", "kittan", "kittanam", "booking", "reserve",
+                          "reservation", "inquiry", "chahte", "chahiye", "ah", "aa", "thanks", "thank"}
 RESTART = re.compile(r"^\s*(?:restart|reset|start again|start over|new chat)\s*[.!]*\s*$", re.IGNORECASE)
 RESTART_MARK = "[restart]"  # stored in the chat; the AI's view of the conversation begins after it
 SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE)
@@ -563,7 +595,7 @@ PLACE_ALIASES = {"alleppey": ("alappuzha", "alapuzha", "alappey", "alappi", "ala
                  "alappuzha": ("alleppey",)}
 # Town names typed in Malayalam / Tamil / Hindi script (or from a voice note) -> the English-letter name the dashboard has
 NATIVE_PLACES = [(re.compile(p), name) for p, name in (
-    ("ആലപ്പുഴ|ആലപ്പി|ആലപ്പീ|ஆலப்புழா|ஆலப்புழை|ஆலப்பி|अलेप्पी|अलप्पुझा|अलाप्पुझा", "alleppey"),
+    ("ആലപ്പുഴ|ആലപ്പി|ആലപ്പീ|അലപ്പുഴ|അലപ്പി|അലപ്പീ|ஆலப்புழா|ஆலப்புழை|ஆலப்பி|अलेप्पी|अलप्पुझा|अलाप्पुझा", "alleppey"),
     ("കാന്തല്ലൂർ|കാന്തലൂർ|காந்தலூர்|காந்தல்லூர்|कांतलूर|कान्तलूर", "kanthalloor"),
     ("മൂന്നാർ|மூணார்|மூன்னார்|मुन्नार", "munnar"), ("പൊഴിയോരം|பொழியோரம்|पोझियोरम", "pozhiyoram"))]
 
@@ -713,7 +745,8 @@ TOOLS = [
     ToolSpec(
         "ask_location",
         "When the guest wants a resort, a booking or rooms and has not said which location, call this: it sends the "
-        "owner's question 'Sure, Kindly confirm the Location' with the towns. Your reply must then be exactly [no reply].",
+        "owner's fixed location question. Never write a location question yourself. Your reply must then be exactly "
+        "[no reply].",
         {"type": "object", "properties": {}}),
     ToolSpec(
         "send_photos",
@@ -1228,7 +1261,10 @@ class ChatMixin:
             numbers = ", ".join(display_phone(n) for n in (closed.contact_numbers or self._all_contact_numbers()))
             msg = t("closed_place", lang, place=(closed.city or closed.place or closed.name).split(",")[0].strip(), numbers=numbers)
         elif step := self.next_step(phone, st):
-            msg = step if step != last else (t("fill_form", lang) if step == t("form", lang) else t("say_again", lang))
+            # the open step, or a short pointer to it when it is the message just above (never 'type that again'
+            # after the name ask, 2026-11-21)
+            msg = step if step != last else (t("fill_form", lang) if step == t("form", lang) else t(
+                "contact_again", lang) if step == t("ask_contact", lang) else t("say_again", lang))
         elif wish and not (st.get("bk") or {}).get("check_in"):
             if prop := self._named_place(text) or self._known_place(st):
                 st["form_place"] = prop.id
@@ -1283,7 +1319,10 @@ class ChatMixin:
         must always go out in the owner's fixed words (client, 2026-11-18)."""
         towns = self._towns()
         named = sum(1 for town in towns if town.lower() in reply.lower())
-        return len(towns) > 1 and named >= 2 and "?" in reply and "Kindly confirm the Location" not in reply
+        # only the owner's EXACT message passes; the AI's own copy around it ('Sure, I can help with that. Kindly
+        # confirm the Location - Alleppey or Kanthalloor?') is replaced too (live chat 2026-11-21)
+        exact = {t("ask_location", lg, towns=self._towns_text()).strip() for lg in ("en", "mn", "tn", "hn")}
+        return len(towns) > 1 and named >= 2 and "?" in reply and reply.strip() not in exact
 
     def _own_dates_ask(self, st: dict[str, Any], reply: str) -> tuple[bool, str]:
         """'What is your check-in date?', 'Please share your check in and check out dates.', 'How many people will be
@@ -1403,7 +1442,9 @@ class ChatMixin:
             return None  # the payment link is out; nothing more to ask
         bk = st.get("bk") or {}
         if bk.get("chosen"):
-            return None  # a summary waits for the guest's answer: 'ok' / 'yes' is that answer (the AI books it)
+            # the figures are locked but the booking needs the name and mobile: that is still the open step (an AI ask
+            # held back as a repeat once left the guest with 'please type that again', 2026-11-21)
+            return None if bk.get("mobile") else t("ask_contact", lang)
         if bk.get("check_in") and st.get("checked"):
             return t("ask_contact", lang)
         if st.get("form_place") and not bk.get("check_in"):
@@ -1457,8 +1498,11 @@ class ChatMixin:
         # a fresh enquiry starts after the last room check / summary (a form re-sent in between must never lose
         # 'Person 3' given just before it, live chat 2026-11-19)
         marks = {t(k, lg) for k in ("rooms_ok", "rooms_none") for lg in ("en", "mn", "tn", "hn")}
+        # the code's rooms sentence also closes a check ('2 rooms mathi' re-checks without 'rooms available'): a
+        # '1 room koode' before it is never added twice (live chat replay, 2026-11-21)
         start = max((i for i, m in enumerate(rows) if m.direction == "out" and (
-            m.text in marks or m.text.startswith("Following are the glimpse of your enquiry"))), default=-1)
+            m.text in marks or m.text.startswith("Following are the glimpse of your enquiry")
+            or any(rx.match(m.text) for rx in ROOMS_LINE_RX))), default=-1)
         rows = [m for m in rows[start + 1:] if m.direction == "in"][-HISTORY:]
         return f"\n{MSG_SEP}\n".join(m.text for m in rows)[-1500:]
 
@@ -1477,6 +1521,11 @@ class ChatMixin:
             got["children"] = bk["children"]
         if bk.get("rooms") and "rooms" not in got:
             got["rooms"] = bk["rooms"]
+        if more := got.pop("more_rooms", 0):  # 'one more room': on top of the rooms quoted at the last check
+            parts = (st.get("checked") or "").split("|")
+            have = int(bk.get("rooms") or 0) or (int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0)
+            if have:
+                got["rooms"] = have + more
         return got
 
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
@@ -1924,7 +1973,7 @@ class ChatMixin:
                               or (mine.get("persons") and not bk.get("check_in"))
                               or (mine.get("persons") and len(_words(text)) <= 5
                                   and mine["persons"] != int(bk.get("adults") or 0) + int(bk.get("children") or 0))
-                              or mine.get("children") or mine.get("rooms")):
+                              or mine.get("children") or mine.get("rooms") or mine.get("more_rooms")):
             # a new number of persons after the check ('7 ppl', 'now we are 7') is re-checked HERE, so the rooms and
             # extra beds always come from the code (live chat 2026-11-20: the AI did that maths wrong)
             return False
@@ -1962,6 +2011,7 @@ class ChatMixin:
                 return "superseded"
         st["turn"] = st.get("turn", 0) + 1
         ctx = _Turn(phone, st)
+        out_before = self.repo.last_chat_id(phone, "out")  # to know at the end whether anything at all went out
         ctx.text = text
         messages = self._history(phone)
         if images and messages and messages[-1].role == "user":
@@ -2125,7 +2175,7 @@ class ChatMixin:
                 clean = " ".join(x for x in re.split(r"(?<=[.?!])\s+|\n+", clean)
                                  if x.strip() and not self._asks_location(x))
             if not clean.strip():
-                pass
+                pass  # nothing left of the AI's reply: the safety net at the end of this turn sends the next step
             elif self._own_location_question(clean):  # the AI asked "which location" in its own words: the owner's
                 clean = t("ask_location", st.get("lang", "en"), towns=self._towns_text())  # wording only
                 self._text(phone, clean)
@@ -2161,7 +2211,10 @@ class ChatMixin:
                 if not self._form_was_last(phone):
                     self._text(phone, message, repeat_ok=True)
                 continue
-            self._text(phone, message)
+            # the code's rooms sentence after a change ('2 rooms mathi' back again) and the name ask after new photos
+            # may go again; everything else follows 'nothing said twice' (owner, 2026-11-21)
+            self._text(phone, message, repeat_ok=message == st.get("rooms_line") or message in {
+                t(k, lg) for k in ("ask_contact", "rooms_ok") for lg in ("en", "mn", "tn", "hn")})
         if ctx.summary_message and ctx.summary_message != st.get("last_summary"):  # never the same summary twice
             st["last_summary"] = ctx.summary_message
             self._save(phone, st)
@@ -2169,6 +2222,11 @@ class ChatMixin:
         if ctx.pay_message:  # the guest asked for the link again: the only message that may repeat
             self._text(phone, ctx.pay_message, repeat_ok=ctx.resend)
             return "payment_link"
+        if not ctx.handed_off and self.repo.last_chat_id(phone, "out") == out_before \
+                and (outcome := self._never_silent(ctx, text)):
+            # the safety net (owner, 2026-11-21): NOTHING went out for this message (every AI sentence was filtered,
+            # or a repeat was held back), so the open step / a short answer goes, chosen in code
+            return outcome
         return "answered"
 
     # ------------------------------------------------------------------ tools
@@ -2448,9 +2506,12 @@ class ChatMixin:
         options = out["options"] = options[:1]
         # The client's flow, once per set of dates: "rooms available" -> the glimpse -> the general photos -> the offered
         # room's photos -> ask name and mobile.
-        key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}"
+        # the rooms the guest asked for are part of the check: '2 rooms mathi' after 3 were quoted is a NEW check;
+        # asking for the number already quoted ('1 room') changes nothing
+        quoted_now = int((options[0] if options else {}).get("quoted_for_rooms") or 1)
+        key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}|{quoted_now}"
         lang = st.get("lang", "en")
-        same_dates = (st.get("checked") or "").rsplit("|", 1)[0] == key.rsplit("|", 1)[0]
+        same_dates = (st.get("checked") or "").split("|")[:3] == key.split("|")[:3]
         # whose photos go: ONLY the one room offered (top priority AND free). Both room types only when the group is
         # split over two (1 Basic + 1 Standard). A live chat got Basic + Standard photos together (owner, 2026-11-19).
         shown = offered if mix else offered[:1]
