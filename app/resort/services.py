@@ -46,7 +46,7 @@ class ResortServices:
         from app.conversation.voice_in import VoiceIn
         try:
             return VoiceIn(self.whatsapp, build_stt(self.config, self.secrets),  # type: ignore[arg-type]
-                           max_seconds=self.config.max_audio_seconds)
+                           max_seconds=self.config.max_audio_seconds, strict=False)
         except SecretNotFound as exc:
             log.warning("Voice notes disabled for the resort bot: %s", exc)
             return None

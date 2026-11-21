@@ -149,14 +149,24 @@ class BookingBot(IdProofMixin, ChatMixin):
             except Exception:  # best effort only
                 pass
             voice = self._voice_in()
-            try:
-                result = voice.process(msg.media_id) if voice else None
-            except Exception as exc:  # download / ffmpeg / STT crashed: the guest still gets the polite text
-                log.error("Voice note failed for %s: %s", mask_phone(phone), exc)
-                result = None
+            why, result = "voice notes are switched off (no speech-to-text key)" if voice is None else "", None
+            for attempt in range(2 if voice else 0):  # one retry: a download or speech-to-text hiccup (2026-11-21)
+                try:
+                    result = voice.process(msg.media_id)
+                except Exception as exc:  # download / ffmpeg / STT crashed: the guest still gets the polite text
+                    log.error("Voice note failed for %s: %s", mask_phone(phone), exc)
+                    result, why = None, f"crash: {type(exc).__name__}: {str(exc)[:120]}"
+                    continue
+                if (result.text or "").strip():
+                    break
+                why = f"{getattr(result, 'problem', None) or 'empty'}: {(getattr(result, 'detail', '') or '')[:120]}".strip(": ")
+                if getattr(result, "problem", None) in ("too_long", "unclear"):
+                    break  # the same audio gives the same answer: no retry
             if result is None or not (result.text or "").strip():
-                self.repo.add_chat(Chat(phone, "in", "[voice note: not understood]", now, "voice"))
-                self._text(phone, t("voice_problem", lang))
+                log.error("Voice note not understood for %s: %s", mask_phone(phone), why)
+                # the reason is kept in the chat (dashboard) so a failure can be checked, never guessed
+                self.repo.add_chat(Chat(phone, "in", f"[voice note: not understood ({why})]", now, "voice"))
+                self._text(phone, t("voice_problem", lang), repeat_ok=True)  # every failed note gets an answer
                 return "voice_problem"
             text, source = result.text, "voice"
         elif msg.type == "image" and msg.media_id:  # a payment screenshot or a photo: the AI looks at it

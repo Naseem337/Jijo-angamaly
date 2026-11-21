@@ -68,10 +68,14 @@ def is_unclear(t: Transcript) -> bool:
 
 
 class VoiceIn:
-    def __init__(self, whatsapp: WhatsAppClient, stt: STTProvider, *, max_seconds: int = 60) -> None:
+    def __init__(self, whatsapp: WhatsAppClient, stt: STTProvider, *, max_seconds: int = 60,
+                 strict: bool = True) -> None:
         self.whatsapp = whatsapp
         self.stt = stt
         self.max_seconds = max_seconds
+        # strict=False (resort bot, owner 2026-11-21): any note with words is used, however unsure the language
+        # detection is (Malayalam and English mixed in one note was rejected as 'unclear')
+        self.strict = strict
 
     def process(self, media_id: str | None) -> VoiceResult:
         if not media_id:
@@ -93,7 +97,7 @@ class VoiceIn:
         finally:
             del audio  # nothing keeps the recording
 
-        if is_unclear(transcript):
+        if (is_unclear(transcript) if self.strict else not transcript.text.strip()):
             return VoiceResult(problem="unclear", duration_s=duration,
                                detail=f"{transcript.text!r} p={transcript.language_probability}")
         return VoiceResult(text=transcript.text.strip(), duration_s=duration)

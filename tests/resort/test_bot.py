@@ -1827,3 +1827,39 @@ def test_the_ai_never_brings_up_bills_the_guest_did_not_ask_about(world):
     assert w.wa.texts()[-1] == "Yes, there is a pool."
     say(w, "is the electricity bill extra?", GUEST, reply("No, electricity is included."))
     assert w.wa.texts()[-1] == "No, electricity is included."  # asked: the answer stays
+
+
+def test_every_failed_voice_note_gets_an_answer_and_the_reason_is_kept(world):
+    # live chat 2026-11-21: the second failed voice note got silence
+    from app.conversation.voice_in import VoiceResult
+    w = world
+    calls = []
+
+    class Voice:
+        def process(self, media_id):
+            calls.append(media_id)
+            return VoiceResult(problem="failed", detail="download timed out")
+
+    w.bot._voice_in = lambda: Voice()
+    for i in (1, 2):
+        m = InboundMessage(f"wamid.vf{i}", GUEST, "audio", datetime(2026, 11, 2, 4, 30 + i), media_id=f"m{i}")
+        assert w.bot.handle(m) == "voice_problem"
+    assert w.wa.texts().count("Sorry, I could not understand that voice note. Could you type it?") == 2
+    assert len(calls) == 4  # each note tried twice
+    assert "download timed out" in w.repo.list_chat(GUEST)[0].text  # the reason is in the dashboard chat
+
+
+def test_a_mixed_language_voice_note_is_used_not_rejected():
+    from app.conversation.voice_in import VoiceIn
+    from app.providers.stt.base import Transcript
+
+    class WA:
+        def download_media(self, media_id):
+            return b"OggS" + b"\x00" * 40, "audio/ogg"
+
+    class STT:
+        def transcribe(self, audio, mime):
+            return Transcript(text="njan jan 10 nu varum, 3 people", language_code="ml-IN", language_probability=0.2)
+
+    assert VoiceIn(WA(), STT(), max_seconds=0, strict=False).process("m1").text == "njan jan 10 nu varum, 3 people"
+    assert VoiceIn(WA(), STT(), max_seconds=0).process("m1").problem == "unclear"  # the strict check (car bot) stays
