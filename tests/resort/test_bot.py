@@ -1508,8 +1508,9 @@ def test_the_summary_is_built_in_english_laid_out_line_by_line_and_sent_before_t
     say(w, "deluxe mathi, early check-in venam", GUEST,
         tool("prepare_booking", room_type="Deluxe", rooms=1, early_checkin=True, language="manglish"),
         reply("Name-um mobile number-um parayamo?"))
-    # the fixed ask already went with the glimpse: the AI's own repeat of it is not sent (nothing twice, 2026-11-18)
-    assert w.wa.texts()[-1] == "Interested aanenkil ningalude name-um mobile number-um ayakkamo?"
+    # the fixed ask already went with the glimpse: the AI's own repeat is not sent; the short pointer goes instead
+    # (never silent, 2026-11-21)
+    assert w.wa.texts()[-1] == "Booking munnott pokan ningalude name-um mobile number-um ivide ayakkamo?"
     assert w.repo.list_bookings(phone=GUEST) == []
     say(w, "Kavana Priya, 80886 78167", GUEST,
         tool("create_booking", guest_name="Kavana Priya", mobile="80886 78167", language="manglish"), reply("[no reply]"))

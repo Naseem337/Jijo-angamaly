@@ -757,3 +757,16 @@ def test_a_message_sent_while_photos_go_waits_its_turn(live):
                          "Please send your name and mobile number here to go ahead with the booking.") or \
         any("name and mobile" in x for x in texts[-3:]), texts[-4:]
     assert "For 4 persons: 2 room(s)." in texts
+
+
+def test_an_answer_without_a_place_to_the_location_question_gets_the_short_re_ask(live):
+    # live chat 2026-11-21: 'Yeah, I want a deluxe.' (voice) to the location question got silence
+    w = live
+    for ai in (None, "Which location would you like, Alleppey or Kanthalloor?"):
+        _live_setup(w)
+        chat(w, "restart", "Hello brother, I need a room there.")
+        if ai:
+            w.llm.script[:0] = [MockLLM.text(ai)] * 3
+        n = len(w.wa.texts(PHONE))
+        chat(w, "Yeah, I want a deluxe.")
+        assert w.wa.texts(PHONE)[n:] == ["Alleppey or Kanthalloor ?"], (ai, w.wa.texts(PHONE)[n:])

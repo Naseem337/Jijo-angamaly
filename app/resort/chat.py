@@ -1332,7 +1332,9 @@ class ChatMixin:
         wish = (BOOKING_WISH.search(text) or PHOTO_ASK.search(text) or contact_in(text) is not None
                 or bool(parse_stay(text, self._today())) or self._named_place(text) is not None)
         # a question, a request, booking details, or one unclear word ('asdfgh'); remarks like 'nice place' may stay quiet
-        real = wish or "?" in text or bool(QUESTION_WORD.search(text)) or bool(OWNER_ASK.search(text)) \
+        # a reply to a question WE asked is always real ('Yeah, I want a deluxe' to the location question got
+        # silence, live chat 2026-11-21)
+        real = wish or asked or "?" in text or bool(QUESTION_WORD.search(text)) or bool(OWNER_ASK.search(text)) \
             or bool(CHANGE_ASK.search(text)) or len(text.split()) == 1 or bool(NUDGE.search(text))
         if not real:
             return None
@@ -1350,7 +1352,8 @@ class ChatMixin:
             # the open step, or a short pointer to it when it is the message just above (never 'type that again'
             # after the name ask, 2026-11-21)
             msg = step if step != last else (t("fill_form", lang) if step == t("form", lang) else t(
-                "contact_again", lang) if step == t("ask_contact", lang) else t("say_again", lang))
+                "contact_again", lang) if step == t("ask_contact", lang) else self._towns_text() + " ?"
+                if "Kindly confirm the Location" in step else t("say_again", lang))
         elif wish and not (st.get("bk") or {}).get("check_in"):
             if prop := self._named_place(text) or self._known_place(st):
                 st["form_place"] = prop.id
@@ -2353,7 +2356,9 @@ class ChatMixin:
                 pass  # nothing left of the AI's reply: the safety net at the end of this turn sends the next step
             elif self._own_location_question(clean):  # the AI asked "which location" in its own words: the owner's
                 clean = t("ask_location", st.get("lang", "en"), towns=self._towns_text())  # wording only
-                self._text(phone, clean)
+                if clean == (self.repo.last_outbound_text(phone) or ""):
+                    clean = self._towns_text() + " ?"  # just asked: the short re-ask, never silence (2026-11-21)
+                self._text(phone, clean, repeat_ok=True)
             elif (dates := self._own_dates_ask(st, clean))[0]:  # it asked for dates / persons itself: the owner's form
                 self._strict_form(ctx, dates[1])
             elif clean := self._no_stale_payment(phone, text, self._no_repeat_ask(phone, self._tool_prices_only(ctx, no_unasked_prices(clean, text)))):
