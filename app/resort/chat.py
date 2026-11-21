@@ -2722,7 +2722,9 @@ class ChatMixin:
                     self._queue_room_photos(ctx, rt, refs[:MAX_ROOM_PHOTOS])
                     fresh = True
             asks = {t("ask_contact", lg) for lg in ("en", "mn", "tn", "hn")}
-            if fresh or (self.repo.last_outbound_text(ctx.phone) or "") not in asks:
+            # after a change the next step is asked again, never a bare 'noted' (owner, 2026-11-21); only when the
+            # name ask is the message just above (nothing new was said) does 'noted' go instead
+            if fresh or rooms_line or (self.repo.last_outbound_text(ctx.phone) or "") not in asks:
                 ctx.after.append(t("ask_contact", lang))
             else:
                 ctx.after.append(t("noted", lang))

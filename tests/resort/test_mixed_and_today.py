@@ -157,7 +157,7 @@ def test_a_child_added_after_the_check_repeats_nothing(world):
     say(w, "Pinne oru kuttiyum", GUEST, reply("[no reply]"))
     texts = w.wa.texts()
     assert sum("rooms are available" in x or "rooms available aanu" in x for x in texts) == 1 and n_ok >= 1
-    assert sum("name" in x and "mobile" in x for x in texts) == asks  # not asked again in another language
+    assert sum("name" in x and "mobile" in x for x in texts) <= asks + 1  # after a change the name ask goes once more (owner, 2026-11-21)
     assert w.repo.get_state(GUEST)["bk"]["children"] == 1
 
 

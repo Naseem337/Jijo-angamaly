@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 import time
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
@@ -180,7 +181,21 @@ class BookingBot(IdProofMixin, ChatMixin):
             self.wa.mark_read(msg.id)
         except Exception:
             pass
-        return self._dispatch(phone, st, text, None if source != "button" else msg.reply_id, source, guest.name, in_id)
+        # one guest's messages are answered one after another (live chat 2026-11-21: '4 people, one room' sent while
+        # the photos of the first answer were still going cut them off and sent a room label twice). The message is
+        # already saved, so an earlier turn still waiting for a second message sees it and steps aside.
+        with self._guest_lock(phone):
+            st = self.repo.get_state(phone)  # fresh: the earlier message may have changed it
+            return self._dispatch(phone, st, text, None if source != "button" else msg.reply_id, source, guest.name,
+                                  in_id)
+
+    _locks: dict[str, threading.RLock] = {}
+    _locks_guard = threading.Lock()
+
+    @classmethod
+    def _guest_lock(cls, phone: str) -> threading.RLock:
+        with cls._locks_guard:
+            return cls._locks.setdefault(phone, threading.RLock())
 
     # Client, 2026-11-17: images are not read by the AI for now and get no reply. Set True to bring it back.
     READ_IMAGES = False

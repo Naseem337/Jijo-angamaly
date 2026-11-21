@@ -727,3 +727,33 @@ def test_a_change_before_payment_gives_a_new_summary_and_link(live):
         assert any(x.startswith("Following are the glimpse of your enquiry") and "Shibil" in x for x in new), new
         assert any("rzp.io" in x for x in new) and not any("Check in :" in x or "name and mobile" in x for x in new)
     assert all(b.payment_link_url != old_link for b in w.repo.list_bookings(phone=PHONE) if b.status == "hold")
+
+
+def test_a_message_sent_while_photos_go_waits_its_turn(live):
+    # live chat 2026-11-21: '4 people, make it one room' sent while the first answer's photos were going: the photos
+    # were cut off, a room label went twice and the name ask never came
+    import threading
+    import time as _time
+
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey")
+    slow = w.wa.send_image
+
+    def send_image(*a, **k):
+        _time.sleep(0.02)
+        return slow(*a, **k)
+
+    w.wa.send_image = send_image
+    first = threading.Thread(target=chat, args=(w, "jan 10 to jan 13, 3 people, 2 rooms"))
+    first.start()
+    _time.sleep(0.1)  # the photos of the first answer are going now
+    chat(w, "sorry 4 people, make it one room")
+    first.join()
+    texts = w.wa.texts(PHONE)
+    labels = [x for x in texts if x.startswith("*Room ")]
+    assert len(labels) == len(set(labels)), labels  # no room label twice
+    assert texts[-1] in ("Please share your name and mobile number to proceed.",
+                         "Please send your name and mobile number here to go ahead with the booking.") or \
+        any("name and mobile" in x for x in texts[-3:]), texts[-4:]
+    assert "For 4 persons: 2 room(s)." in texts
