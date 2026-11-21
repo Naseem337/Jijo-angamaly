@@ -322,6 +322,11 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
         if "more_rooms" in got:  # 'one more room': added on top later (_stay_known), the latest message wins
             out["more_rooms"] = got["more_rooms"]
             out.pop("rooms", None)
+            out.pop("less_rooms", None)
+        if "less_rooms" in got:
+            out["less_rooms"] = got["less_rooms"]
+            out.pop("rooms", None)
+            out.pop("more_rooms", None)
     return out
 
 
@@ -353,6 +358,29 @@ ROOMS_LINE_RX = [re.compile("^" + re.sub(r"\\\{\w+\\\}", ".+?", re.escape(v)) + 
 # 'same date', 'same dates', 'athe date', 'wahi date': the dates of the stay already booked / talked about
 SAME_DATES = re.compile(r"\b(?:same|athe|ade|wahi|vahi|adhe)\s+(?:dates?|days?|dateil|date-il|tharikh)\b|"
                         r"അതേ\s*(?:ഡേറ്റ്|തീയതി)", re.IGNORECASE)
+
+
+_LESS_ROOMS = re.compile(
+    r"\b(?:remove|reduce|less|minus|cancel|drop|kurakk\w*|kuraykk\w*|kuracch\w*)\b[^.?!\n]{0,15}?"
+    r"\b(\d{1,2}|one|oru|two|randu)?[ \t]*rooms?\b|"
+    r"\b(\d{1,2}|one|oru|two|randu)[ \t]*rooms?[ \t]*(?:less|kuravu|kurachu|venda|vendaa|mathi\s+alla)\b",
+    re.IGNORECASE)
+
+
+# new dates for the SAME enquiry ('change to jan 2', 'make it jan 2 to 5', 'jan 2 aakkam') vs a second stay
+DATE_CHANGE = re.compile(r"\b(?:change\w*|make it|instead|shift|aakk\w*|maatt\w*|badal\w*|pannunga)\b|ആക്ക",
+                         re.IGNORECASE)
+ANOTHER_STAY = re.compile(r"\b(?:another|new|separate|second|other|vere|veroru|innoru|dusra)\s+(?:stay|booking|trip|"
+                          r"enquiry|visit)\b", re.IGNORECASE)
+
+
+def _less_rooms_in(text: str) -> int:
+    """'remove one room' / '1 room less' / '1 room venda' -> rooms taken away (owner, 2026-11-21)."""
+    m = _LESS_ROOMS.search(text)
+    if not m:
+        return 0
+    n = (m.group(1) or m.group(2) or "1").lower()
+    return int(n) if n.isdigit() else _MORE_WORD.get(n, 1)
 
 
 def _more_rooms_in(text: str) -> int:
@@ -445,7 +473,9 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
         out["persons"] = persons[-1]  # the latest number they gave
     if kids := _kids_in(text):
         out["children"] = kids  # 'pinne oru kuttiyum' / '2 kids': children on top of the persons
-    if more := _more_rooms_in(text):
+    if less := _less_rooms_in(text):
+        out["less_rooms"] = less  # rooms taken AWAY from the ones quoted / held (owner, 2026-11-21)
+    elif more := _more_rooms_in(text):
         out["more_rooms"] = more  # rooms ADDED to the ones already quoted (owner, 2026-11-21: 'add rooms')
     elif 0 < (rooms := _rooms_in(text)) <= 200:
         out["rooms"] = rooms  # '4 rooms': the group wants that many rooms (owner, 2026-11-19)
@@ -835,8 +865,16 @@ TOOLS = [
         "an existing booking or payment, or want to cancel (if_cancelled_today has the policy charge and refund).",
         {"type": "object", "properties": {}}),
     ToolSpec(
+        "change_name",
+        "The guest corrects their name ('my name is not Naseem, it is Shibil', 'name correction: Shibil') after the "
+        "enquiry summary or the booking: the name is changed on their booking and the guest is told automatically. "
+        "Never start the booking again for a name correction. Reply exactly [no reply].",
+        {"type": "object", "properties": {
+            "name": {"type": "string", "description": "the correct name, in English letters (e.g. Shibil)"}},
+         "required": ["name"]}),
+    ToolSpec(
         "talk_to_owner",
-        "Hand the chat to the owner: the bot pauses and the owner gets a short summary. Use when the guest asks for "
+        "The owner gets a short summary and will contact the guest; the bot keeps answering. Use when the guest asks for "
         "the owner / a person / a call, complains, wants a refund or exception outside the policy, makes a price "
         "counter-offer, or a group / many-room booking. The guest is told automatically; reply exactly [no reply].",
         {"type": "object", "properties": {
@@ -1282,6 +1320,15 @@ class ChatMixin:
         if ((is_ack(text) and "?" not in text and not asked) or (NOT_NOW.search(text) and "?" not in text)) \
                 and not CHANGE_ASK.search(text):
             return None  # an 'ok' to OUR question is an answer: it is never left silent (live chat 2026-11-20)
+        now = self.clock.now()
+        held = next((b for b in self.repo.list_bookings(phone=phone, limit=3) if b.status == "hold"
+                     and b.hold_expires_at and b.hold_expires_at > now and b.payment_link_url), None)
+        if held is not None and not BOOKING_WISH.search(text):
+            # a payment link is out and nothing else answered ('Already sent'): point to that link, never the dates
+            # form again (live chat 2026-11-21)
+            mins = max(1, int((held.hold_expires_at - now).total_seconds() // 60))
+            self._text(phone, t("pending", lang, id=held.id, minutes=mins, url=held.payment_link_url), repeat_ok=True)
+            return "answered"
         wish = (BOOKING_WISH.search(text) or PHOTO_ASK.search(text) or contact_in(text) is not None
                 or bool(parse_stay(text, self._today())) or self._named_place(text) is not None)
         # a question, a request, booking details, or one unclear word ('asdfgh'); remarks like 'nice place' may stay quiet
@@ -1422,6 +1469,11 @@ class ChatMixin:
         lang = st.get("lang", "en")
         if rest:
             self._text(phone, self._ease_sir(phone, rest))
+        now = self.clock.now()
+        if not st.get("bk") and not BOOKING_WISH.search(ctx.text or "") and any(
+                b.status == "hold" and b.hold_expires_at and b.hold_expires_at > now
+                for b in self.repo.list_bookings(phone=phone, limit=3)):
+            return  # a payment link is out: the booking is not started again (live chat 2026-11-21)
         prop = self._known_place(st) or self._named_place(
             ctx.text) or (self._places()[0] if len(self._places()) == 1 else None)
         if prop is None:
@@ -1564,7 +1616,22 @@ class ChatMixin:
             parts = (st.get("checked") or "").split("|")
             have = int(bk.get("rooms") or 0) or (int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0)
             got["rooms"] = have + more if have else more  # nothing quoted yet (a new booking): just those rooms
+        if less := got.pop("less_rooms", 0):
+            parts = (st.get("checked") or "").split("|")
+            have = int(bk.get("rooms") or 0) or (int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0)
+            if have:
+                got["rooms"] = max(1, have - less)
         return got
+
+    def _open_hold(self, phone: str) -> list[Booking]:
+        """The guest's unpaid enquiry whose payment link is still open (all its parts for a stay over two room types)."""
+        now = self.clock.now()
+        holds = [b for b in self.repo.list_bookings(phone=phone, status="hold", limit=10)
+                 if b.hold_expires_at and b.hold_expires_at > now]
+        if not holds:
+            return []
+        newest = max(holds, key=lambda b: b.created_at)
+        return [b for b in holds if b is newest or (newest.payment_link_id and b.payment_link_id == newest.payment_link_id)]
 
     def _upcoming_booking(self, phone: str) -> Booking | None:
         """The guest's latest booking that is still ahead (paid, on hold or checked in), else None."""
@@ -1791,6 +1858,8 @@ class ChatMixin:
             "particular room type, call prepare_booking with it.\n"
             "- Never state prices, totals or the advance while checking availability; the price reaches the guest "
             "in the resort's details and the enquiry summary. Give a price only if the guest asks for it.\n"
+            "- A name correction after the summary or the booking ('my name is not X, it is Y'): call change_name "
+            "with the new name in English letters. Never ask for the dates again for that.\n"
             "5. When the guest gives their name and mobile number, call create_booking right away (no 'shall I "
             "confirm?'). The enquiry summary and the payment link are sent automatically: reply [no reply]. Never "
             "write the summary, the link, the advance amount or a percent yourself. If they say 'this number' "
@@ -2023,7 +2092,28 @@ class ChatMixin:
         True when something was queued for the guest."""
         st, phone = ctx.st, ctx.phone
         bk = st.get("bk") or {}
-        if not bk.get("check_in") and (SAME_DATES.search(text) or _more_rooms_in(text)) \
+        mine0 = parse_stay(text, self._today())
+        changes = bool(mine0.get("rooms") or mine0.get("more_rooms") or mine0.get("less_rooms")
+                       or mine0.get("persons") or mine0.get("children")
+                       or (mine0.get("check_in") and DATE_CHANGE.search(text)))
+        if not bk.get("check_in") and changes and not ANOTHER_STAY.search(text) and (held := self._open_hold(phone)):
+            # the payment link is out but not paid: a change ('add 1 room', '1 room venda', '6 per', new dates) starts
+            # from that enquiry; the rooms are re-checked and a NEW summary and link replace the old ones (owner,
+            # 2026-11-21: 'add that extra room and give a new link'). Dates, name and mobile are never asked again.
+            first = held[0]
+            mobile = re.search(r"Mobile: ([+\d][\d ]{6,})", first.notes or "")
+            bk = st.setdefault("bk", {})
+            bk.update(property_id=first.property_id, check_in=first.check_in.isoformat(),
+                      check_out=first.check_out.isoformat(), adults=sum(b.adults for b in held),
+                      children=sum(b.children for b in held), rooms=sum(b.rooms for b in held),
+                      guest_name=first.guest_name or "",
+                      mobile=try_normalize_phone(mobile.group(1)) if mobile else phone)
+            bk.pop("chosen", None)
+            st["form_place"] = first.property_id
+            st["rebook"] = True
+            st.pop("checked", None)
+            force = True
+        elif not bk.get("check_in") and (SAME_DATES.search(text) or _more_rooms_in(text)) \
                 and (last := self._upcoming_booking(phone)) is not None:
             # 'add 1 room also' / 'same date' after a booking: the dates and resort of their latest booking
             # (live chat 2026-11-21: 'same date' got the form again and again)
@@ -2033,7 +2123,7 @@ class ChatMixin:
             st["form_place"] = last.property_id
             force = True
         place_id = st.get("form_place") or bk.get("property_id")
-        if not place_id or bk.get("chosen") or CHANGE_ASK.search(text):
+        if not place_id or bk.get("chosen") or (CHANGE_ASK.search(text) and not st.get("rebook")):
             return False
         if st.get("suggest_rooms") and (is_ack(text) or YES_REPLY.match(text)):
             bk["rooms"] = st.pop("suggest_rooms")  # 'ok' to 'Shall I go ahead with 5 rooms?'
@@ -2045,6 +2135,7 @@ class ChatMixin:
                               or (mine.get("persons") and len(_words(text)) <= 5
                                   and mine["persons"] != int(bk.get("adults") or 0) + int(bk.get("children") or 0))
                               or mine.get("children") or mine.get("rooms") or mine.get("more_rooms")
+                              or mine.get("less_rooms")
                               or SAME_DATES.search(text)):
             # a new number of persons after the check ('7 ppl', 'now we are 7') is re-checked HERE, so the rooms and
             # extra beds always come from the code (live chat 2026-11-20: the AI did that maths wrong)
@@ -2060,6 +2151,15 @@ class ChatMixin:
                                    "language": st.get("style")})
         elif got or force:
             self._ask_missing(ctx, got)
+        if st.pop("rebook", None) and bk.get("check_in") and not ctx.none_found and st.get("checked"):
+            # the change fits: the new summary and payment link straight away (name and mobile are known); the old
+            # link is closed by create_booking (close_old_holds)
+            prep = self._tool_prepare(ctx, {"rooms": got["rooms"]} if got.get("rooms") else {})
+            if "error" not in prep:
+                asks = {t(k, lg) for k in ("ask_contact", "contact_again") for lg in ("en", "mn", "tn", "hn")}
+                ctx.after = [m for m in ctx.after if not (isinstance(m, str) and m in asks)]
+                st.pop("last_summary", None)  # after a change the summary always goes again
+                self._tool_create(ctx, {"guest_name": bk.get("guest_name") or "", "mobile": bk.get("mobile") or "same"})
         self._save(phone, st)
         return bool(ctx.after or ctx.summary_message)
 
@@ -2293,7 +2393,7 @@ class ChatMixin:
         if ctx.summary_message and ctx.summary_message != st.get("last_summary"):  # never the same summary twice
             st["last_summary"] = ctx.summary_message
             self._save(phone, st)
-            self._text(phone, ctx.summary_message)
+            self._text(phone, ctx.summary_message, repeat_ok=True)  # a changed enquiry may repeat an older summary
         if ctx.pay_message:  # the guest asked for the link again: the only message that may repeat
             self._text(phone, ctx.pay_message, repeat_ok=ctx.resend)
             return "payment_link"
@@ -2312,7 +2412,7 @@ class ChatMixin:
                     "check_availability": self._tool_check, "prepare_booking": self._tool_prepare,
                     "create_booking": self._tool_create, "my_bookings": self._tool_bookings,
                     "send_payment_link": self._tool_resend, "recall_old_chat": self._tool_recall,
-                    "talk_to_owner": self._tool_owner}
+                    "talk_to_owner": self._tool_owner, "change_name": self._tool_change_name}
         handler = handlers.get(call.name)
         if handler is None or call.arguments_error:
             return json.dumps({"error": call.arguments_error or f"unknown tool {call.name}"}), True
@@ -3078,6 +3178,32 @@ class ChatMixin:
         if paid_now:
             out["note"] = "a payment was just found and the confirmation message was sent automatically; do not repeat its details"
         return out
+
+    def _tool_change_name(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        """A name correction after the summary (live chat 2026-11-21: 'my name is not Naseem, it is Shibil' started the
+        booking again). The name changes on the guest's open and upcoming bookings; nothing else restarts."""
+        name = re.sub(r"[^A-Za-z .']", "", str(a.get("name") or "")).strip()[:60]
+        if not name:
+            return {"error": "give the new name in English letters"}
+        name = " ".join(w[:1].upper() + w[1:] for w in name.split())
+        today = self._today()
+        changed = 0
+        for b in self.repo.list_bookings(phone=ctx.phone, limit=10):
+            if b.status in ("hold", "paid", "checked_in") and b.check_out >= today:
+                b.guest_name = name
+                self.repo.save_booking(b)
+                changed += 1
+        guest = self.repo.get_guest(ctx.phone)
+        if guest is not None:
+            guest.name = name
+            self.repo.upsert_guest(guest)
+        bk = ctx.st.get("bk") or {}
+        if bk:
+            bk["guest_name"] = name
+        ctx.after.append(t("name_changed", ctx.st.get("lang", "en"), name=name))
+        ctx.silent = True
+        return {"ok": True, "bookings_changed": changed,
+                "note": "the guest is told automatically. Reply exactly [no reply]."}
 
     def _tool_owner(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         """The guest wants the owner (owner, 2026-11-18): pause the bot, send the owner a short summary."""

@@ -691,3 +691,39 @@ def test_add_a_room_after_a_paid_booking_uses_the_same_dates(live):
     chat(w, "3")
     assert "Yes, rooms are available for your dates." in w.wa.texts(PHONE)[n:]
     assert w.repo.get_state(PHONE)["bk"]["check_in"] == "2026-12-12"
+
+
+def test_a_name_correction_after_the_summary_changes_only_the_name(live):
+    # live chat 2026-11-21: 'my name is not Naseem, it is Shibil' (voice) started the booking again (dates form)
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people", "Naseem 9847012345")
+    w.llm.script[:0] = [MockLLM.tool("change_name", name="Shibil"), MockLLM.text("[no reply]")]
+    n = len(w.wa.texts(PHONE))
+    chat(w, "ആ ചെറിയൊരു കറക്ഷൻ ഉണ്ട് കേട്ടോ. എൻ്റെ പേര് നസീം അല്ല, എൻ്റെ പേര് ഷിബിൽ.")
+    assert w.wa.texts(PHONE)[n:] == ["Sheri, peru Shibil ennu maatti."]
+    assert [b.guest_name for b in w.repo.list_bookings(phone=PHONE)] == ["Shibil"]
+    w.llm.script[:0] = [MockLLM.text("Please share your check-in and check-out dates.")] * 2
+    n = len(w.wa.texts(PHONE))
+    chat(w, "Already sent")
+    new = w.wa.texts(PHONE)[n:]
+    assert len(new) == 1 and "payment link" in new[0].lower() and "Check in" not in new[0]
+
+
+def test_a_change_before_payment_gives_a_new_summary_and_link(live):
+    # owner, 2026-11-21: the link is out but not paid; 'add 1 room' / '1 room venda' / '6 per' change the enquiry and a
+    # NEW summary and payment link go at once. Dates, name and mobile are never asked again.
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 4 people", "Shibil 9847012345")
+    old_link = w.repo.list_bookings(phone=PHONE)[0].payment_link_url
+    for text, rooms in (("add 1 room also", 3), ("1 room venda", 2), ("6 per aayi", 2)):
+        n = len(w.wa.texts(PHONE))
+        chat(w, text)
+        new = w.wa.texts(PHONE)[n:]
+        held = [b for b in w.repo.list_bookings(phone=PHONE) if b.status == "hold"]
+        assert sum(b.rooms for b in held) == rooms, (text, held)
+        assert any(x.startswith("Following are the glimpse of your enquiry") and "Shibil" in x for x in new), new
+        assert any("rzp.io" in x for x in new) and not any("Check in :" in x or "name and mobile" in x for x in new)
+    assert all(b.payment_link_url != old_link for b in w.repo.list_bookings(phone=PHONE) if b.status == "hold")
