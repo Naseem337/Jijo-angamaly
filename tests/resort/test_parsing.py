@@ -93,3 +93,31 @@ def test_neutral_messages_keep_the_last_language(neutral):
     st = {"style": "tanglish"}
     ChatMixin._language_note(st, neutral)
     assert st["style"] == "tanglish"
+
+
+@pytest.mark.parametrize("text, want", [
+    # voice notes (live chat 2026-11-21): no ':' after the label, numbers in words, a bare '2.'
+    ("Check-in January 1st, check-out maybe January 3, and number of persons 2, and we need one room.",
+     {"check_in": date(2027, 1, 1), "check_out": date(2027, 1, 3), "persons": 2, "rooms": 1}),
+    ("2.", {"persons": 2}),
+    ("two persons", {"persons": 2}),
+    ("we are two people", {"persons": 2}),
+    ("number of persons is 4", {"persons": 4}),
+    ("persons 3, rooms 2", {"persons": 3, "rooms": 2}),
+    ("moonu per", {"persons": 3}),
+    ("Which one is better?", {}),
+    ("one moment please", {}),
+])
+def test_spoken_stay_details_from_a_voice_note(text, want):
+    assert parse_stay(text, date(2026, 11, 21)) == want
+
+
+def test_a_date_range_number_is_never_read_as_rooms():
+    assert "rooms" not in parse_stay("dec 12 to 14 room 3 persons", date(2026, 11, 21))
+
+
+def test_speech_to_text_spellings_of_the_town():
+    from app.resort.chat import close_word
+    for said in ("aalappee", "alappee", "alappi", "aleppee", "allepy"):
+        assert close_word(said, "alleppey"), said
+    assert not close_word("kerala", "alleppey") and not close_word("asdfgh", "alleppey")

@@ -151,7 +151,7 @@ _STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|d?h?ivas\w*|disam|dhisam|ra+t
 _NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|ra+thri|raat|raatein|iravu|days?|d?h?ivas\w*|disam|dhisam|din|naal\w*)\b", re.IGNORECASE)
 # 'Person 3' at the start of a line, '3 persons', 'persons : 3'. Never across a line break: 'To 23\nPerson 3' was once
 # read as 23 persons (live chat, 2026-11-19).
-_PERSONS = re.compile(r"(?:number of persons|persons|pax|guests|people)[ \t]*[:=-][ \t]*(\d{1,2})\b|(?:we are|we're|we r|njangal|njmal|nangal|hum)[ \t]+(\d{1,2})\b|\b(\d{1,2})[ \t]*(?:persons?|"
+_PERSONS = re.compile(r"(?:number of persons|no of persons|number of people|persons|pax|guests|people)[ \t]*(?:[:=-]|is|are)?[ \t]*(\d{1,2})\b(?![ \t]*(?:rooms?|nights?|days?)\b)|(?:we are|we're|we r|njangal|njmal|nangal|hum)[ \t]+(\d{1,2})\b|\b(\d{1,2})[ \t]*(?:persons?|"
                       r"people|ppl|pple|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b|"
                       r"(?:^|\n)[ \t]*(?:persons?|people|pax|guests?|adults?|members)[ \t]*[:=-]?[ \t]*(\d{1,2})[ \t]*(?:$|\n)",
                       re.IGNORECASE)
@@ -210,7 +210,26 @@ def _month_typo(word: str) -> str | None:
     return None
 
 
+_NUMBER_WORDS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                 "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+                 "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "randu": 2, "rendu": 2, "moonu": 3,
+                 "munnu": 3, "naalu": 4, "nalu": 4, "anju": 5, "aaru": 6, "ezhu": 7, "ettu": 8, "ombathu": 9,
+                 "pathu": 10, "teen": 3, "chaar": 4, "char": 4, "paanch": 5, "panch": 5}
+_NUMBER_WORD = re.compile(r"\b(" + "|".join(_NUMBER_WORDS) + r")\b", re.IGNORECASE)
+# 'one' only next to a person / room word ('one room', 'one person'): 'which one', 'one moment' stay words
+_ONE = re.compile(r"\bone(?=[ \t]+(?:persons?|people|adults?|rooms?|nights?|days?)\b)|"
+                  r"(?<=\bpersons )one\b|(?<=\bpeople )one\b", re.IGNORECASE)
+
+
+def _spoken_numbers(text: str) -> str:
+    """Numbers said in words in a voice note ('number of persons two', 'three people', 'moonu per') as digits
+    (live chat 2026-11-21: 'number of persons 2' from a voice note was never read)."""
+    text = _ONE.sub("1", text)
+    return _NUMBER_WORD.sub(lambda m: str(_NUMBER_WORDS[m.group(1).lower()]), text)
+
+
 def _latin_stay(text: str) -> str:
+    text = _spoken_numbers(text)
     for word, rx in _NATIVE_STAY:
         text = rx.sub(f" {word} ", text)
 
@@ -299,9 +318,10 @@ _KIDS = re.compile(r"\b(\d{1,2}|a|one|oru|ek|two|randu|rendu|do)\s*(?:small\s+)?
                    r"kuzhandhai\w*|bachch?[ae]|bachch?on|bab(?:y|ies))\b", re.IGNORECASE)
 
 
-_ROOMS_ASKED = re.compile(r"\b(\d{1,2}|one|two|three|four|five|six|oru|randu|rendu|moonu|moonnu|naalu|anju|"
+_ROOMS_ASKED = re.compile(r"(?<!to )(?<!till )(?<!-)(?<!- )\b(\d{1,2}|one|two|three|four|five|six|oru|randu|rendu|moonu|moonnu|naalu|anju|"
                           r"ek|do|teen|char|paanch)[ \t]*(?:rooms?|muri\w*|kamre|kamra|araigal)\b|"
-                          r"\brooms?[ \t]*[:=-][ \t]*(\d{1,2})\b", re.IGNORECASE)
+                          r"\b(?:number of |no of )?rooms?[ \t]*(?:[:=-]|is)?[ \t]*(\d{1,2})\b(?![ \t]*(?:persons?|people|"
+                          r"nights?|days?|pax)\b)", re.IGNORECASE)  # 'rooms 2' from a voice note (no ':')
 _ROOM_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "oru": 1, "randu": 2, "rendu": 2,
                   "moonu": 3, "moonnu": 3, "naalu": 4, "anju": 5, "ek": 1, "do": 2, "teen": 3, "char": 4, "paanch": 5}
 
@@ -381,8 +401,8 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
     elif m := next((x for rx in (_DAY_ONLY, _UNTIL) for x in rx.finditer(text)), None):
         out["until_day"] = int(m.group(1))
     persons = [int(next(g for g in m.groups() if g)) for m in _PERSONS.finditer(text)]
-    if not persons and re.fullmatch(r"\s*(\d{1,2})\s*", text):
-        persons = [int(text.strip())]  # '3' on its own, answering 'Number of persons :'
+    if not persons and (bare := re.fullmatch(r"\s*(\d{1,2})\s*[.!]?\s*", text)):
+        persons = [int(bare.group(1))]  # '3' on its own, answering 'Number of persons :'
     if persons and 0 < persons[-1] <= 500:  # no 40 cap (owner, 2026-11-20); 500 only keeps a year out
         out["persons"] = persons[-1]  # the latest number they gave
     if kids := _kids_in(text):
@@ -539,7 +559,8 @@ _LIST_LINE = re.compile(r"₹|\bRs\.?\s?\d|https?://|^\s*(?:[-*•]|\d+[.)])\s",
 
 
 # Other names guests use for a town (small spelling mistakes are caught by close_word).
-PLACE_ALIASES = {"alleppey": ("alappuzha", "alapuzha"), "alappuzha": ("alleppey",)}
+PLACE_ALIASES = {"alleppey": ("alappuzha", "alapuzha", "alappey", "alappi", "alappee", "aleppee"),
+                 "alappuzha": ("alleppey",)}
 # Town names typed in Malayalam / Tamil / Hindi script (or from a voice note) -> the English-letter name the dashboard has
 NATIVE_PLACES = [(re.compile(p), name) for p, name in (
     ("ആലപ്പുഴ|ആലപ്പി|ആലപ്പീ|ஆலப்புழா|ஆலப்புழை|ஆலப்பி|अलेप्पी|अलप्पुझा|अलाप्पुझा", "alleppey"),
@@ -573,7 +594,11 @@ def close_word(said: str, name: str) -> bool:
         return True
     if min(len(said), len(name)) < 5 or said[0] != name[0]:
         return False
-    return difflib.SequenceMatcher(None, said, name).ratio() >= 0.75
+    if difflib.SequenceMatcher(None, said, name).ratio() >= 0.75:
+        return True
+    # doubled letters and y/i/ee endings from speech-to-text: 'aalappee' ~ 'alleppey' (live chat 2026-11-21)
+    a, b = (re.sub(r"(.)\1+", r"\1", re.sub(r"(?:ee|ey|y|i)$", "i", w)) for w in (said, name))
+    return len(a) >= 4 and difflib.SequenceMatcher(None, a, b).ratio() >= 0.8
 
 
 def chatty_words(reply: str) -> int:
