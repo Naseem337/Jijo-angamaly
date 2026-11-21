@@ -640,3 +640,54 @@ def test_live_chat_2026_11_21_rooms_change_and_every_ok_answered(live):
         assert len(w.wa.texts(PHONE)) > n, f"silence after {text!r}"
     assert not any("ready aakkam" in x for x in w.wa.texts(PHONE))
     assert w.wa.texts(PHONE).count("5 perkku 2 room + 1 extra bed venam (oru extra bed-inu ₹500 per night).") == 2
+
+
+def test_photos_only_when_the_guest_asks_for_them(live):
+    # live chat 2026-11-21: 'I wanted a room ... send the details' (voice) got room photos and nothing else
+    w = live
+    _live_setup(w)
+    w.llm.script[:0] = [MockLLM.tool("send_photos", place="Alleppey"), MockLLM.text("[no reply]")]
+    before = transcript(w)
+    chat(w, "ആ എനിക്കൊരു റൂം വേണമായിരുന്നല്ലോ. എവിടെയാണ് ഇതിങ്ങനെ ഇലക്ട്രിക്സിനും കാര്യങ്ങളൊക്കെ വരുന്നത്? "
+            "ഡീറ്റെയിൽസും കാര്യങ്ങളൊക്കെ ഒന്ന് വിടാട്ടോ.")
+    new = transcript(w)[len(before):]
+    assert not any(x.startswith("PHOTO") for x in new), new
+    assert "BOT: Sure, Kindly confirm the Location 📍" in new
+
+
+def test_live_chat_2026_11_21_afternoon(live):
+    # 'ok' got 'details ellam automatically vannittund'; 'room book chey' got the AI's own dates question; the
+    # voice '5 പേരുണ്ടാവും' was not read as persons
+    w = live
+    _live_setup(w)
+    w.llm.script[:0] = [MockLLM.text("Okay, details ellam automatically vannittund.")] * 2
+    chat(w, "Rooms", "Alleppey", "ok")
+    assert not any("automatic" in x for x in w.wa.texts(PHONE))
+    _live_setup(w)
+    w.llm.script[:0] = [MockLLM.text("Booking-inu check-in, check-out dates-um ethra per undennum ariyanam. "
+                                     "Details onnu parayamo?")] * 4
+    chat(w, "restart", "room book chey")
+    assert w.wa.texts(PHONE)[-1] == "Sure, Kindly confirm the Location 📍\nAlleppey or Kanthalloor ?"
+    chat(w, "Alleppey", "ok")
+    assert not any("ariyanam" in x or "parayamo" in x for x in w.wa.texts(PHONE))
+    chat(w, "നമ്മൾ ജനുവരി 1 മുതൽ ജനുവരി 3 വരെ ഉണ്ടാവും. നമ്മൾ 5 പേരുണ്ടാവും. പിന്നെ 2 റൂം മതി. ഓക്കേ.")
+    assert "5 perkku 2 room + 1 extra bed venam (oru extra bed-inu ₹500 per night)." in w.wa.texts(PHONE) or \
+        any(x.startswith("For 5 persons") or x.startswith("5 perkku") for x in w.wa.texts(PHONE))
+    assert not any(x.startswith("Please share these details:\n\nNumber of persons") for x in w.wa.texts(PHONE))
+
+
+def test_add_a_room_after_a_paid_booking_uses_the_same_dates(live):
+    # live chat 2026-11-21: 'ok add 1 room also' then 'same date' got the full form again and again
+    w = live
+    w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people", "Faris 9847012345")
+    w.bot.mark_paid(booking_id=w.repo.list_bookings(phone=PHONE)[0].id)
+    chat(w, "ok add 1 room also")
+    assert w.wa.texts(PHONE)[-1] == "Please share these details:\n\nNumber of persons :"  # dates and resort known
+    n = len(w.wa.texts(PHONE))
+    chat(w, "same date")
+    assert len(w.wa.texts(PHONE)) > n  # never silent
+    chat(w, "3")
+    assert "Yes, rooms are available for your dates." in w.wa.texts(PHONE)[n:]
+    assert w.repo.get_state(PHONE)["bk"]["check_in"] == "2026-12-12"

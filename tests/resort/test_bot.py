@@ -239,15 +239,17 @@ def test_photos_uploaded_in_the_dashboard_are_sent_when_a_guest_asks_and_never_t
     prop_refs = [ph.save_photo(png) for _ in range(4)]
     w.repo.save_room_type(RoomType(**{**w.deluxe.__dict__, "photo_urls": room_refs}))
     w.repo.save_property(Property(**{**w.repo.get_property(w.p1.id).__dict__, "photo_urls": prop_refs}))
-    assert say(w, "deluxe room photos undo?") == "next_step"  # before the dates: the next step, not photos
+    assert say(w, "deluxe room photos undo?") == "location"  # no location yet: the location question first (owner, 2026-11-21)
     assert w.wa.texts()[-1].startswith("Sure, Kindly confirm the Location") and not w.wa.to(GUEST)[:-1]
     w.wa.sent.clear()
     st = w.repo.get_state(GUEST)
     st["checked"] = "rooms were found"  # after the availability check, photos go on request
+    st["form_place"] = w.p1.id  # the resort is known by then
     w.repo.set_state(GUEST, st)
     say(w, "deluxe room photos undo?", GUEST, tool("send_photos", place="Pozhiyoram", room_type="Deluxe"), reply("[no reply]"))
     images = [p for _, k, p in w.wa.to(GUEST) if k == "image"]
-    assert images and len(images) == 2 and w.wa.texts() == ["*Deluxe*"]  # the room's own photos only, its name first
+    assert images and len(images) == 2 and w.wa.texts()[0] == "*Deluxe*"  # the room's own photos only, its name first
+    w.llm.script.clear()  # the code sent those photos itself; the scripted AI reply was never needed
     say(w, "more?", GUEST, tool("send_photos", place="Pozhiyoram"), reply("[no reply]"))
     assert len([1 for _, k, _ in w.wa.to(GUEST) if k == "image"]) == 6  # every room shown: the resort's 4 photos
     say(w, "more?", GUEST, tool("send_photos", place="Pozhiyoram"), reply("That's all the photos we have sir."))
@@ -1815,3 +1817,12 @@ def test_no_sir_in_the_middle_of_a_chat_even_if_never_said_before(world):
         say(w, q, GUEST, reply(a))
     say(w, "beach?", GUEST, reply("Yes sir, beach view."))
     assert w.wa.texts()[-1] == "Yes, beach view."
+
+
+def test_the_ai_never_brings_up_bills_the_guest_did_not_ask_about(world):
+    # live chat 2026-11-21: after 'ok' the AI said 'Electricity bill-um property-il poyi settle cheyyanam'
+    w = world
+    say(w, "is there a pool?", GUEST, reply("Yes, there is a pool. Electricity bill is settled at the property."))
+    assert w.wa.texts()[-1] == "Yes, there is a pool."
+    say(w, "is the electricity bill extra?", GUEST, reply("No, electricity is included."))
+    assert w.wa.texts()[-1] == "No, electricity is included."  # asked: the answer stays

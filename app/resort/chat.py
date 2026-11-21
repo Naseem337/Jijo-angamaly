@@ -110,13 +110,13 @@ DATES_QUESTION = re.compile(
     r"|\bstaying\b|\bnights\b|\bpax\b|ethra (?:per|peru|aal|divasam|day|night)|\beppol|\bennu\b|kitne (?:log|din)"
     r"|\bkab\b|evlo (?:per|peru|naal|days?)|evvalavu (?:per|naal)|ethana(?:i)? (?:per|peru|naal)|\beppo\b|\beppodhu\b"
     r"|kitni raat|kab se|\bta?reekh|\btarikh|\bthethi|\bthedhi|which year|what year|\b20\d\d or 20\d\d\b"
-    r"|you said \d+ (?:person|people|night|day)", re.IGNORECASE)
+    r"|you said \d+ (?:person|people|night|day)|\bdetails?\b", re.IGNORECASE)  # 'Details onnu parayamo?' (2026-11-21)
 BOOKING_WISH = re.compile(r"\b(?:rooms?|resorts?|stay|book\w*|cottages?|accommodation|vacancy|availab\w*|kamra)\b|"
                           r"റൂം|മുറി|റിസോർട്ട്|ബുക്ക്|ரூம்|அறை|ரிசார்ட்|புக்|रूम|कमरा|रिसॉर्ट|बुक", re.IGNORECASE)
 NOT_NOW = re.compile(r"\b(?:later|will|thanks|thank|pinne|sheri|ok|okay|nice|good|was|were|cancel\w*|super|great|"
                      r"beautiful|lovely|awesome|amazing|wow|adipoli|kollam|kidu|semma|mast|badhiya)\b", re.IGNORECASE)
 ASKING = re.compile(r"\b(?:share|tell|send|give|let me know|please|pls|kindly|confirm|need|needed|require|venam|"
-                    r"parayamo|parayu|parayoo|ariyikk"
+                    r"parayamo|parayu|parayoo|ariyanam|ariyan|ariyenam|ariyende|ariyikk"
                     r"\w*|batao|bataiye|bataye|batayein|bataiyega|sollunga|sollungal|sollu|anuppunga|kodunga|"
                     r"ayakkamo|ayakku)\b", re.IGNORECASE)
 FILLER = re.compile(r"(?:(?:got it|sure|okay|ok|alright|noted|fine|great|thanks|thank you|sheri|shari)[\s,.!]*"
@@ -179,7 +179,7 @@ _NATIVE_STAY_WORDS = [
     ("aug", "ഓഗസ്റ്റ്|ആഗസ്റ്റ്|ஆகஸ்ட்|अगस्त"), ("sep", "സെപ്റ്റംബർ|செப்டம்பர்|सितंबर|सितम्बर"),
     ("oct", "ഒക്ടോബർ|அக்டோபர்|अक्टूबर|अक्तूबर"), ("nov", "നവംബർ|நவம்பர்|नवंबर|नवम्बर"),
     ("dec", "ഡിസംബർ|டிசம்பர்|दिसंबर|दिसम्बर"),
-    ("per", "പേരാണ്|പേരുണ്ട്|പേർ|പേര്|ആളുകൾ|ആൾക്കാർ|ആൾ|பேர்|நபர்கள்|நபர்|लोगों|लोग|व्यक्ति|आदमी|जन"),
+    ("per", "പേരുണ്ട\\S*|പേരാണ്|പേരുണ്ട്|പേർ|പേര്|ആളുകൾ|ആൾക്കാർ|ആളുണ്ട\\S*|ആൾ|பேர்|நபர்கள்|நபர்|लोगों|लोग|व्यक्ति|आदमी|जन"),
     ("rooms", "റൂമുകൾ|റൂംസ്|റൂമ്|റൂം|മുറികൾ|മുറി|ரூம்கள்|ரூம்|அறைகள்|अरै|रूम्स|रूम|कमरे|कमरा"),
     ("nights", "രാത്രി|ராத்திரி|இரவு|इरवु|रातें|रात"), ("vare", "വരെ|வரை|तक"),
     ("days", "ദിവസം|ദിവസത്തേക്ക്|ദിവസ|நாள்|நாட்கள்|दिन"), ("kid", "കുട്ടി\\S*|குழந்தை\\S*|बच्च\\S*"),
@@ -265,9 +265,13 @@ PRICE_Q = re.compile(r"\b(?:price|prices|prize|prise|prive|pricee|rate|rates|tar
 PRICE_SHORT = re.compile(r"^\W*(?:ethra|etra|ethraya|etreya|ethreya|ethrayaa|ethra aakum|ethra aavum|ethrayaakum)\W*$",
                          re.IGNORECASE)
 NOT_PRICE = re.compile(r"discount|offer|reduce|advance|balance|refund|cancel|paid|extra bed|early", re.IGNORECASE)
+# bills and deposits the AI made up ('Electricity bill-um property-il settle cheyyanam', live chat 2026-11-21): only
+# when the guest asked about them
+CHARGE_TALK = re.compile(r"electric\w*|current bill|power bill|water bill|utilit\w*|\bdeposit\w*|\bkarant\w*",
+                         re.IGNORECASE)
 # how the code picks rooms is internal: never 'The resort will assign the room based on its own priority' (owner,
 # 2026-11-21)
-INTERNAL_RULE = re.compile(r"\bpriority\b|\b(?:assign|allot|allocat)\w*\b[^.?!\n]{0,40}\brooms?\b|"
+INTERNAL_RULE = re.compile(r"\bpriority\b|\bautomatic\w*|\bthe (?:system|code|tool|bot)\b|\b(?:assign|allot|allocat)\w*\b[^.?!\n]{0,40}\brooms?\b|"
                            r"\brooms?\b[^.?!\n]{0,40}\b(?:assign|allot|allocat)\w*|"
                            r"\b(?:resort|owner|team|we)\b[^.?!\n]{0,30}\b(?:decide|choose|pick)s?\b[^.?!\n]{0,30}\brooms?\b",
                            re.IGNORECASE)
@@ -335,8 +339,9 @@ _ROOM_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6
 
 _MORE_ROOMS = re.compile(
     r"\b(\d{1,2}|one|oru|two|randu|rendu)?[ \t]*(?:more|extra|additional|koode|kude|koodi|kudi)[ \t]*rooms?\b|"
-    r"\b(\d{1,2}|one|oru|two|randu|rendu)?[ \t]*rooms?[ \t]*(?:koode|kude|koodi|kudi|more|extra|additional)\b|"
-    r"\b(?:another|add(?:[ \t]+(?:a|one))?)[ \t]+rooms?\b", re.IGNORECASE)
+    r"\b(\d{1,2}|one|oru|two|randu|rendu)?[ \t]*rooms?[ \t]*(?:koode|kude|koodi|kudi|more|extra|additional|also|too)\b|"
+    r"\b(?:another|add|plus)(?:[ \t]+(?:a|one|oru|(\d{1,2})|(two|randu|rendu)))?[ \t]+(?:more[ \t]+)?rooms?\b",
+    re.IGNORECASE)  # 'add 1 room also', 'add 2 rooms', '1 room also' (live chat 2026-11-21)
 _MORE_WORD = {"one": 1, "oru": 1, "two": 2, "randu": 2, "rendu": 2}
 
 
@@ -345,12 +350,17 @@ ROOMS_LINE_RX = [re.compile("^" + re.sub(r"\\\{\w+\\\}", ".+?", re.escape(v)) + 
                  for k in ("rooms_plain", "rooms_beds", "rooms_note") for v in _STRINGS[k].values()]
 
 
+# 'same date', 'same dates', 'athe date', 'wahi date': the dates of the stay already booked / talked about
+SAME_DATES = re.compile(r"\b(?:same|athe|ade|wahi|vahi|adhe)\s+(?:dates?|days?|dateil|date-il|tharikh)\b|"
+                        r"അതേ\s*(?:ഡേറ്റ്|തീയതി)", re.IGNORECASE)
+
+
 def _more_rooms_in(text: str) -> int:
     """'one more room' / '1 room koode venam' / 'add a room' -> 1 extra room on top of those already quoted."""
     m = _MORE_ROOMS.search(text)
     if not m:
         return 0
-    n = (m.group(1) or m.group(2) or "1").lower()
+    n = (m.group(1) or m.group(2) or m.group(3) or m.group(4) or "1").lower()
     return int(n) if n.isdigit() else _MORE_WORD.get(n, 1)
 
 
@@ -558,6 +568,8 @@ YES_REPLY = re.compile(r"^\W*(?:yes|yeah|yep|ya|yaa|s|sure|ok\w*|go ahead|procee
 SOLD_OUT_CLAIM = re.compile(r"fully booked|sold out|no rooms?\b|not available|full(?:y)? (?:on|for)|all (?:the )?rooms "
                             r"(?:are )?(?:booked|full)|rooms? (?:are |is )?full|booked out|onnum (?:illa|ella)|"
                             r"available alla|free alla|illa(?:llo)? rooms?", re.IGNORECASE)
+SEE_ASK = re.compile(r"\b(?:see|show|view|look at|kaanikk\w*|kaanan|kanikk\w*|dikha\w*|paakka|kaattu)\b",
+                     re.IGNORECASE)
 PHOTO_ASK = re.compile(r"\b(?:photos?|pics?|pictures?|images?|fotos?|padam|padangal|video)\b|ഫോട്ടോ|படம்|फोटो",
                        re.IGNORECASE)
 # "other room photos" / "vere room" / "dusra room": the next free room type by the owner's priority
@@ -580,7 +592,9 @@ WISH_WORDS = WISH_CORE | {"a", "an", "any", "is", "are", "there", "i", "we", "ne
                           "cheyyan", "cheyyanam", "enquiry", "details", "info", "information", "in", "at", "on",
                           "near", "il", "le", "mein", "la", "le", "from", "needed", "required", "require", "wants",
                           "urgent", "urgently", "free", "vacant", "vacancy", "kittan", "kittanam", "booking", "reserve",
-                          "reservation", "inquiry", "chahte", "chahiye", "ah", "aa", "thanks", "thank"}
+                          "reservation", "inquiry", "chahte", "chahiye", "ah", "aa", "thanks", "thank", "chey", "cheyy",
+                          "cheyyu", "cheyyo", "cheyyamo", "cheyyanam", "pannu", "pannanum", "pannunga", "karo", "karna",
+                          "karni", "kar", "do", "make", "it", "ready"}
 RESTART = re.compile(r"^\s*(?:restart|reset|start again|start over|new chat)\s*[.!]*\s*$", re.IGNORECASE)
 RESTART_MARK = "[restart]"  # stored in the chat; the AI's view of the conversation begins after it
 SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE)
@@ -974,9 +988,8 @@ class ChatMixin:
         named = self._named_place(text)
         place_id = bk.get("property_id") or st.get("form_place")
         prop = self.repo.get_property(place_id) if place_id else None
-        if prop is None:  # no resort picked yet: the one they named, else the only open one
-            places = self._places()
-            prop = named or (places[0] if len(places) == 1 else None)
+        if prop is None:  # no resort picked yet: only the one they named (owner, 2026-11-21: never guess the
+            prop = named  # location for photos; the location question goes first)
         if prop is None or (named and named.id != prop.id):
             return None
         return prop
@@ -1006,8 +1019,9 @@ class ChatMixin:
         me check, one moment' promises (the code answers at once, nothing comes later)."""
         parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", reply) if x.strip()]
         checked = bool(st.get("checked")) and bool((st.get("bk") or {}).get("check_in"))
+        asked_charge = bool(CHARGE_TALK.search(guest_text))
         keep = [x for x in parts if not STALLING.search(x) and not INTERNAL_RULE.search(x)
-                and not (checked and ROOMS_MATH.search(x))]
+                and not (checked and ROOMS_MATH.search(x)) and (asked_charge or not CHARGE_TALK.search(x))]
         out = " ".join(keep).strip()
         if checked and len(keep) < len(parts) and (line := st.get("rooms_line")) \
                 and re.search(r"\brooms?\b|\bbeds?\b|muri|kamr", guest_text, re.IGNORECASE) and line not in out:
@@ -1099,6 +1113,12 @@ class ChatMixin:
         """A photo request at any stage, answered in code (never the AI): the photos by _photo_plan, then the open
         booking step. None = another resort was named (the AI answers)."""
         prop = self._photo_place(st, text)
+        if prop is None and self._known_place(st) is None and self._named_place(text) is None:
+            # no location yet: ask it first; the photos go right after the answer (owner, 2026-11-21)
+            st["photo_wish"] = text
+            self._save(phone, st)
+            self._text(phone, t("ask_location", st.get("lang", "en"), towns=self._towns_text()), repeat_ok=True)
+            return "location"
         if prop is None:
             return None
         lang = st.get("lang", "en")
@@ -1125,6 +1145,21 @@ class ChatMixin:
 
     def _tool_photos(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         """The AI's photo tool follows exactly the same rules as the code path (_photo_plan)."""
+        if not (PHOTO_ASK.search(ctx.text) or ROOM_OPTIONS_ASK.search(ctx.text) or OTHER_ROOM.search(ctx.text)
+                or SEE_ASK.search(ctx.text)
+                or (re.fullmatch(r"\W*(?:any\s+)?(?:more|innum|iniyum|vere|aur|still|next)\W*", ctx.text, re.IGNORECASE)
+                    and self._sent_photos(ctx.phone))):  # 'more?' right after photos = more photos
+            # photos only when the guest asks for them (live chat 2026-11-21: 'a room ... send the details' got room
+            # photos and nothing else, no location question)
+            return {"error": "the guest did not ask for photos: send none. Answer what they said; a room request "
+                             "with no place known: call ask_location."}
+        if self._known_place(ctx.st) is None and self._named_place(ctx.text) is None:
+            # the guest never said which resort: the location question first, photos after the answer
+            ctx.st["photo_wish"] = ctx.text
+            ctx.after.append(t("ask_location", ctx.st.get("lang", "en"), towns=self._towns_text()))
+            ctx.silent = True
+            return {"ok": True, "note": "the location question is sent first; the photos follow the guest's answer. "
+                                        "Reply exactly [no reply]."}
         prop = self._find_property(a.get("place", "")) or self._photo_place(ctx.st, ctx.text)
         if prop is None:
             return {"error": "unknown place", "places": [self._place_label(p) for p in self._places()]}
@@ -1201,6 +1236,10 @@ class ChatMixin:
             return "location"
         st["form_place"] = prop.id
         self._save(phone, st)
+        if wish := st.pop("photo_wish", None):  # they asked for photos before the location: now they go
+            self._save(phone, st)
+            if self._photos_now(phone, st, wish):
+                return "photos"
         self._text(phone, t("form", st.get("lang", "en")))
         return "form"
 
@@ -1524,9 +1563,15 @@ class ChatMixin:
         if more := got.pop("more_rooms", 0):  # 'one more room': on top of the rooms quoted at the last check
             parts = (st.get("checked") or "").split("|")
             have = int(bk.get("rooms") or 0) or (int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0)
-            if have:
-                got["rooms"] = have + more
+            got["rooms"] = have + more if have else more  # nothing quoted yet (a new booking): just those rooms
         return got
+
+    def _upcoming_booking(self, phone: str) -> Booking | None:
+        """The guest's latest booking that is still ahead (paid, on hold or checked in), else None."""
+        today = self._today()
+        live = [b for b in self.repo.list_bookings(phone=phone, limit=10)
+                if b.status in ("paid", "hold", "checked_in") and b.check_out >= today]
+        return max(live, key=lambda b: b.created_at, default=None)
 
     def _tool_location(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         if prop := self._named_place(ctx.text) or self._known_place(ctx.st):  # named or picked already: the form follows
@@ -1649,6 +1694,15 @@ class ChatMixin:
         return (
             f"You are the WhatsApp booking assistant of {self._brand()}. You talk like a friendly, sensible person at "
             "the front desk, never like a form or a menu. " + self.config.speaking_style + "\n\n"
+            "YOUR PURPOSE (strict)\n"
+            "- You ONLY help with this resort: the rooms, the stay, the booking, the payment, getting there and the "
+            "places around. Anything else (news, other businesses, general questions, jokes, personal talk, other "
+            "hotels): one polite line that you can help only with stays at the resort, then nothing more.\n"
+            "- Never talk about how you work: no 'automatically', 'the system', 'tools', 'steps' or 'messages are "
+            "sent'. Never explain the booking process unless asked.\n"
+            "- Only say what you are sure of from the FACTS, the tool results and this chat. Never invent charges, "
+            "bills, rules or facts. If a message makes no sense to you, ask the guest to say it again in a few words.\n"
+            "- Every reply must make sense on its own to a guest reading it on WhatsApp.\n\n"
             f"Today is {today.isoformat()} ({today.strftime('%A')}), India time.\n\n"
             "LANGUAGE\n"
             "- Work out the guest's language from their message. Never ask which language they want.\n"
@@ -1761,6 +1815,9 @@ class ChatMixin:
             "- Every price, date, room count and availability you state must come from the tool results or the "
             "FACTS below. Never calculate your own totals. Never invent the resort's amenities or policies; a resort "
             "fact you do not have: the owner will tell them (give the owner's number).\n"
+            "- Never invent charges, bills (electricity, water, utility), deposits, fees or rules that are not in the "
+            "FACTS. If a message makes no sense (often a voice note heard wrongly), ask the guest to say it again in a "
+            "few words; never guess what they meant.\n"
             "- Rooms and extra beds (the owner's rule): 2 persons per room. Fewer rooms only when the guest asks for "
             "fewer: then up to 3 per room, the 3rd on an extra bed at the FACTS price. When the guest asks for a "
             "number of rooms, call check_availability with that rooms number; the code adds the beds and the cost.\n\n"
@@ -1966,6 +2023,15 @@ class ChatMixin:
         True when something was queued for the guest."""
         st, phone = ctx.st, ctx.phone
         bk = st.get("bk") or {}
+        if not bk.get("check_in") and (SAME_DATES.search(text) or _more_rooms_in(text)) \
+                and (last := self._upcoming_booking(phone)) is not None:
+            # 'add 1 room also' / 'same date' after a booking: the dates and resort of their latest booking
+            # (live chat 2026-11-21: 'same date' got the form again and again)
+            bk = st.setdefault("bk", {})
+            bk.update(property_id=last.property_id, check_in=last.check_in.isoformat(),
+                      check_out=last.check_out.isoformat())
+            st["form_place"] = last.property_id
+            force = True
         place_id = st.get("form_place") or bk.get("property_id")
         if not place_id or bk.get("chosen") or CHANGE_ASK.search(text):
             return False
@@ -1978,7 +2044,8 @@ class ChatMixin:
                               or (mine.get("persons") and not bk.get("check_in"))
                               or (mine.get("persons") and len(_words(text)) <= 5
                                   and mine["persons"] != int(bk.get("adults") or 0) + int(bk.get("children") or 0))
-                              or mine.get("children") or mine.get("rooms") or mine.get("more_rooms")):
+                              or mine.get("children") or mine.get("rooms") or mine.get("more_rooms")
+                              or SAME_DATES.search(text)):
             # a new number of persons after the check ('7 ppl', 'now we are 7') is re-checked HERE, so the rooms and
             # extra beds always come from the code (live chat 2026-11-20: the AI did that maths wrong)
             return False
@@ -2039,6 +2106,9 @@ class ChatMixin:
                                      "the guest's question in one or two short, friendly lines. Do not ask for "
                                      "dates, location, persons, name or mobile, and do not say whether rooms are "
                                      "available.]")
+            if is_ack(text):  # 'ok' / 'thanks': a polite word back, never an answer to an older message (2026-11-21)
+                messages[-1].content += ("\n[The guest only said this short word. Reply in a few polite words to it "
+                                         "only. Do not answer older messages and do not add any new information.]")
         reply = ""
         coded = False if answer_only else self._stay_in_code(ctx, text)
         if coded and self._other_question(text):
