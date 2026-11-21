@@ -518,7 +518,7 @@ def test_system_prompt_has_the_rules_and_facts(world):
     system = w.llm.calls[0].system
     assert "9497861924" in system and "9995855789" in system and "https://maps.app.goo.gl/abc" in system
     assert "Never ask which language" in system and "Manglish" in system and "Hinglish" in system
-    assert "the owner does it" in system and "NEGOTIATION" in system and "Never offer a" in system
+    assert "the owner does it" in system and "NEGOTIATION" in system and "The FIRST time the guest asks for a lower price" in system
     assert "₹4,000" not in system and "Extra bed: ₹500" in system  # prices only ever come from the tools
     assert "Kanthalloor, Munnar" in system and "2026-11-02 (Monday)" in system
 
@@ -1492,7 +1492,7 @@ def test_the_prompt_says_sir_and_treats_an_offers_question_as_a_plain_question(w
     assert 'Say "sir" only once, at the very start' in system and "Never bro" in system and "Und bro" not in system
     assert "Asking about offers, deals or the price is only a question, NOT a request to reduce" in system
     assert "Never say there is no offer, never say you cannot reduce" in system
-    assert "Only when the guest asks for a lower price" in system
+    assert "Only when they ask AGAIN" in system
 
 
 # --------------------------------------------------------------------------- the summary, and never a price-hike story

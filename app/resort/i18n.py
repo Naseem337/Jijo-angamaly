@@ -48,6 +48,7 @@ S: dict[str, dict[str, str]] = {
     "no_other_room": _t(*["Sorry, no other room is free on your dates."] * 4),
     "other_room_free": _t(*["Yes, {room} is also free for your dates. Photos below; tell me if you want this room."] * 4),
     "fill_form": _t(*["Please share the details above."] * 4),
+    "owner_numbers": _t(*["The owner can speak with you directly: {numbers}."] * 4),
     "name_changed": _t(*["Done, the name is changed to {name}."] * 4),
     "contact_again": _t(*["Please send your name and mobile number here to go ahead with the booking."] * 4),
     "say_again": _t(*["Sorry, could you please type that once more in a few words?"] * 4),

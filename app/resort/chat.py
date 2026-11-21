@@ -722,6 +722,13 @@ _STRAY_ML = {"tanglish": {"und": "irukku", "undo": "irukka", "aanu": "thaan", "v
                           "ethra": "evlo", "mathi": "podhum"},
              "hinglish": {"und": "hai", "undo": "hai kya", "aanu": "hai", "venam": "chahiye", "ippol": "abhi",
                           "ethra": "kitna", "mathi": "chalega"}}
+LINK_ASK = re.compile(r"\blink\b|\bpay\w*|\bpaid\b|\badvance\b|razorpay|upi|gpay", re.IGNORECASE)
+LINK_REMINDER = re.compile(r"payment link (?:is )?(?:still )?(?:active|open|valid)|link is still|link ippozhum|"
+                           r"if you would like to go ahead", re.IGNORECASE)
+SORRY_FILLER = re.compile(r"\bi wish i could\b|\bi hear you\b|\bi understand (?:your|that)\b|\bunfortunately\b|"
+                          r"\bi am sorry\b|\bsorry,? but\b", re.IGNORECASE)
+PHONE_DIGITS = re.compile(r"\d{5}\s?\d{5}")
+OWNER_WORD = re.compile(r"\bowner\b|\bspeak with\b|\bcall\b|\bvilikk\w*", re.IGNORECASE)
 ASKS_REDUCE = re.compile(r"reduc|discount|lower|less|last price|final price|negotiat|bargain|best price|kurach|kurakk|kuraikk|"
                          r"kam kar|chhoot|குறை|കുറ|कम कर|छूट|ഡിസ്കൗണ്ട്|തള്ള", re.IGNORECASE)
 
@@ -1391,6 +1398,23 @@ class ChatMixin:
                                          for w in words for n in self._place_words(p))]
         return hits[0] if len(hits) == 1 else None
 
+    def _negotiation_guard(self, phone: str, guest_text: str, reply: str) -> str:
+        """A request for a lower price (owner, 2026-11-21): the first time only the value is said (owner numbers and
+        payment-link reminders are dropped); when they ask again, the owner's numbers always go. A payment-link
+        reminder the guest did not ask for is dropped from any reply."""
+        parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", reply) if x.strip()]
+        if not LINK_ASK.search(guest_text):
+            parts = [x for x in parts if not LINK_REMINDER.search(x)]
+        if ASKS_REDUCE.search(guest_text):
+            parts = [x for x in parts if not SORRY_FILLER.search(x)]  # 'I hear you, and I wish I could help.'
+            earlier = sum(1 for m in self._session_rows(phone)[:-1] if m.direction == "in" and ASKS_REDUCE.search(m.text))
+            numbers = [display_phone(n) for n in self._all_contact_numbers()]
+            if not earlier:
+                parts = [x for x in parts if not PHONE_DIGITS.search(x) and not OWNER_WORD.search(x)]
+            elif numbers and not any(PHONE_DIGITS.search(x) for x in parts):
+                parts.append(t("owner_numbers", "en", numbers=" / ".join(numbers)))
+        return " ".join(parts).strip()
+
     def _all_contact_numbers(self) -> list[str]:
         return [n for p in self.repo.list_properties(active_only=False) for n in p.contact_numbers][:2]
 
@@ -1764,6 +1788,9 @@ class ChatMixin:
         return (
             f"You are the WhatsApp booking assistant of {self._brand()}. You talk like a friendly, sensible person at "
             "the front desk, never like a form or a menu. " + self.config.speaking_style + "\n\n"
+            "BE CONCISE (the owner's rule)\n"
+            "- Answer exactly what was asked, in as few words as it needs, politely. Nothing extra: no reminders "
+            "(payment link, booking), no offers, no explanations they did not ask for, no closing lines.\n\n"
             "YOUR PURPOSE (strict)\n"
             "- You ONLY help with this resort: the rooms, the stay, the booking, the payment, getting there and the "
             "places around. Anything else (news, other businesses, general questions, jokes, personal talk, other "
@@ -1917,13 +1944,13 @@ class ChatMixin:
             "- Asking about offers, deals or the price is only a question, NOT a request to reduce. Just answer: the "
             "price for their dates (no dates yet: call ask_stay_details). Never say there is no offer, never "
             "say you cannot reduce, never mention discounts, unless they ask for a lower price themselves.\n"
-            "- Only when the guest asks for a lower price (reduce, discount, last price, 'kurachu tharamo', 'koodiyo'), "
-            "be warm and confident and CONVINCE them: the price is fair for what they get "
-            "(use the real good points of the place from the FACTS). NEVER say 'no discount', 'no offer' or 'I "
-            "cannot reduce': just explain the value, as a friendly person would. Never offer a discount. If they "
-            "push again, convince once more with a different good point.\n"
-            "- Only if they still keep pushing after that, say the owner can talk to them directly and give the "
-            "owner's number(s).\n\n"
+            "- The FIRST time the guest asks for a lower price (reduce, discount, last price, 'kurachu tharamo', "
+            "'koodiyo'): in one or two short, warm, respectful lines show it is worth it, with the real good points "
+            "from the FACTS (for example the direct beach access and the sea-view AC rooms). NEVER say 'no discount', "
+            "'no offer' or 'I cannot reduce', never 'I wish I could help', no owner numbers, no payment-link reminder, "
+            "nothing else.\n"
+            "- Only when they ask AGAIN: politely say the owner can talk to them directly and give the owner's "
+            "number(s). Nothing else.\n\n"
             "GUEST MEMORY\n"
             "- You remember every guest. After the FACTS you get their records (name, earlier bookings with dates, place and status). The chat shown is today's conversation; older chat is kept and you can read it with the recall_old_chat tool.\n"
             "- Look things up only when needed, to save effort: a guest who asks about an earlier booking, a payment, a link, a stay date or something said before gets the real answer (use the records, my_bookings and/or recall_old_chat). A guest who only says hi, makes small talk or jokes gets a short, polite, friendly reply with no lookup.\n"
@@ -2260,7 +2287,8 @@ class ChatMixin:
                     and not self._own_location_question(x) and not self._asks_location(x)
                     and not self._own_dates_ask(st, x)[0]
                     and not CONTACT_ASK.search(x) and not ROOM_FACT.search(x)]
-            clean = self._code_facts_only(st, text, no_unasked_prices(" ".join(keep), text))
+            clean = self._negotiation_guard(phone, text, self._code_facts_only(
+                st, text, no_unasked_prices(" ".join(keep), text)))
             if not clean:
                 if any(self._own_dates_ask(st, x)[0] for x in re.split(r"(?<=[.?!])\s+|\n+", reply)):
                     self._strict_form(ctx, "")  # it only asked for the dates: the owner's form, never silence
@@ -2348,7 +2376,7 @@ class ChatMixin:
             parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", clean) if x.strip()]
             if len(parts) > 1 and CLOSING.match(parts[-1].strip()):
                 clean = " ".join(parts[:-1])  # no 'Anything else?' tails (owner: very few words)
-            clean = self._code_facts_only(st, text, clean)
+            clean = self._negotiation_guard(phone, text, self._code_facts_only(st, text, clean))
             if self._known_place(st) is not None:  # the resort is picked: the AI never asks the location again
                 clean = " ".join(x for x in re.split(r"(?<=[.?!])\s+|\n+", clean)
                                  if x.strip() and not self._asks_location(x))

@@ -770,3 +770,23 @@ def test_an_answer_without_a_place_to_the_location_question_gets_the_short_re_as
         n = len(w.wa.texts(PHONE))
         chat(w, "Yeah, I want a deluxe.")
         assert w.wa.texts(PHONE)[n:] == ["Alleppey or Kanthalloor ?"], (ai, w.wa.texts(PHONE)[n:])
+
+
+def test_a_lower_price_ask_first_gets_the_value_then_the_owner(live):
+    # owner, 2026-11-21: the first ask gets a short reason it is worth it (no owner numbers, no payment-link reminder,
+    # no 'I wish I could help'); only when they ask again, the owner's numbers
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people")
+    w.llm.script[:0] = [MockLLM.text(
+        "I hear you, and I wish I could help. The value here is really in the direct beach access and the sea-view AC "
+        "rooms. If you would like, the owner can speak with you directly at 9497861924. Your payment link is still "
+        "active if you would like to go ahead.")] * 2
+    n = len(w.wa.texts(PHONE))
+    chat(w, "can you reduce the price?")
+    assert w.wa.texts(PHONE)[n:] == ["The value here is really in the direct beach access and the sea-view AC rooms."]
+    w.llm.script[:0] = [MockLLM.text("The beach access and the sea view make it worth it.")] * 2
+    n = len(w.wa.texts(PHONE))
+    chat(w, "please give some discount")
+    new = w.wa.texts(PHONE)[n:]
+    assert len(new) == 1 and "owner can speak with you directly" in new[0]
