@@ -135,3 +135,17 @@ def test_speech_to_text_spellings_of_the_town():
 ])
 def test_spoken_dates_with_ordinals(text, want):
     assert parse_stay(text, date(2026, 11, 21)) == want
+
+
+@pytest.mark.parametrize("text, want", [
+    # voice notes, live chats 2026-11-21/22: 'check out in 23', 'number of rooms, 1', English words in Malayalam letters
+    ("Yeah, I think I will be checked in in January 21st and check out in 23. And basically, we have 3 persons and "
+     "number of rooms, 1 if possible.",
+     {"check_in": date(2027, 1, 21), "check_out": date(2027, 1, 23), "persons": 3, "rooms": 1}),
+    ("ചെക്കിന് 1-ാം തീയതി ജനുവരി, ചെക്ക്ഔട്ട് 3-ാം തീയതി ജനുവരി, പിന്നെ നമ്പർ ഓഫ് പേഴ്സൺസ് 4, പിന്നെ നമ്പർ ഓഫ് റൂംസ് 2.",
+     {"check_in": date(2027, 1, 1), "check_out": date(2027, 1, 3), "persons": 4, "rooms": 2}),
+    ("I will check in on jan 5 and checking out on 8, two people",
+     {"check_in": date(2027, 1, 5), "check_out": date(2027, 1, 8), "persons": 2}),
+])
+def test_everything_in_one_voice_note(text, want):
+    assert parse_stay(text, date(2026, 11, 22)) == want

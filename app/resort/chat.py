@@ -129,7 +129,8 @@ _MON_DAY = re.compile(rf"\b{_MON}\s*(\d{{1,2}})(?:st|nd|rd|th)?\b"  # 'dec 12', 
                       r"(?!\s*(?:persons?|people|pax|per\b|peru|adults?|guests?|members|nights?|days?|aal|log|rooms?))",
                       re.IGNORECASE)
 _NUMERIC = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b")
-_DAY_ONLY = re.compile(r"(?:\b(?:till|to|until|upto|up to|thru|through)|-|\bcheck[\s-]?out\s*[:=-]?)\s*(\d{1,2})(?:st|nd|rd|th)?\b"
+_DAY_ONLY = re.compile(r"(?:\b(?:till|to|until|upto|up to|thru|through)|-|\bcheck(?:ed|ing)?[\s-]?out(?:\s+(?:in|on|at|by))?"
+                       r"\s*[:=-]?)\s*(\d{1,2})(?:st|nd|rd|th)?\b"
                        r"(?!\s*(?:[/.-]\d|person|people|pax|per\b|adult|night|room|guest|member|aal|days?))", re.IGNORECASE)
 _PERSONS_LOOSE = re.compile(r"\b(?:for|of|we are|we're|total)\s+(\d{1,2})\b(?!\s*(?:nights?|days?|rooms?|dec|jan|feb|"
                             r"mar|apr|may|jun|jul|aug|sep|oct|nov|th|st|nd|rd))|\b(\d{1,2})\s*(?:of us|members)\b",
@@ -151,7 +152,7 @@ _STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|d?h?ivas\w*|disam|dhisam|ra+t
 _NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|ra+thri|raat|raatein|iravu|days?|d?h?ivas\w*|disam|dhisam|din|naal\w*)\b", re.IGNORECASE)
 # 'Person 3' at the start of a line, '3 persons', 'persons : 3'. Never across a line break: 'To 23\nPerson 3' was once
 # read as 23 persons (live chat, 2026-11-19).
-_PERSONS = re.compile(r"(?:number of persons|no of persons|number of people|persons|pax|guests|people)[ \t]*(?:[:=-]|is|are)?[ \t]*(\d{1,2})\b(?![ \t]*(?:rooms?|nights?|days?)\b)|(?:we are|we're|we r|njangal|njmal|nangal|hum)[ \t]+(\d{1,2})\b|\b(\d{1,2})[ \t]*(?:persons?|"
+_PERSONS = re.compile(r"(?:number of persons|no of persons|number of people|persons|pax|guests|people)[ \t]*(?:[:=,-]|is|are)?[ \t]*(\d{1,2})\b(?![ \t]*(?:rooms?|nights?|days?)\b)|(?:we are|we're|we r|njangal|njmal|nangal|hum)[ \t]+(\d{1,2})\b|\b(\d{1,2})[ \t]*(?:persons?|"
                       r"people|ppl|pple|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b|"
                       r"(?:^|\n)[ \t]*(?:persons?|people|pax|guests?|adults?|members)[ \t]*[:=-]?[ \t]*(\d{1,2})[ \t]*(?:$|\n)",
                       re.IGNORECASE)
@@ -180,6 +181,11 @@ _NATIVE_STAY_WORDS = [
     ("oct", "ഒക്ടോബർ|அக்டோபர்|अक्टूबर|अक्तूबर"), ("nov", "നവംബർ|நவம்பர்|नवंबर|नवम्बर"),
     ("dec", "ഡിസംബർ|டிசம்பர்|दिसंबर|दिसम्बर"),
     ("per", "പേരുണ്ട\\S*|പേരാണ്|പേരുണ്ട്|പേർ|പേര്|ആളുകൾ|ആൾക്കാർ|ആളുണ്ട\\S*|ആൾ|பேர்|நபர்கள்|நபர்|लोगों|लोग|व्यक्ति|आदमी|जन"),
+    ("check in", "ചെക്കിന്|ചെക്കിൻ|ചെക്ക് ഇൻ|ചെക്ക്-ഇൻ|ചെക്ക്ഇൻ|ചെക്ക് ഇന്"),
+    ("check out", "ചെക്ക്ഔട്ട്|ചെക്ക് ഔട്ട്|ചെക്കൗട്ട്|ചെക്ക്-ഔട്ട്|ചെക്ക് ഔട്ട്"),
+    ("number of", "നമ്പർ ഓഫ്|നമ്പര് ഓഫ്"),
+    ("persons", "പേഴ്സൺസ്|പേഴ്സൺ|പെഴ്സൺസ്|പേഴ്സൻസ്"),
+    ("people", "പീപ്പിൾ|പീപ്പിള്"),
     ("rooms", "റൂമുകൾ|റൂംസ്|റൂമ്|റൂം|മുറികൾ|മുറി|ரூம்கள்|ரூம்|அறைகள்|अरै|रूम्स|रूम|कमरे|कमरा"),
     ("nights", "രാത്രി|ராத்திரி|இரவு|इरवु|रातें|रात"), ("vare", "വരെ|வரை|तक"),
     ("days", "ദിവസം|ദിവസത്തേക്ക്|ദിവസ|நாள்|நாட்கள்|दिन"), ("kid", "കുട്ടി\\S*|குழந்தை\\S*|बच्च\\S*"),
@@ -360,7 +366,7 @@ _KIDS = re.compile(r"\b(\d{1,2}|a|one|oru|ek|two|randu|rendu|do)\s*(?:small\s+)?
 
 _ROOMS_ASKED = re.compile(r"(?<!to )(?<!till )(?<!-)(?<!- )\b(\d{1,2}|one|two|three|four|five|six|oru|randu|rendu|moonu|moonnu|naalu|anju|"
                           r"ek|do|teen|char|paanch)[ \t]*(?:rooms?|muri\w*|kamre|kamra|araigal)\b|"
-                          r"\b(?:number of |no of )?rooms?[ \t]*(?:[:=-]|is)?[ \t]*(\d{1,2})\b(?![ \t]*(?:persons?|people|"
+                          r"\b(?:number of |no of )?rooms?[ \t]*(?:[:=,-]|is)?[ \t]*(\d{1,2})\b(?![ \t]*(?:persons?|people|"
                           r"nights?|days?|pax)\b)", re.IGNORECASE)  # 'rooms 2' from a voice note (no ':')
 _ROOM_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "oru": 1, "randu": 2, "rendu": 2,
                   "moonu": 3, "moonnu": 3, "naalu": 4, "anju": 5, "ek": 1, "do": 2, "teen": 3, "char": 4, "paanch": 5}
