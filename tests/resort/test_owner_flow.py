@@ -801,3 +801,16 @@ def test_restart_starts_the_language_fresh(live):
     chat(w, "restart")
     st = w.repo.get_state(PHONE)
     assert st.get("lang", "en") == "en" and st.get("style") in (None, "en")
+
+
+def test_the_booked_date_after_payment_is_talk_about_that_booking(live):
+    # live chat 2026-11-22: after the confirmation 'Lets meet on 21jan' got the form for a new booking
+    w = live
+    _live_setup(w)
+    chat(w, "Rooms", "Alleppey", "jan 21 to jan 23, 3 people, 1 room", "Faris 9847012345")
+    w.bot.mark_paid(booking_id=w.repo.list_bookings(phone=PHONE)[0].id)
+    w.llm.script[:0] = [MockLLM.text("See you on 21 Jan!")] * 2
+    n = len(w.wa.texts(PHONE))
+    chat(w, "Lets meet on 21jan")
+    new = w.wa.texts(PHONE)[n:]
+    assert new == ["See you on 21 Jan!"], new

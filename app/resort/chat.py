@@ -273,11 +273,13 @@ def _latin_stay(text: str) -> str:
 
 
 MSG_SEP = "\x1e"  # between the guest's messages in _recent_guest_text
-_DAY_AFTER = re.compile(r"\b(?:day after tomorrow|mattannal|matannal|marunaal|parso|parson)\b|മറ്റന്നാൾ|परसों",
+_DAY_AFTER = re.compile(r"\b(?:day after tomorrow|mattannal|matannal|mattanal|mattannaal|mattanaal|matannaal|"
+                        r"mattenal|marunaal|parso|parson)\b|മറ്റന്നാൾ|परसों",
                         re.IGNORECASE)
 _TOMORROW = re.compile(r"\b(?:tomorrow|tmrw|tmr|tomo|naale|nale|naaley|naalai|naalaikku|nalaiku|kal)\b|നാളെ|நாளை|कल",
                        re.IGNORECASE)
-_TODAY = re.compile(r"\b(?:today|tonight|innu|innale raathri|aaj|indru|inniki|innaikku|innikku)\b|ഇന്ന്|இன்று|आज",
+_TODAY = re.compile(r"\b(?:today|tonight|innu|innale raathri|aaj|indru|inniki|innaikku|innikku)\b|"
+                    r"(?<!check )(?<!check)\binn\b(?! of\b)|ഇന്ന്|இன்று|आज",
                     re.IGNORECASE)
 _WORD_NUM = {"a": 1, "one": 1, "oru": 1, "ek": 1, "single": 1, "two": 2, "randu": 2, "rendu": 2, "do": 2, "three": 3,
              "moonu": 3, "moonnu": 3, "munnu": 3, "teen": 3}
@@ -1935,6 +1937,9 @@ class ChatMixin:
             "in the resort's details and the enquiry summary. Give a price only if the guest asks for it.\n"
             "- A name correction after the summary or the booking ('my name is not X, it is Y'): call change_name "
             "with the new name in English letters. Never ask for the dates again for that.\n"
+            "- After a booking is confirmed: 'ok' / 'thanks' gets one short warm line ('Thank you, see you soon!'), "
+            "never 'How can I help you'. A guest who mentions their booked dates ('see you on 21 Jan') is talking "
+            "about THAT booking: reply warmly in one short line; never start a new booking.\n"
             "5. When the guest gives their name and mobile number, call create_booking right away (no 'shall I "
             "confirm?'). The enquiry summary and the payment link are sent automatically: reply [no reply]. Never "
             "write the summary, the link, the advance amount or a percent yourself. If they say 'this number' "
@@ -2168,6 +2173,13 @@ class ChatMixin:
         st, phone = ctx.st, ctx.phone
         bk = st.get("bk") or {}
         mine0 = parse_stay(text, self._today())
+        if (not bk.get("check_in") and mine0.get("check_in") and not mine0.get("persons") and not mine0.get("rooms")
+                and not BOOKING_WISH.search(text) and any(
+                    b.status in ("paid", "checked_in") and b.check_in == mine0["check_in"]
+                    for b in self.repo.list_bookings(phone=phone, limit=10))):
+            # 'Lets meet on 21 jan' with a confirmed booking on 21 Jan: talk about THAT booking, never a new enquiry
+            # (live chat 2026-11-22: it got the form for a new booking)
+            return False
         changes = bool(mine0.get("rooms") or mine0.get("more_rooms") or mine0.get("less_rooms")
                        or mine0.get("persons") or mine0.get("children")
                        or (mine0.get("check_in") and DATE_CHANGE.search(text)))

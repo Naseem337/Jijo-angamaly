@@ -92,7 +92,7 @@ def test_home_is_the_simple_front_desk_view(env):
     assert home.count("New booking") == 1  # one button, not two
     for gone in ("Open chats", "Chats needing a human", "Money collected, by how it was paid", "all time"):
         assert gone not in home, gone
-    assert "WhatsApp chats" not in home  # not in the menu either
+    assert "WhatsApp chats" in home  # back in the menu (owner, 2026-11-22: "i cant see whatsapp in dashboard")
 
 
 def test_settings_page_is_gone_and_home_has_no_occupancy_card(env):

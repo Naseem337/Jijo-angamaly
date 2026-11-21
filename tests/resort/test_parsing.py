@@ -149,3 +149,13 @@ def test_spoken_dates_with_ordinals(text, want):
 ])
 def test_everything_in_one_voice_note(text, want):
     assert parse_stay(text, date(2026, 11, 22)) == want
+
+
+@pytest.mark.parametrize("text, want", [
+    # live chat 2026-11-22: 'inn' (today) and 'mattanal' (day after tomorrow) were not read
+    ("inn varum mattanal vare indavum.", {"check_in": date(2026, 11, 22), "check_out": date(2026, 11, 24)}),
+    ("inn muthal nale vare", {"check_in": date(2026, 11, 22), "check_out": date(2026, 11, 23)}),
+    ("check inn", {}),
+])
+def test_manglish_today_and_day_after_tomorrow(text, want):
+    assert parse_stay(text, date(2026, 11, 22)) == want
