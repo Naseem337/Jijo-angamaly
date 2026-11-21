@@ -121,3 +121,17 @@ def test_speech_to_text_spellings_of_the_town():
     for said in ("aalappee", "alappee", "alappi", "aleppee", "allepy"):
         assert close_word(said, "alleppey"), said
     assert not close_word("kerala", "alleppey") and not close_word("asdfgh", "alleppey")
+
+
+@pytest.mark.parametrize("text, want", [
+    # voice notes, live chat 2026-11-21: '5-ാം തീയതി വരെ' (till the 5th date) asked for the check-out again
+    ("ബ്രോ, എനിക്ക് ഫെബ്രുവരി 1 മുതൽ 5-ാം തീയതി വരെ കേട്ടോ. 4 പേരുണ്ടാവും. ഒരു റൂം മതി.",
+     {"check_in": date(2027, 2, 1), "check_out": date(2027, 2, 5), "persons": 4, "rooms": 1}),
+    ("ഫെബ്രുവരി ഒന്നാം തീയതി മുതൽ അഞ്ചാം തീയതി വരെ", {"check_in": date(2027, 2, 1), "check_out": date(2027, 2, 5)}),
+    ("from the 1st of February to the 5th", {"check_in": date(2027, 2, 1), "check_out": date(2027, 2, 5)}),
+    ("February first to fifth, four people", {"check_in": date(2027, 2, 1), "check_out": date(2027, 2, 5), "persons": 4}),
+    ("first floor room please", {}),
+    ("the 5th date", {}),
+])
+def test_spoken_dates_with_ordinals(text, want):
+    assert parse_stay(text, date(2026, 11, 21)) == want

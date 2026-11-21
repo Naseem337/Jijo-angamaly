@@ -222,10 +222,34 @@ _ONE = re.compile(r"\bone(?=[ \t]+(?:persons?|people|adults?|rooms?|nights?|days
                   r"(?<=\bpersons )one\b|(?<=\bpeople )one\b", re.IGNORECASE)
 
 
+_ORDINALS = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
+             "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13, "fourteenth": 14,
+             "fifteenth": 15, "sixteenth": 16, "seventeenth": 17, "eighteenth": 18, "nineteenth": 19, "twentieth": 20,
+             "twenty first": 21, "twenty-first": 21, "twenty second": 22, "twenty-second": 22, "twenty third": 23,
+             "twenty-third": 23, "twenty fourth": 24, "twenty-fourth": 24, "twenty fifth": 25, "twenty-fifth": 25,
+             "twenty sixth": 26, "twenty-sixth": 26, "twenty seventh": 27, "twenty-seventh": 27, "twenty eighth": 28,
+             "twenty-eighth": 28, "twenty ninth": 29, "twenty-ninth": 29, "thirtieth": 30, "thirty first": 31,
+             "thirty-first": 31,
+             "ഒന്നാം": 1, "രണ്ടാം": 2, "മൂന്നാം": 3, "നാലാം": 4, "അഞ്ചാം": 5, "ആറാം": 6, "ഏഴാം": 7, "എട്ടാം": 8,
+             "ഒമ്പതാം": 9, "ഒൻപതാം": 9, "പത്താം": 10}
+# English ordinals only next to a month or a date word ('February first', 'the fifth', 'to fifth'): 'first floor'
+# and 'second week' stay words; Malayalam ordinals are only used for dates
+_ORDINAL_WORD = re.compile(
+    r"\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+|the\s+|to\s+|till\s+|until\s+|from\s+)("
+    + "|".join(sorted((k for k in _ORDINALS if k.isascii()), key=len, reverse=True))
+    + r")\b|(" + "|".join(k for k in _ORDINALS if not k.isascii()) + ")", re.IGNORECASE)
+# '5-ാം തീയതി വരെ' / '5ാം തീയതി' / '5th date' / 'the 5th': the plain day number
+_DAY_SUFFIX = re.compile(r"(\d{1,2})\s*-?\s*ാം|\s*-?\s*(?:തീയതി|തിയതി|തീയ്യതി|തിയ്യതി|theeyathi|thiyathi|tharikh)|"
+                         r"\bthe\s+(?=\d)|(?<=\d(?:st|nd|rd|th))\s+date\b", re.IGNORECASE)
+
+
 def _spoken_numbers(text: str) -> str:
     """Numbers said in words in a voice note ('number of persons two', 'three people', 'moonu per') as digits
-    (live chat 2026-11-21: 'number of persons 2' from a voice note was never read)."""
+    (live chat 2026-11-21: 'number of persons 2' from a voice note was never read), ordinals ('February first to
+    fifth', 'ഒന്നാം ... അഞ്ചാം തീയതി') and '5-ാം തീയതി വരെ' as plain day numbers."""
     text = _ONE.sub("1", text)
+    text = _ORDINAL_WORD.sub(lambda m: (m.group(1) or "") + str(_ORDINALS[(m.group(2) or m.group(3)).lower()]), text)
+    text = _DAY_SUFFIX.sub(lambda m: m.group(1) or " ", text)
     return _NUMBER_WORD.sub(lambda m: str(_NUMBER_WORDS[m.group(1).lower()]), text)
 
 
