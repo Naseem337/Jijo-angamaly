@@ -234,7 +234,8 @@ def test_a_price_the_ai_made_up_is_replaced_by_the_real_one(world):
         tool("check_availability", place="Alleppey", check_in="2026-11-10", check_out="2026-11-12", adults=2),
         reply("[no reply]"))
     say(w, "how much is it?", GUEST, reply("It is Rs 2,000 a night, Rs 4,000 in total."))  # the AI is not asked
-    assert w.wa.texts()[-1] == "1 room(s), Deluxe, 10 Nov to 12 Nov 2026 (2 nights): total ₹8,000."
+    assert w.wa.texts()[-1] == ("Deluxe: ₹4,000 per room per night.\n"
+                                "1 room(s), Deluxe, 10 Nov to 12 Nov 2026 (2 nights): total ₹8,000.")
 
 
 def test_the_ai_does_not_ask_name_and_mobile_again_after_the_fixed_ask(world):

@@ -103,6 +103,13 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 - "Price etreya", "how much", "rate?" once the stay is checked: the code sends the real price of that stay:
   "2 room(s), Beach View Standard Rooms + 1 extra bed(s), 22 Nov to 30 Nov 2026 (8 nights): total ₹52,000."
   The dates are never asked again.
+- A rate question also gets the price per room per night ("Beach View Standard Room: ₹3,000 per room per night."),
+  but only when every night of the stay costs the same; otherwise only the total (owner, 2026-11-22).
+- A room named in the price question ("whats the cost for standard room") gets THAT room's price for the same stay.
+  It is only a question, never a switch: no "should I change your booking?". This also works after the payment
+  link has gone out, using the stay on that link; the booking and the link stay unchanged.
+- Once the dates and persons are known (the room check, or the open payment link), the form is never sent again,
+  not after "Yes", not after "same date" / "same persons" (live chat 2026-11-22).
 - A price only when the guest asks, and only from the code. Never seasons, peak dates or "rates changed".
 - Asked to reduce: the real good points (never "no discount"); if they keep pushing, the owner's numbers.
 

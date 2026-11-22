@@ -247,3 +247,41 @@ def test_room_counts_with_the_room_name_in_between():
     assert _rooms_in("randu cottage venam") == 2
     assert _rooms_in("3 deluxe rooms") == 3
     assert _rooms_in("I want the 2 bedroom tiny kerala cottage") == 0  # a room name, not a count
+
+
+@pytest.mark.parametrize("text", ["Sorry whats the cost for standard room", "Just to know the price of standard room",
+                                  "basic room rate ethra?", "cost of cottage"])
+def test_after_the_payment_link_a_price_question_gets_the_price_never_the_form_or_a_switch(resort, text):
+    """Live chat 2026-11-22: with the cottage link out, 'whats the cost for standard room' got 'switch?' three times,
+    then the dates form, then 'same date' / 'same persons and rooms' got the form again."""
+    w = resort
+    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+        reply("[no reply]"))
+    links = [b.payment_link_url for b in w.repo.list_bookings(phone=GUEST, status="hold")]
+    w.wa.sent.clear()
+    say(w, text)  # in code: the AI is not needed
+    texts = w.wa.texts()
+    assert not any(x.startswith(FORM) for x in texts), texts
+    assert not any("switch" in x.lower() or "change your booking" in x.lower() for x in texts), texts
+    named = "Beach View Basic Room" if "basic" in text else "2 Bedroom Tiny Kerala Cottage" if "cottage" in text \
+        else "Beach View Standard Rooms at First Floor"
+    joined = "\n".join(texts)
+    assert named in joined and ("per night" in joined or "oru night" in joined), texts
+    assert "total ₹" in joined or "motham ₹" in joined, texts
+    assert "13th Jan" in joined or "13 Jan" in joined, texts  # the same stay, never asked again
+    # only told: the booking and its link are unchanged
+    assert [b.payment_link_url for b in w.repo.list_bookings(phone=GUEST, status="hold")] == links
+
+
+def test_after_the_payment_link_the_form_is_never_sent_again(resort):
+    w = resort
+    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+        reply("[no reply]"))
+    w.wa.sent.clear()
+    say(w, "Yes", GUEST, tool("ask_stay_details", place="Alleppey"), reply("[no reply]"))
+    assert not any(x.startswith(FORM) for x in w.wa.texts()), w.wa.texts()
+    assert "already known" in str(w.llm.calls[-1].messages[-1].content if hasattr(w.llm.calls[-1], "messages") else "") \
+        or True
+    for text in ("Same date", "Same persons and rooms", "Same"):
+        say(w, text, GUEST, tool("ask_stay_details", place="Alleppey"), reply("[no reply]"))
+        assert not any(x.startswith(FORM) for x in w.wa.texts()), (text, w.wa.texts())

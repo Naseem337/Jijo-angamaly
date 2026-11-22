@@ -594,7 +594,8 @@ def test_live_chat_2026_11_21_past_date_price_and_oky(live):
     assert "For 5 persons: 2 room(s) + 1 extra bed(s) (₹500 per extra bed per night)." in w.wa.texts(PHONE)
     n = len(w.wa.texts(PHONE))
     chat(w, "Price etreya")  # 2 rooms x ₹3,000 x 8 nights + 1 extra bed x ₹500 x 8 nights
-    assert w.wa.texts(PHONE)[n:] == ["2 room(s), Beach View Standard Rooms at First Floor + 1 extra bed(s), "
+    assert w.wa.texts(PHONE)[n:] == ["Beach View Standard Rooms at First Floor: ₹3,000 per room per night.\n"
+                                     "2 room(s), Beach View Standard Rooms at First Floor + 1 extra bed(s), "
                                      "22 Nov to 30 Nov 2026 (8 nights): total ₹52,000."]
     chat(w, "Oky")  # any spelling of ok goes on to the open step
     assert w.wa.texts(PHONE)[-1] == "Please share your name and mobile number to proceed."

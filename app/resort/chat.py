@@ -1226,16 +1226,21 @@ class ChatMixin:
         2026-11-21: the AI asked for the dates again although the guest had given them). None = not a price question,
         or the stay is not checked yet (then the AI / the form asks what is missing)."""
         bk = st.get("bk") or {}
-        if not (st.get("checked") and bk.get("check_in") and bk.get("check_out") and bk.get("adults")):
-            return None
         if not (PRICE_Q.search(text) or PRICE_SHORT.match(text)) or NOT_PRICE.search(text):
             return None
+        if not (st.get("checked") and bk.get("check_in") and bk.get("check_out") and bk.get("adults")):
+            # the payment link is out (the stay is kept on the held booking, not in bk): 'whats the cost for standard
+            # room' gets that room's price for the SAME stay, never the form or 'switch?' (live chat 2026-11-22)
+            return self._held_price(phone, st, text)
         ctx = _Turn(phone, st, text=text)
         st.setdefault("turn", 0)
         before = bk.get("chosen")
         args: dict[str, Any] = {"rooms": bk.get("rooms") or 0} if bk.get("rooms") else {}
         if (photo_room := getattr(self, "_quoted_rooms", {}).get(phone)) and (rt := self.repo.get_room_type(photo_room)):
             args["room_type"] = rt.name  # 'price?' swiped on a room's photo: the price of THAT room (owner, 2026-11-22)
+        elif (prop0 := self.repo.get_property(bk.get("property_id") or "")) and \
+                (named := self._room_in_words(text, self.repo.list_room_types(prop0.id))):
+            args["room_type"] = named.name  # 'cost for standard room': the price of THAT room
         out = self._tool_prepare(ctx, args)
         if "error" in out:
             out = self._tool_prepare(ctx, {})
@@ -1252,13 +1257,58 @@ class ChatMixin:
             return "price" if ctx.after else None
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
         beds = int(out.get("extra_beds") or beds_chosen)
-        self._text(phone, t("price_answer", lang, rooms=out["rooms"], room=out["room_type"],
-                            beds=t("price_beds", lang, beds=beds) if beds else "", dates=av.fmt_range(ci, co),
-                            nights=(co - ci).days, total=_money(int(out["total"]))), repeat_ok=True)
+        night = ""
+        if (prop := self.repo.get_property(bk.get("property_id") or "")) and (rt := next(
+                (r for r in self.repo.list_room_types(prop.id) if r.name == out["room_type"]), None)):
+            night = self._night_line(prop, rt, ci, co, lang)
+        total_line = t("price_answer", lang, rooms=out["rooms"], room=out["room_type"],
+                       beds=t("price_beds", lang, beds=beds) if beds else "", dates=av.fmt_range(ci, co),
+                       nights=(co - ci).days, total=_money(int(out["total"])))
+        self._text(phone, "\n".join(x for x in (night, total_line) if x), repeat_ok=True)
         step = self._open_step(phone, st)
         if step and step != (self.repo.last_outbound_text(phone) or ""):
             self._text(phone, step)  # back to the booking (the name ask), never twice in a row
         self._save(phone, st)
+        return "price"
+
+    def _night_line(self, prop: Property, rt: RoomType, ci: date, co: date, lang: str) -> str:
+        """'Beach View Standard Room: ₹4,000 per room per night.' (owner, 2026-11-22: a rate question gets the price
+        per night). Only when every night costs the same (rates that change are never shown): else '' (total only)."""
+        rates = {r for _, r in av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, 1).per_night}
+        return t("price_night", lang, room=rt.name, rate=_money(rates.pop())) if len(rates) == 1 else ""
+
+    def _held_price(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """A price question while the payment link is out: the price of the room the guest names (else the held one)
+        for the stay on that link, per night and in total. Only told: the booking and the link are not changed."""
+        held = self._held_stay(phone)
+        if held is None:
+            return None
+        prop = self.repo.get_property(held["property_id"])
+        if prop is None:
+            return None
+        rooms = self.repo.list_room_types(prop.id)
+        photo_room = getattr(self, "_quoted_rooms", {}).get(phone)
+        rt = next((r for r in rooms if r.id == photo_room), None) or self._room_in_words(text, rooms) or \
+            next((r for r in rooms if r.id in held["room_type_ids"]), None)
+        if rt is None:
+            return None
+        ci, co = date.fromisoformat(held["check_in"]), date.fromisoformat(held["check_out"])
+        lang = st.get("lang", "en")
+        free = self.repo.free_rooms(rt, ci, co, self.clock.now(), phone)
+        beds_ok = bool(prop.extra_bed_rate)
+        plan = av.plan_rooms(rt, held["adults"], held["children"], free, int(held.get("rooms") or 0), beds_ok) \
+            or av.plan_rooms(rt, held["adults"], held["children"], free, 0, beds_ok)
+        night = self._night_line(prop, rt, ci, co, lang)
+        if not plan:  # that room is not free for their dates: the nightly rate, and that it is taken
+            self._text(phone, "\n".join(x for x in (night, t("rooms_none", lang)) if x), repeat_ok=True)
+            return "price"
+        n = plan[0]
+        beds = self._beds_for(prop, rt, held["adults"], held["children"], n)
+        _, _, total, _ = self._price(prop, rt, ci, co, n, beds, False)
+        total_line = t("price_answer", lang, rooms=n, room=rt.name,
+                       beds=t("price_beds", lang, beds=beds) if beds else "", dates=av.fmt_range(ci, co),
+                       nights=(co - ci).days, total=_money(total))
+        self._text(phone, "\n".join(x for x in (night, total_line) if x), repeat_ok=True)
         return "price"
 
     @staticmethod
@@ -1792,6 +1842,10 @@ class ChatMixin:
         that check used (a child added later keeps the dates; new dates keep the persons)."""
         got = parse_stay(self._recent_guest_text(phone), self._today())
         bk = st.get("bk") or {}
+        if not bk.get("adults") and (held := self._held_stay(phone)) and (
+                not bk.get("check_in") or bk.get("check_in") == held["check_in"]):
+            # the payment link is out: its stay is what we know ('same date', 'same persons' never ask again)
+            bk = {**held, **{k: v for k, v in bk.items() if v}}
         if bk.get("check_in") and "check_in" not in got:
             got["check_in"] = date.fromisoformat(bk["check_in"])
             if bk.get("check_out") and "check_out" not in got:
@@ -1822,6 +1876,21 @@ class ChatMixin:
             return []
         newest = max(holds, key=lambda b: b.created_at)
         return [b for b in holds if b is newest or (newest.payment_link_id and b.payment_link_id == newest.payment_link_id)]
+
+    def _held_stay(self, phone: str) -> dict[str, Any] | None:
+        """The stay on the guest's open payment link, in the shape of st['bk'] (plus the held room type ids), or None.
+        After the link goes out st['bk'] is cleared, so this is where the dates, persons and rooms are remembered."""
+        held = self._open_hold(phone)
+        if not held:
+            return None
+        first = held[0]
+        note = re.search(r"Mobile: ([+\d][\d ]{6,})", first.notes or "")
+        return {"property_id": first.property_id, "check_in": first.check_in.isoformat(),
+                "check_out": first.check_out.isoformat(), "adults": sum(b.adults for b in held),
+                "children": sum(b.children for b in held), "rooms": sum(b.rooms for b in held),
+                "guest_name": first.guest_name or "",
+                "mobile": try_normalize_phone(note.group(1)) if note else phone,
+                "room_type_ids": [b.room_type_id for b in held]}
 
     def _upcoming_booking(self, phone: str) -> Booking | None:
         """The guest's latest booking that is still ahead (paid, on hold or checked in), else None."""
@@ -2360,6 +2429,8 @@ class ChatMixin:
             photo_room = None
         if "?" in text and not STRONG_CHOICE.search(text) and not photo_room:
             return None  # 'is the cottage free?' / 'any other rooms?' are questions (answered elsewhere)
+        if (PRICE_Q.search(text) or PRICE_SHORT.match(text)) and not STRONG_CHOICE.search(text):
+            return None  # 'whats the cost for standard room' only asks the price (_price_now), it is not a switch
         bk = st.get("bk") or {}
         held = [] if bk.get("check_in") else self._open_hold(phone)
         place_id = bk.get("property_id") or (held[0].property_id if held else "") or st.get("form_place")
@@ -2977,6 +3048,15 @@ class ChatMixin:
         if prop is None:
             return {"error": "that resort has no online booking: give the owner's numbers from the FACTS",
                     "open_resorts": [self._place_label(p) for p in self._places()]}
+        bk = ctx.st.get("bk") or {}
+        known = bk if bk.get("check_in") and bk.get("adults") else self._held_stay(ctx.phone)
+        if known and not ANOTHER_STAY.search(ctx.text or ""):
+            # the dates and persons are already known (live chat 2026-11-22: after the payment link, 'Yes' to 'should
+            # I look up the cost?' got the form, then 'same date' and 'same persons' got it again)
+            return {"error": f"the stay is already known: {known['check_in']} to {known['check_out']}, "
+                             f"{known['adults']} adults, {known.get('children') or 0} children, "
+                             f"{known.get('rooms') or 0} rooms. Never ask for the dates or persons again. For a price "
+                             "call check_availability with these values; for a change call change_enquiry."}
         ctx.st["form_place"] = prop.id
         if t("form", "en") not in ctx.after:
             ctx.after.append(t("form", ctx.st.get("lang", "en")))
