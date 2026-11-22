@@ -28,7 +28,7 @@ from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
 from app.resort.idproof import IdProofMixin
-from app.resort.models import Booking, ChatMessage as Chat
+from app.resort.models import Booking, ChatMessage as Chat, RoomType
 from app.resort.paying import apply_payment, method_label
 from app.resort.payments import PaymentError, Payments
 from app.whatsapp.client import WhatsAppClient, WhatsAppError
@@ -89,6 +89,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         self.payments = payments
         self.clock = clock
         self._quotes: dict[str, str] = {}  # phone -> note about the message the guest swipe-replied to
+        self._quoted_rooms: dict[str, str] = {}  # phone -> room type id of the photo the guest swipe-replied to
         self._llm = llm
         self._voice_in = voice_in or (lambda: None)
 
@@ -123,11 +124,39 @@ class BookingBot(IdProofMixin, ChatMixin):
     def _note_quote(self, phone: str, context_id: str | None) -> None:
         """A swipe-reply: remember which earlier message the guest is answering, for the AI's next turn."""
         quoted = self.repo.chat_by_wamid(phone, context_id or "")
+        self._quoted_rooms.pop(phone, None)
         if quoted is None:
             self._quotes.pop(phone, None)
             return
         who = "your (the assistant's) message" if quoted.direction == "out" else "their own earlier message"
+        if quoted.direction == "out" and (room := self._room_of_message(quoted.text)):
+            # a swipe-reply to a room photo (no caption on photos) or to its '*Room 108 - ...*' line: that room
+            # (owner, 2026-11-22). 'this one venam', 'price?', 'is this free?' are about it.
+            rt, num = room
+            self._quoted_rooms[phone] = rt.id
+            label = f"Room {num} - {rt.name}" if num else rt.name
+            self._quotes[phone] = (f"[The guest swiped to reply to a photo of {label}. Their message is about THIS "
+                                   "room; 'this one' means this room.]")
+            return
         self._quotes[phone] = f'[The guest swiped to reply to {who}: "{quoted.text[:400]}". Answer about that.]'
+
+    def _room_of_message(self, text: str) -> tuple[RoomType, str] | None:
+        """The room a sent photo ('[photo] <ref>') or room label ('*Room 108 - Beach View Standard Rooms*') shows."""
+        label = re.fullmatch(r"\*(?:Room (\w+) - )?(.+?)\*", text.strip())
+        ref = text[len("[photo] "):].strip() if text.startswith("[photo] ") else ""
+        if not (label or ref):
+            return None
+        for p in self.repo.list_properties(active_only=False):
+            for rt in self.repo.list_room_types(p.id):
+                if ref:
+                    for num, refs in rt.number_photos.items():
+                        if ref in refs:
+                            return rt, num
+                    if ref in rt.photo_urls:
+                        return rt, ""
+                elif label and label.group(2).strip() == rt.name:
+                    return rt, label.group(1) or ""
+        return None
 
     # ------------------------------------------------------------------ entry point
 

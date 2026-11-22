@@ -445,7 +445,7 @@ class ResortRepo:
     def list_chat(self, phone: str, limit: int = 100) -> list[ChatMessage]:
         rows = self._all("SELECT * FROM (SELECT * FROM chat WHERE phone=? ORDER BY id DESC LIMIT ?) ORDER BY id",
                          (phone, limit))
-        return [ChatMessage(r["phone"], r["direction"], r["text"], _dt(r["at"]), r["source"]) for r in rows]  # type: ignore[arg-type]
+        return [ChatMessage(r["phone"], r["direction"], r["text"], _dt(r["at"]), r["source"], r["wamid"]) for r in rows]  # type: ignore[arg-type]
 
     def list_conversations(self, limit: int = 200) -> list[dict[str, Any]]:
         """One row per guest: last message, newest first (for the dashboard inbox)."""

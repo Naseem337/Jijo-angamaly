@@ -674,6 +674,10 @@ STRONG_CHOICE = re.compile(r"\b(?:book|booking|take|prefer|only|instead|mathi|ma
                            r"\bcan (?:i|we) (?:get|have|take|book)\b|" + _ROOMS_OF, re.IGNORECASE)
 NOT_WANT = re.compile(r"\b(?:don'?t|dont|do not|no need|not|remove|without|except|venda|vendaa|vendathilla|vendam|"
                       r"nahi|nahin|illathe)\b", re.IGNORECASE)
+# a swipe-reply to a room photo that picks it or asks if it is free ('this one', 'ithu venam', 'is this free?');
+# 'nice view' / 'beautiful' only gets the AI's answer (owner, 2026-11-22)
+PHOTO_PICK = re.compile(r"\b(?:this|ithu|ith|idhu|ee|yeh|ye wala|that one|athu|adhu|free|available|availability|"
+                        r"undo|kittumo|kittuo|book|booking)\b", re.IGNORECASE)
 # room numbers are not the guest's concern (owner, 2026-11-22): told only when the guest named one or asked for them
 ROOM_NUMBERS_SAID = re.compile(r"\broom\s*(?:numbers?|nos?)\b|\brooms?\s*#?\s*\d{3}\b|\b\d{3}\s*(?:,|/|&|and)\s*\d{3}\b",
                                re.IGNORECASE)
@@ -1229,7 +1233,10 @@ class ChatMixin:
         ctx = _Turn(phone, st, text=text)
         st.setdefault("turn", 0)
         before = bk.get("chosen")
-        out = self._tool_prepare(ctx, {"rooms": bk.get("rooms") or 0} if bk.get("rooms") else {})
+        args: dict[str, Any] = {"rooms": bk.get("rooms") or 0} if bk.get("rooms") else {}
+        if (photo_room := getattr(self, "_quoted_rooms", {}).get(phone)) and (rt := self.repo.get_room_type(photo_room)):
+            args["room_type"] = rt.name  # 'price?' swiped on a room's photo: the price of THAT room (owner, 2026-11-22)
+        out = self._tool_prepare(ctx, args)
         if "error" in out:
             out = self._tool_prepare(ctx, {})
         beds_chosen = int((bk.get("chosen") or {}).get("extra_beds") or 0)
@@ -1375,11 +1382,12 @@ class ChatMixin:
                 continue
             try:
                 media_id = self.wa.upload_media(path.read_bytes(), ph.mime_of(path), path.name)
-                self.wa.send_image(phone, media_id, caption if not sent else "")
+                wamid = self.wa.send_image(phone, media_id, caption if not sent else "")
             except Exception as exc:  # one bad photo must not stop the chat
                 log.warning("Photo send failed: %s", exc)
                 continue
-            self._log(phone, f"[photo] {ref}")
+            # the WhatsApp id is kept: a swipe-reply to this photo tells which room it shows (owner, 2026-11-22)
+            self._log(phone, f"[photo] {ref}", wamid=wamid if isinstance(wamid, str) else "")
             sent += 1
         return sent
 
@@ -2345,7 +2353,12 @@ class ChatMixin:
         use memory like a human'). None when the message is not a room choice."""
         if (PHOTO_ASK.search(text) or SEE_ASK.search(text)) and not STRONG_CHOICE.search(text):
             return None  # 'cottage photos venam' is a photo ask
-        if "?" in text and not STRONG_CHOICE.search(text):
+        # a swipe-reply to a room's photo (owner, 2026-11-22): 'this one venam' / 'is this free?' / 'ok' is that room;
+        # a price question about it is answered by _price_now
+        photo_room = getattr(self, "_quoted_rooms", {}).get(phone)
+        if photo_room and (PRICE_Q.search(text) or PRICE_SHORT.match(text) or NOT_WANT.search(text)):
+            photo_room = None
+        if "?" in text and not STRONG_CHOICE.search(text) and not photo_room:
             return None  # 'is the cottage free?' / 'any other rooms?' are questions (answered elsewhere)
         bk = st.get("bk") or {}
         held = [] if bk.get("check_in") else self._open_hold(phone)
@@ -2369,7 +2382,12 @@ class ChatMixin:
             current = {free[0].id}  # the room that was offered (the owner's priority)
         words = _words(text)
         target = None
-        if (m := ROOM_NUMBER.search(text)) and (CHOICE_ASK.search(text) or len(words) <= 4):
+        if photo_room and (CHOICE_ASK.search(text) or PHOTO_PICK.search(text)) \
+                and not self._room_in_words(text, rooms) and not ROOM_NUMBER.search(text):
+            target = next((rt for rt in rooms if rt.id == photo_room), None)  # the room in the photo
+        if target:
+            pass
+        elif (m := ROOM_NUMBER.search(text)) and (CHOICE_ASK.search(text) or len(words) <= 4):
             number = m.group(1) or m.group(2)
             target = next((rt for rt in rooms if number in rt.room_list), None)
         named = None if target else self._room_in_words(text, rooms)

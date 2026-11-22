@@ -89,6 +89,10 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 ## 6. Photos
 - No photo limit. No photo is sent twice in a conversation.
 - Before every room's photos, a text with the room number and name: "*Room 108 - Beach View Standard Rooms*".
+  The photos themselves have no caption (owner, 2026-11-22: keep it so).
+- A swipe-reply to a room photo or to its "*Room 108 ...*" line is about THAT room (each photo's WhatsApp id is
+  kept): "this one venam", "ithu mathi", "book this", "is this free?" pick it (checked in code on the stay's dates);
+  "price?" gives that room's price; anything else ("nice view") is answered by the AI, which is told the room.
 - Before the dates, room photos go freely (one room type after another, then the general photos), followed once by
   "To check which rooms are available, we need your check-in and check-out dates." and the form.
 - After the dates: a named free room -> its photos; a named full room -> "Sorry, <room> is not free on your dates.";

@@ -63,7 +63,7 @@ class FakeWA:
 
     def send_image(self, to, media_id, caption=""):
         self.sent.append((to, "image", media_id))
-        return "wamid.x"
+        return f"wamid.img{len(self.sent)}"  # each photo its own id (a swipe-reply finds it)
 
     def send_document(self, to, media_id, filename, caption=""):
         self.sent.append((to, "document", filename))
@@ -418,8 +418,7 @@ def test_a_mid_chat_hi_is_never_left_unanswered(world):
     w = world
     say(w, "Is there a beach view?", GUEST, reply("Yes sir, every room has a beach view."))
     assert say(w, "hi") == "greeting"
-    hello = "Hi. Kindly confirm the Location 📍
-Alleppey or Munnar ?"  # never 'How may I assist you?' again
+    hello = "Hi. Kindly confirm the Location 📍\nAlleppey or Munnar ?"  # never 'How may I assist you?' again
     assert w.wa.texts()[-1] == hello
     assert say(w, "Hello") == "greeting" and w.wa.texts().count(hello) == 2  # always answered
 

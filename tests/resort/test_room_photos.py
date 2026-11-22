@@ -100,3 +100,51 @@ def test_the_ai_photo_tool_follows_the_same_rule(checked):
     full(w, "family")
     say(w, "can I see the family suite?", GUEST, tool("send_photos", place="Alleppey", room_type="Family Suite"), reply("[no reply]"))
     assert sent_photos(w) == [] and w.wa.texts()[-1] == "Sorry, Family Suite is not free on your dates."
+
+
+
+def swipe(w, text, wamid):
+    from datetime import datetime
+    from app.whatsapp.parse import InboundMessage
+    w.bot.handle(InboundMessage(f"wamid.sw{len(w.wa.sent)}", GUEST, "text", datetime(2026, 11, 2, 4, 40), text=text,
+                                context_id=wamid))
+
+
+def photo_id(w, ref):
+    return next(m.wamid for m in w.repo.list_chat(GUEST, limit=200) if m.text == f"[photo] {ref}")
+
+
+def held_room(w):
+    st = w.repo.get_state(GUEST)
+    bk = st.get("bk") or {}
+    return st.get("room_pref") or (bk.get("chosen") or {}).get("room_type_id")
+
+
+@pytest.mark.parametrize("text", ["this one venam", "ithu mathi", "is this free?", "book this"])
+def test_a_swipe_reply_on_a_room_photo_picks_that_room(checked, text):
+    """Owner, 2026-11-22: no caption on each photo, but a swipe-reply to a photo is about the room in it."""
+    w = checked
+    say(w, "family suite photos")
+    assert set(w.refs["family"]) <= set(sent_photos(w))
+    w.wa.sent.clear()
+    swipe(w, text, photo_id(w, w.refs["family"][1]))
+    texts = w.wa.texts()
+    assert any("Family Suite" in x for x in texts), texts
+    assert held_room(w) == w.family.id
+
+
+def test_price_swiped_on_a_room_photo_is_that_rooms_price(checked):
+    w = checked
+    say(w, "family suite photos")
+    w.wa.sent.clear()
+    swipe(w, "price?", photo_id(w, w.refs["family"][0]))
+    assert any("Family Suite" in x and "total" in x for x in w.wa.texts()), w.wa.texts()
+
+
+def test_nice_view_swiped_on_a_photo_does_not_change_the_room(checked):
+    w = checked
+    say(w, "family suite photos")
+    w.llm.script.append(reply("Thank you sir!"))
+    swipe(w, "nice view", photo_id(w, w.refs["family"][0]))
+    assert held_room(w) != w.family.id
+    assert "a photo of Family Suite" in w.llm.calls[-1].messages[-1].content  # the AI knows which room
