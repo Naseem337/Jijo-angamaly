@@ -208,7 +208,8 @@ def test_room_numbers_never_told_unless_the_guest_named_one():
 
 
 @pytest.mark.parametrize("text", ["is there 2 rooms in kerala cottage", "is there 2 rooms in kerala cottage?",
-                                  "I want 2 rooms in the cottage"])
+                                  "I want 2 rooms in the cottage", "2 cottage rooms venam",
+                                  "randu cottage venam"])
 def test_is_there_2_rooms_in_the_cottage_gives_the_cottage_and_no_room_numbers(resort, text):
     """Live chat 2026-11-22: 'is there 2 rooms in kerala cottage' got 'Room numbers 103 and 104.' (not the guest's
     concern), and the code read '2 rooms' but kept the Standard room."""
@@ -217,9 +218,32 @@ def test_is_there_2_rooms_in_the_cottage_gives_the_cottage_and_no_room_numbers(r
         reply("Yes, 2 rooms available in Kerala Cottage."))
     texts = w.wa.texts()
     assert not any("103" in x or "104" in x for x in texts), texts
-    assert "Sure, 2 Bedroom Tiny Kerala Cottage is free for your dates." in texts
-    assert "For 3 persons: 2 room(s)." in texts
+    assert any("2 Bedroom Tiny Kerala Cottage" in x for x in texts), texts
+    assert sum(x in texts for x in ("For 3 persons: 2 room(s).", "3 perkku 2 room(s).")) == 1, texts
     w.llm.script.clear()
     say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"), reply("[no reply]"))
     holds = w.repo.list_bookings(phone=GUEST, status="hold")
     assert {w.repo.get_room_type(b.room_type_id).name for b in holds} == {"2 Bedroom Tiny Kerala Cottage"}
+
+
+def test_a_hi_in_the_middle_of_the_chat_gives_what_we_know_and_the_open_step(resort):
+    """Owner, 2026-11-22: a second 'hi' is not 'How may I assist you?' again: 'Hi' with the guest's details, never
+    silence."""
+    w = resort
+    say(w, "hi")
+    texts = w.wa.texts()
+    assert "Hi, How may I assist you?" not in texts
+    assert texts[0] == "Hi. Your enquiry: Pozhiyoram, Alleppey, 13 Jan 2027 to 17 Jan 2027, 3 person(s), 1 room(s).", texts
+    assert texts[-1] == "Please share your name and mobile number to proceed."
+    w.wa.sent.clear()
+    say(w, "hi")  # again: still answered
+    assert w.wa.texts() and w.wa.texts()[0].startswith("Hi. Your enquiry:")
+
+
+
+def test_room_counts_with_the_room_name_in_between():
+    from app.resort.chat import _rooms_in
+    assert _rooms_in("2 cottage rooms venam") == 2
+    assert _rooms_in("randu cottage venam") == 2
+    assert _rooms_in("3 deluxe rooms") == 3
+    assert _rooms_in("I want the 2 bedroom tiny kerala cottage") == 0  # a room name, not a count

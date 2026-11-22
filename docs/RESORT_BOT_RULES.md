@@ -17,8 +17,11 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 - Safety net: if nothing at all went out for a guest's message, the code sends the open step (never silence).
 
 ## 1. Greeting
-- Any greeting ("hi", "hello", "ഹായ്"), at the start or in the middle of a chat, gets exactly
-  "Hi, How may I assist you?".
+- The first greeting ("hi", "hello", "ഹായ്") of a conversation gets exactly "Hi, How may I assist you?".
+- A greeting in the middle of a chat (owner, 2026-11-22) never gets "How may I assist you?" again and is never left
+  silent: "Hi. Your enquiry: Pozhiyoram, Alleppey, 13 Jan 2027 to 17 Jan 2027, 3 person(s), 1 room(s)." (or "Hi. Your
+  booking at <resort>, <dates> is confirmed ✅.") and then the step still open (a short pointer if that step is just
+  above). Nothing known yet: "Hi. Kindly confirm the Location 📍 ...".
 - "restart" starts a fresh conversation (bookings and records stay).
 
 ## 2. Location
@@ -44,9 +47,10 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 ## 4. Rooms available
 - Complete details, in this order: "Yes, rooms are available for your dates." -> the rooms sentence -> the glimpse
   (`Property.intro`) -> general photos -> each room's photos -> "Please share your name and mobile number to proceed."
-- The rooms sentence always comes from the code after a room check:
-  "For 5 persons: 2 room(s) + 1 extra bed(s) (₹500 per extra bed per night)." or "For 4 persons: 2 room(s)."
-  or "For 5 persons, 3 rooms are needed. Or 5 persons can stay in 2 room(s) with extra beds (...)".
+- The rooms sentence always comes from the code after a room check: "For 4 persons: 2 room(s)." A group that needs
+  an odd room gets both choices: "For 5 persons, 3 rooms are needed. Or 5 persons can stay in 2 room(s) with extra
+  beds (...)". Only when the guest picks fewer rooms: "For 5 persons: 2 room(s) + 1 extra bed(s) (₹500 per extra bed
+  per night)."
 - A group bigger than every free room: "For your dates 6 room(s) are free, enough for up to 18 persons. Please tell
   me how many persons will come, or send other dates for all 60."
 - Not available: "Sorry, rooms are not available for your dates." (with the nearest free dates when there are any).
@@ -73,9 +77,12 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
   open link never blocks their change. Only a change to a PAID booking goes to the owner.
 - A count with a named room ("is there 2 rooms in kerala cottage", "I want 2 rooms in the cottage") is a pick of
   that room for that many rooms, checked in code (2026-11-22: the count was once read and the cottage ignored).
-- Room numbers are not the guest's concern (owner, 2026-11-22): "is there 2 rooms in X?" -> "Yes, 2 rooms
+- Room numbers are not the guest's concern in chat (owner, 2026-11-22): "is there 2 rooms in X?" -> "Yes, 2 rooms
   available.", never "Room numbers 103 and 104." The AI says a room number only when the guest named one or asked for
-  them; a code check rewrites, then drops, any other sentence with room numbers.
+  them; a code check rewrites, then drops, any other sentence with room numbers. Room numbers DO show on the photo
+  captions (§6) and on the confirmed booking (§9), by the owner's choice.
+- A count with the room name in between is read too: "2 cottage rooms venam", "randu cottage venam", "3 deluxe
+  rooms". "2 bedroom cottage" is a room name, not a count.
 - The AI is told the CURRENT ENQUIRY (resort, dates, persons, rooms, room type, link sent or not) on every message,
   and the room numbers of each room type (only to understand a guest who names one).
 
@@ -127,8 +134,8 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 - The greeting, the location question and the form keep the owner's exact English; the summary and confirmation are
   English. Voice notes of any length are transcribed and handled like text; the reply is text.
 
-## 12. Changes and cancellations of a booking
-- The bot cannot change or cancel a booking. A change goes to the owner (alerted). A cancellation: the bot states the
+## 12. Changes and cancellations of a PAID booking
+- (Changes before payment are made by the bot itself, see §5.) The bot cannot change or cancel a paid booking. A change goes to the owner (alerted). A cancellation: the bot states the
   policy charge and says the owner will confirm.
 
 ## 13. Memory and conversations

@@ -367,7 +367,10 @@ _KIDS = re.compile(r"\b(\d{1,2}|a|one|oru|ek|two|randu|rendu|do)\s*(?:small\s+)?
 
 
 _ROOMS_ASKED = re.compile(r"(?<!to )(?<!till )(?<!-)(?<!- )\b(\d{1,2}|one|two|three|four|five|six|oru|randu|rendu|moonu|moonnu|naalu|anju|"
-                          r"ek|do|teen|char|paanch)[ \t]*(?:rooms?|muri\w*|kamre|kamra|araigal)\b|"
+                          r"ek|do|teen|char|paanch)[ \t]*"
+                          # '2 cottage rooms venam', '2 deluxe rooms', 'randu cottage venam' (owner, 2026-11-22)
+                          r"(?:(?:cottage|tiny|kerala|deluxe|standard|basic|beach|view|family|ac|non-ac|double|"
+                          r"premium|super)[ \t]+){0,3}(?:rooms?|cottages?|muri\w*|kamre|kamra|araigal)\b|"
                           r"\b(?:number of |no of )?rooms?[ \t]*(?:[:=,-]|is)?[ \t]*(\d{1,2})\b(?![ \t]*(?:persons?|people|"
                           r"nights?|days?|pax)\b)", re.IGNORECASE)  # 'rooms 2' from a voice note (no ':')
 _ROOM_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "oru": 1, "randu": 2, "rendu": 2,
@@ -823,6 +826,10 @@ def display_phone(e164: str) -> str:
     return e164[3:] if e164.startswith("+91") and len(e164) == 13 else e164
 
 
+def _day(d: date) -> str:
+    return f"{d.day} {d.strftime('%b')} {d.year}"
+
+
 def _money(n: int) -> str:
     return f"₹{n:,}"
 
@@ -1133,6 +1140,48 @@ class ChatMixin:
         if prop is None or (named and named.id != prop.id):
             return None
         return prop
+
+    def _hello_back(self, phone: str, st: dict[str, Any]) -> None:
+        """A 'hi' in the middle of a chat (owner, 2026-11-22: 'say hi and fetch the customer details, never silence'):
+        'Hi. Your enquiry: Alleppey, 13 Jan to 17 Jan 2027, 3 persons, 2 room(s).' (or their confirmed booking), then
+        the booking step still open. Nothing known at all: the open step with 'Hi', else the owner's greeting."""
+        lang = st.get("lang", "en")
+        bk = st.get("bk") or {}
+        held = [] if bk.get("check_in") else self._open_hold(phone)
+        hello = ""
+        if bk.get("check_in") and bk.get("check_out") and bk.get("adults"):
+            prop = self.repo.get_property(bk.get("property_id") or "")
+            rooms = (bk.get("chosen") or {}).get("rooms") or bk.get("rooms")
+            stay = [self._place_label(prop) if prop else "",
+                    f"{_day(date.fromisoformat(bk['check_in']))} to {_day(date.fromisoformat(bk['check_out']))}",
+                    f"{bk['adults']} person(s)" + (f" + {bk['children']} child(ren)" if bk.get("children") else ""),
+                    f"{rooms} room(s)" if rooms else ""]
+            hello = t("hello_back", lang, stay=", ".join(x for x in stay if x))
+        elif held:
+            prop = self.repo.get_property(held[0].property_id)
+            stay = [self._place_label(prop) if prop else "",
+                    f"{_day(held[0].check_in)} to {_day(held[0].check_out)}",
+                    f"{sum(b.adults for b in held)} person(s)", f"{sum(b.rooms for b in held)} room(s)"]
+            hello = t("hello_back", lang, stay=", ".join(x for x in stay if x))
+        elif paid := [b for b in self.repo.list_bookings(phone=phone, limit=10)
+                      if b.status in ("paid", "checked_in") and b.check_out >= self._today()]:
+            prop = self.repo.get_property(paid[0].property_id)
+            hello = t("hello_booked", lang, place=self._place_label(prop) if prop else "the resort",
+                      dates=f"{_day(paid[0].check_in)} to {_day(paid[0].check_out)}")
+        step = self._open_step(phone, st)
+        if step and step == (self.repo.last_outbound_text(phone) or ""):  # just above: the short pointer to it
+            step = t("fill_form", lang) if step == t("form", lang) else t("contact_again", lang) \
+                if step == t("ask_contact", lang) else step
+        if step and step.startswith("Sure, "):  # 'Hi. Kindly confirm the Location', not 'Hi. Sure, ...'
+            step = step[6:7].upper() + step[7:]
+        if hello:
+            self._text(phone, hello, repeat_ok=True)
+            if step:
+                self._text(phone, step, repeat_ok=True)
+        elif step:
+            self._text(phone, f"Hi. {step}", repeat_ok=True)
+        else:
+            self._text(phone, t("greet", lang), repeat_ok=True)
 
     def _open_step(self, phone: str, st: dict[str, Any]) -> str | None:
         """The booking step still open (form, name and mobile...). The location question ONLY when no resort is picked

@@ -379,9 +379,10 @@ class BookingBot(IdProofMixin, ChatMixin):
         if GREETING.match(text) and self._chatting_now(phone):
             # a mid-chat 'hi' gets the owner's greeting (2026-11-18), never an AI guess (a paid guest was once told
             # "Payment complete aayal booking confirm aakum"). The conversation is remembered; nothing restarts.
-            # every new 'hi' gets an answer, even right after the last one (a silent bot looks broken, 2026-11-18)
-            self._text(phone, t("greet", st.get("lang", "en")), repeat_ok=True)
+            # every new 'hi' gets an answer, even right after the last one (a silent bot looks broken, 2026-11-18).
+            # Owner, 2026-11-22: not 'How may I assist you?' again: 'Hi' with what we already know, then the open step
             self._save(phone, st)
+            self._hello_back(phone, st)
             return "greeting"
         if CHANGE_ASK.search(text) and (live := [b for b in self.repo.list_bookings(phone=phone, limit=5)
                                                  if b.status in ("paid", "checked_in", "hold")]):

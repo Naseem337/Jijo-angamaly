@@ -36,6 +36,9 @@ S: dict[str, dict[str, str]] = {
     # ---- first message and payment
     # the client's own words (2026-11-17), the same for every language
     "greet": _t(*["Hi, How may I assist you?"] * 4),
+    # a 'hi' in the middle of a chat (owner, 2026-11-22): 'Hi' and what we already know, never 'How may I assist you?'
+    "hello_back": _t(*["Hi. Your enquiry: {stay}."] * 4),
+    "hello_booked": _t(*["Hi. Your booking at {place}, {dates} is confirmed ✅."] * 4),
     # the client's words (2026-11-17); {towns} comes from the properties in the dashboard
     "ask_location": _t(*["Sure, Kindly confirm the Location 📍\n{towns} ?"] * 4),
     # the client's booking form (2026-11-17), always this English template
@@ -184,6 +187,8 @@ S.update({
 
 # Manglish (Malayalam in English letters) for the fixed messages. Keys not listed here fall back to English.
 MN = {
+    "hello_back": "Hi. Ningalude enquiry: {stay}.",
+    "hello_booked": "Hi. {place}-il {dates} ningalude booking confirm aanu ✅.",
     "discount": "Nalla vaartha: owner ningalkku special price tharunnu. Puthiya total ₹{total}, ippol pay cheyyenda advance ₹{advance}.",
     "or": "allenkil",
     "pay": "Ee link vazhi advance pay cheyyuka:\n{url}",
@@ -249,6 +254,8 @@ for _key, _text in MN.items():
 # the location question and the form keep the owner's exact English wording for everyone; summaries and the booking
 # confirmation stay English. Keys not listed here fall back to English.
 TN = {
+    "hello_back": "Hi. Unga enquiry: {stay}.",
+    "hello_booked": "Hi. {place}-la {dates} unga booking confirm aayiduchu ✅.",
     "discount": "Nalla news: owner ungalukku special price tharaanga. Pudhu total ₹{total}, ippo pay panna vendiya advance ₹{advance}.",
     "or": "illa",
     "pay": "Indha link-la advance pay pannunga:\n{url}",
@@ -301,6 +308,8 @@ TN = {
     "fb_done": "Feedback-ku thanks!",
 }
 HN = {
+    "hello_back": "Hi. Aapki enquiry: {stay}.",
+    "hello_booked": "Hi. {place} mein {dates} aapki booking confirm hai ✅.",
     "discount": "Achhi khabar: owner aapko special price de rahe hain. Naya total ₹{total}, abhi pay karne wala advance ₹{advance}.",
     "or": "ya",
     "pay": "Is link se advance pay kijiye:\n{url}",

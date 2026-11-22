@@ -191,8 +191,8 @@ def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
     say(w, "need a room in Pozhiyoram", GUEST, reply("Sure. Which dates?"))
     form = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
     assert w.wa.texts()[-1] == form  # never the AI's own 'Which dates?' (client, 2026-11-18)
-    assert say(w, "hi") == "greeting"  # mid-chat: the owner's greeting, no AI call (2026-11-18)
-    assert w.wa.texts()[-2:] == [form, "Hi, How may I assist you?"]
+    assert say(w, "hi") == "greeting"  # mid-chat: 'Hi' and the open step, no AI call (owner, 2026-11-22)
+    assert w.wa.texts()[-2:] == [form, "Hi. Please share the details above."]
     say(w, "2 people", GUEST, reply("[no reply]"))
     # the chat is remembered: the resort is still known, so only the missing dates are asked (in code, 2026-11-19)
     assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :\nNumber of rooms:"
@@ -418,8 +418,10 @@ def test_a_mid_chat_hi_is_never_left_unanswered(world):
     w = world
     say(w, "Is there a beach view?", GUEST, reply("Yes sir, every room has a beach view."))
     assert say(w, "hi") == "greeting"
-    assert w.wa.texts()[-1] == "Hi, How may I assist you?"
-    assert say(w, "Hello") == "greeting" and w.wa.texts().count("Hi, How may I assist you?") == 2  # always answered
+    hello = "Hi. Kindly confirm the Location 📍
+Alleppey or Munnar ?"  # never 'How may I assist you?' again
+    assert w.wa.texts()[-1] == hello
+    assert say(w, "Hello") == "greeting" and w.wa.texts().count(hello) == 2  # always answered
 
 
 def test_no_message_is_ever_sent_twice_in_a_conversation(world):
