@@ -1230,15 +1230,61 @@ class ChatMixin:
         return self.repo.get_property(pid) if pid else None
 
     @staticmethod
-    def _code_facts_only(st: dict[str, Any], guest_text: str, reply: str) -> str:
+    def _says_stay_change(text: str) -> bool:
+        """Does this message give or change a stay detail (a date, a number, persons, rooms, a room pick)? Anything with
+        a digit, a date, persons or a change word counts; 'etra room und' / 'cottage il etra room und' do not."""
+        text = text or ""
+        return bool(re.search(r"\d", text) or parse_stay(text, date.today()) or _PERSONS_LOOSE.search(text)
+                    or re.search(r"\b(?:venam|venum|venda|vendi|mathi|koode|kootti|more|add|extra|only|instead|change|"
+                                 r"remove|dont|don't|need|want|book|another|other|different|switch|cancel|one|two|"
+                                 r"three|four|five|oru|randu|moonu|naalu|anchu)\b", text, re.IGNORECASE))
+
+    def _already_checked(self, ctx: _Turn) -> dict[str, Any] | None:
+        """The AI calls check_availability again although the stay is already checked and the guest's message changes
+        nothing ('etra room und', 'cottage il etra room und', live chat 2026-11-23): nothing is re-checked, nothing is
+        queued, the stay is not rewritten. The AI gets the room counts and answers the question itself (it once got
+        '10 persons: 5 room(s)' twice). None = a real check (new details, or nothing checked yet)."""
+        prev = ctx.st.get("bk") or {}
+        prop = self.repo.get_property(prev.get("property_id") or "")
+        if not (ctx.st.get("checked") and prev.get("check_in") and prev.get("check_out") and prop) \
+                or self._says_stay_change(ctx.text):
+            return None
+        return {"already_checked": True, "check_in": prev["check_in"], "check_out": prev["check_out"],
+                "room_types": self._room_count_facts(prop, prev),
+                "note": "The stay is already checked and nothing changed. Answer only what the guest asked, in one "
+                        "short line, from room_types (total_rooms = all rooms of that type, free_rooms = free on "
+                        "their dates). Do not say the rooms sentence or ask for name and mobile again."}
+
+    def _room_count_facts(self, prop: Property, bk: dict[str, Any]) -> list[dict[str, Any]]:
+        """Every room type with all its rooms and the rooms free on the checked dates (facts for the AI)."""
+        ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
+        now = self.clock.now()
+        return [{"room_type": rt.name, "total_rooms": rt.units,
+                 "free_rooms": self.repo.free_rooms(rt, ci, co, now, bk.get("own", ""))}
+                for rt in self.repo.list_room_types(prop.id)]
+
+    def _code_facts_only(self, st: dict[str, Any], guest_text: str, reply: str) -> str:
         """The AI's reply without what only the code may say (live chat 2026-11-20): its own room / extra-bed maths
         once rooms were checked (the code's rooms sentence goes instead when the guest asked about rooms), and 'let
-        me check, one moment' promises (the code answers at once, nothing comes later)."""
+        me check, one moment' promises (the code answers at once, nothing comes later). A sentence that gives a ROOM
+        TYPE's own count ('Yes, 2 rooms available in the cottage') is not maths: it stays (2026-11-23: it was replaced
+        by 'For 10 persons: 5 room(s)')."""
         parts = [x for x in re.split(r"(?<=[.?!])\s+|\n+", reply) if x.strip()]
         checked = bool(st.get("checked")) and bool((st.get("bk") or {}).get("check_in"))
         asked_charge = bool(CHARGE_TALK.search(guest_text))
+        counts: set[int] = set()
+        if checked and (prop := self.repo.get_property((st.get("bk") or {}).get("property_id") or "")):
+            for row in self._room_count_facts(prop, st["bk"]):
+                counts |= {row["total_rooms"], row["free_rooms"]}
+
+        def own_count(x: str) -> bool:
+            nums = re.findall(r"\b(\d+)\s*(?:rooms?|room\(s\))", x, re.IGNORECASE)
+            return bool(nums) and all(int(n) in counts for n in nums) and not re.search(
+                r"\b(?:persons?|people|guests?|pax|beds?|needed?|venam|chahiye)\b", x, re.IGNORECASE)
+
         keep = [x for x in parts if not STALLING.search(x) and not INTERNAL_RULE.search(x)
-                and not (checked and ROOMS_MATH.search(x)) and (asked_charge or not CHARGE_TALK.search(x))]
+                and not (checked and ROOMS_MATH.search(x) and not own_count(x))
+                and (asked_charge or not CHARGE_TALK.search(x))]
         out = " ".join(keep).strip()
         if checked and len(keep) < len(parts) and (line := st.get("rooms_line")) \
                 and re.search(r"\brooms?\b|\bbeds?\b|muri|kamr", guest_text, re.IGNORECASE) and line not in out:
@@ -3027,6 +3073,8 @@ class ChatMixin:
         handler = handlers.get(call.name)
         if handler is None or call.arguments_error:
             return json.dumps({"error": call.arguments_error or f"unknown tool {call.name}"}), True
+        if call.name == "check_availability" and (facts := self._already_checked(ctx)) is not None:
+            return json.dumps(facts, ensure_ascii=False), False
         try:
             result = handler(ctx, call.arguments)
         except Exception as exc:

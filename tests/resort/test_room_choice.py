@@ -305,3 +305,17 @@ def test_ok_to_the_bots_own_question_tells_the_ai_what_it_answers(resort):
     say(w, "ok", GUEST, tool("change_enquiry", room_type="2 Bedroom Tiny Kerala Cottage"), reply("[no reply]"))
     assert "YES/OK TO YOUR OWN LAST MESSAGE" in w.llm.calls[-1].system
     assert any("Tiny Kerala Cottage is free" in x for x in w.wa.texts()), w.wa.texts()
+
+
+@pytest.mark.parametrize("text", ["Etra room und", "Cottage il etra room und"])
+@pytest.mark.parametrize("calls_tool", [True, False])
+def test_how_many_rooms_of_a_type_is_answered_by_the_ai_not_replaced_by_the_groups_rooms(resort, text, calls_tool):
+    """Live chat 2026-11-23: 'Etra room und' / 'Cottage il etra room und' got 'For 10 persons: 5 room(s)' twice. The
+    AI re-ran the room check (which queued the rooms sentence + name ask) and a filter replaced its own '2 rooms'.
+    Now the stay is not re-checked when the message changes nothing, and a room type's own count stays."""
+    w = resort
+    script = [tool("check_availability", place="Alleppey", check_in="2027-01-13", check_out="2027-01-17", adults=3,
+                   rooms=1)] if calls_tool else []
+    say(w, text, GUEST, *script, reply("Cottage il 2 room und."))
+    assert w.wa.texts() == ["Cottage il 2 room und."], w.wa.texts()
+    assert w.repo.get_state(GUEST)["bk"]["adults"] == 3  # the stay was not rewritten
