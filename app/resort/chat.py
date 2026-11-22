@@ -659,15 +659,22 @@ WISH_WORDS = WISH_CORE | {"a", "an", "any", "is", "are", "there", "i", "we", "ne
                           "karni", "kar", "do", "make", "it", "ready"}
 # the guest PICKS a room ('I only need cottage', 'ok book cottage', 'can I get room 103', 'I want other room'):
 # switched in code with the dates already known, never the form again (owner, 2026-11-22)
+# 'is there 2 rooms in kerala cottage' / '2 cottage rooms undo': a count with a named room is a pick of that room
+# (live chat 2026-11-22: the count was read, the cottage was not, and Standard was booked)
+_ROOMS_OF = r"\b(?:\d+|one|two|three|four|five|oru|randu|moonu|naalu|anju)\s*(?:rooms?|cottages?)\b"
 CHOICE_ASK = re.compile(r"\b(?:want|wanted|need|book|booking|take|prefer|like|liked|only|just|choose|select|go with|"
                         r"go for|give me|instead|change|switch|shift|that one|this one|venam|venum|veno|mathi|madhi|"
                         r"mathy|matram|mathram|maathram|edukk\w*|kittumo|chahiye|lena|vendum|podhum|ok|okay|fine|"
-                        r"confirm)\b|\bcan (?:i|we) (?:get|have|take|book)\b", re.IGNORECASE)
+                        r"confirm)\b|\bcan (?:i|we) (?:get|have|take|book)\b|" + _ROOMS_OF, re.IGNORECASE)
 STRONG_CHOICE = re.compile(r"\b(?:book|booking|take|prefer|only|instead|mathi|madhi|matram|mathram|choose|go with|"
                            r"go for|switch|change|shift)\b|\bneed (?:a |the |that )?(?:rooms?|cottage)\b|"
-                           r"\bcan (?:i|we) (?:get|have|take|book)\b", re.IGNORECASE)
+                           r"\bcan (?:i|we) (?:get|have|take|book)\b|" + _ROOMS_OF, re.IGNORECASE)
 NOT_WANT = re.compile(r"\b(?:don'?t|dont|do not|no need|not|remove|without|except|venda|vendaa|vendathilla|vendam|"
                       r"nahi|nahin|illathe)\b", re.IGNORECASE)
+# room numbers are not the guest's concern (owner, 2026-11-22): told only when the guest named one or asked for them
+ROOM_NUMBERS_SAID = re.compile(r"\broom\s*(?:numbers?|nos?)\b|\brooms?\s*#?\s*\d{3}\b|\b\d{3}\s*(?:,|/|&|and)\s*\d{3}\b",
+                               re.IGNORECASE)
+ROOM_NUMBER_ASKED = re.compile(r"\b\d{3}\b|\broom\s*(?:numbers?|nos?)\b", re.IGNORECASE)
 ROOM_NUMBER = re.compile(r"\b(?:room|rm|no|number)\.?\s*#?\s*(\d{2,4})\b|#\s*(\d{2,4})\b", re.IGNORECASE)
 # words that do not tell room types apart ('a room in Kerala' is not the Tiny Kerala Cottage)
 CHOICE_FILLER = {"room", "rooms", "view", "the", "with", "and", "type", "kerala", "india", "floor", "first", "ground",
@@ -981,7 +988,7 @@ class ChatMixin:
             line = (f"  ROOM TYPE '{rt.name}': {rt.units} room(s), max {rt.max_occupancy} guests per room "
                     f"({rt.max_adults} adults, {rt.max_children} children)")
             if rt.room_list:
-                line += f", room numbers {', '.join(rt.room_list)}"
+                line += f", room numbers {', '.join(rt.room_list)} (only to understand a guest who names one; never tell them)"
             extras = " ".join(x for x in (rt.description, rt.amenities) if x and "PLACEHOLDER" not in x)
             lines.append(line + "." + (f" {extras}" if extras else ""))
         return lines
@@ -1933,7 +1940,8 @@ class ChatMixin:
             "Never bro, dear, da, chetta, chechi, machane or their name.\n"
             "- Rooms: the room offered first is picked automatically. The guest may choose ANY room type or room "
             "number at any time: when they ask which rooms there are, name the room types from the FACTS (prices "
-            "only if asked). Never say a room cannot be chosen, and never send a room change to the owner.\n"
+            "only if asked). Never say a room cannot be chosen, and never send a room change to the owner. Never tell "
+            "room numbers: 'is there 2 rooms in X?' -> 'Yes, 2 rooms available.' (a number only if the guest named it).\n"
             "- Ask only ONE thing at a time, simply. No emoji piles (one is fine).\n"
             "- Do not paste the property description. Do not mention offers, discounts or 'special' deals. Just "
             "state the price.\n"
@@ -2210,6 +2218,9 @@ class ChatMixin:
                 and latin_style(talk) == "en"):
             return ("Rewrite that reply in Manglish (Malayalam in English letters), the guest's language. Do not "
                     "answer in English; words like room, booking and payment are fine.")
+        if ROOM_NUMBERS_SAID.search(reply) and not ROOM_NUMBER_ASKED.search(guest_text):
+            return ("Rewrite that reply without any room numbers: room numbers are not the guest's concern. Say only "
+                    "how many rooms are available, e.g. 'Yes, 2 rooms available.'")
         return ""  # no word limits of any kind on answers (owner, 2026-11-20)
 
     def _fix_reply(self, llm, system: str, messages: list[ChatMessage], reply: str, guest_text: str,
@@ -2227,7 +2238,17 @@ class ChatMixin:
         swap = _STRAY_ML.get(st.get("style", ""))
         if swap and not MANGLISH_WORDS.search(guest_text):  # the rewrite kept a Malayalam word: put the guest's own
             out = MANGLISH_WORDS.sub(lambda m: swap.get(m.group(0).lower(), m.group(0)), out)
-        return self._latin_only(out, fixed, st)
+        return self._latin_only(self._without_room_numbers(out, guest_text), fixed, st)
+
+    @staticmethod
+    def _without_room_numbers(reply: str, guest_text: str) -> str:
+        """Room numbers are never told unless the guest named one (owner, 2026-11-22: 'is there 2 rooms in kerala
+        cottage' got 'Room numbers 103 and 104.'; just 'Yes, 2 rooms available.'). The sentences that still say them
+        after the rewrite are dropped; if nothing is left the reply stays as it is."""
+        if not ROOM_NUMBERS_SAID.search(reply) or ROOM_NUMBER_ASKED.search(guest_text):
+            return reply
+        keep = [x for x in re.split(r"(?<=[.?!])\s+|\n+", reply) if x.strip() and not ROOM_NUMBERS_SAID.search(x)]
+        return " ".join(keep).strip() or reply
 
     @staticmethod
     def _latin_only(reply: str, other: str, st: dict[str, Any]) -> str:

@@ -1,6 +1,6 @@
 # Resort bot: the owner's current rules
 
-Only the rules in force today (2026-11-21). Older, replaced rules were deleted; git history keeps them.
+Only the rules in force today (2026-11-22). Older, replaced rules were deleted; git history keeps them.
 The rules live in our own prompt and code (`app/resort/chat.py`, `flow.py`, `i18n.py`), not in any one model, so
 changing `LLM_CHAIN` keeps them. After a model change run `.venv\Scripts\python.exe scripts\live_eval_resort.py`.
 Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort_eval.py` (mock scenarios).
@@ -71,8 +71,13 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
   persons, dates), uses the stay the bot already knows (memory, like a human): never the form again, never sent to
   the owner. After the link, a new summary and a new link go at once and the old link is closed. The guest's own
   open link never blocks their change. Only a change to a PAID booking goes to the owner.
+- A count with a named room ("is there 2 rooms in kerala cottage", "I want 2 rooms in the cottage") is a pick of
+  that room for that many rooms, checked in code (2026-11-22: the count was once read and the cottage ignored).
+- Room numbers are not the guest's concern (owner, 2026-11-22): "is there 2 rooms in X?" -> "Yes, 2 rooms
+  available.", never "Room numbers 103 and 104." The AI says a room number only when the guest named one or asked for
+  them; a code check rewrites, then drops, any other sentence with room numbers.
 - The AI is told the CURRENT ENQUIRY (resort, dates, persons, rooms, room type, link sent or not) on every message,
-  and the room numbers of each room type.
+  and the room numbers of each room type (only to understand a guest who names one).
 
 ## 6. Photos
 - No photo limit. No photo is sent twice in a conversation.

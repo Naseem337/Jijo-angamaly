@@ -191,3 +191,35 @@ def test_the_prompt_lets_guests_choose_and_remembers_the_enquiry(resort):
     system = w.llm.calls[-1].system
     assert "may choose ANY room type" in system and "room numbers 103, 104" in system
     assert "CURRENT ENQUIRY" in system and "check-in 2027-01-13" in system and "Payment link: SENT" in system
+
+
+def test_room_numbers_never_told_unless_the_guest_named_one():
+    """Owner, 2026-11-22: 'is there 2 rooms in kerala cottage' -> 'Yes, 2 rooms available.', not 'Room numbers 103 and 104.'"""
+    from app.resort.chat import ChatMixin
+    ask = "is there 2 rooms in kerala cottage"
+    said = "Yes, 2 rooms available in Kerala Cottage. Room numbers 103 and 104."
+    assert ChatMixin._reply_problem(said, ask, {}).startswith("Rewrite that reply without any room numbers")
+    assert ChatMixin._without_room_numbers(said, ask) == "Yes, 2 rooms available in Kerala Cottage."
+    assert ChatMixin._without_room_numbers("Rooms 103/104 are free.", ask) == "Rooms 103/104 are free."  # nothing else left
+    assert ChatMixin._without_room_numbers("Yes, room 103 is free.", "is room 103 free?") == "Yes, room 103 is free."
+    assert ChatMixin._without_room_numbers("Your rooms are 103 and 104.", "what is my room number?") == "Your rooms are 103 and 104."
+    assert ChatMixin._reply_problem("Yes, 2 rooms available. ₹3,500 per night.", ask, {}) == ""
+
+
+
+@pytest.mark.parametrize("text", ["is there 2 rooms in kerala cottage", "is there 2 rooms in kerala cottage?",
+                                  "I want 2 rooms in the cottage"])
+def test_is_there_2_rooms_in_the_cottage_gives_the_cottage_and_no_room_numbers(resort, text):
+    """Live chat 2026-11-22: 'is there 2 rooms in kerala cottage' got 'Room numbers 103 and 104.' (not the guest's
+    concern), and the code read '2 rooms' but kept the Standard room."""
+    w = resort
+    say(w, text, GUEST, reply("Yes, 2 rooms available in Kerala Cottage. Room numbers 103 and 104."),
+        reply("Yes, 2 rooms available in Kerala Cottage."))
+    texts = w.wa.texts()
+    assert not any("103" in x or "104" in x for x in texts), texts
+    assert "Sure, 2 Bedroom Tiny Kerala Cottage is free for your dates." in texts
+    assert "For 3 persons: 2 room(s)." in texts
+    w.llm.script.clear()
+    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"), reply("[no reply]"))
+    holds = w.repo.list_bookings(phone=GUEST, status="hold")
+    assert {w.repo.get_room_type(b.room_type_id).name for b in holds} == {"2 Bedroom Tiny Kerala Cottage"}
