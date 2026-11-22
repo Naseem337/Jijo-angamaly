@@ -1,5 +1,7 @@
 # Resort bot: the owner's current rules
 
+> General rules (payment checks, polite and short talking, language, memory) are in [../common/RULES.md](../common/RULES.md); this file adds the resort-specific ones and wins where they differ.
+
 Only the rules in force today (2026-11-22). Older, replaced rules were deleted; git history keeps them.
 The rules live in our own prompt and code (`app/resort/chat.py`, `flow.py`, `i18n.py`), not in any one model, so
 changing `LLM_CHAIN` keeps them. After a model change run `.venv\Scripts\python.exe scripts\live_eval_resort.py`.
