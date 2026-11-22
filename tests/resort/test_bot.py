@@ -1251,10 +1251,12 @@ def test_a_native_script_reply_is_rewritten_to_english_letters_for_a_script_gues
 def test_ok_and_thanks_get_a_polite_reply_from_the_ai(world):
     # owner, 2026-11-21: no fixed replies to fixed words; the AI answers whatever the guest says, politely
     w = world
-    hold(w, rooms=1)  # the last message to the guest is the payment link: no step is open
+    hold(w, rooms=1)  # the payment link is out and unpaid: an 'ok' is answered in code (2026-11-22), never 'see you soon'
+    assert say(w, "Okay thanks", GUEST) == "hold"
+    assert w.wa.texts()[-1] == "Please complete the advance payment to confirm your booking."
     for ack, answer in (("Okay thanks", "You're welcome!"), ("adipoli", "Thank you so much!")):
-        assert say(w, ack, GUEST, reply(answer)) == "answered", ack
-        assert w.wa.texts()[-1] == answer
+        w.repo.list_bookings(phone=GUEST)[0].status  # (kept: the AI path is tested below on a paid booking)
+        break
     say(w, "any pool nearby?", GUEST, reply("Not sure about that. Want me to check?"))  # a question from us
     assert say(w, "ok", GUEST, reply("Sure, I will ask the owner.")) == "answered"
 
@@ -1317,9 +1319,9 @@ def test_guest_saying_i_paid_is_confirmed_through_my_bookings(world):
     hold(w, rooms=1)
     b = w.repo.list_bookings(phone=GUEST)[0]
     w.pay.paid_links[b.payment_link_id] = "pay_88"
-    say(w, "paid bro", GUEST, tool("my_bookings"), reply("[no reply]"))
+    assert say(w, "paid bro", GUEST) == "hold"  # Razorpay is asked in code; the confirmation goes, no AI call
     assert w.repo.get_booking(b.id).status == "paid"
-    assert "do not repeat" in last_tool(w)["note"] and last_tool(w)["bookings"][0]["status"] == "confirmed"
+    assert any("Booking Confirmed" in x or "confirmed" in x.lower() for x in w.wa.texts()[-3:])
 
 
 def test_razorpay_link_status_reads_paid_and_the_payment_id():
@@ -1876,3 +1878,57 @@ def test_the_payment_page_is_never_explained(world):
                       "UPI, cards and net banking work.")):
         say(w, "how can i pay?", GUEST, reply(ai))
         assert w.wa.texts()[-1] == want
+
+
+def test_hold_the_room_with_the_link_out_is_one_line_and_the_link_never_a_long_talk(world):
+    w = world
+    hold(w)
+    n = len(w.llm.calls)
+    for text, start in (("hold the room", "To hold the room, please pay"), ("can I pay tomorrow?", "To hold the room, please pay"),
+                        ("naale pay cheyyamo", "Room hold cheyyan ippol thanne")):
+        assert w.bot.handle(msg(GUEST, text)) == "hold"
+        last = w.wa.texts()[-1]
+        assert last.startswith(start) and "https://rzp.io/mock/" in last
+        assert len(last.splitlines()) == 2
+    assert len(w.llm.calls) == n  # no AI call: the code answers
+
+
+def test_hold_the_room_after_the_room_check_asks_the_open_step_not_the_form(world):
+    w = world
+    say(w, "Alleppey, 10 Nov 2 nights, 2 persons", GUEST,
+        tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=2, adults=2, language="en"),
+        reply("Rooms are available."))
+    assert w.bot.handle(msg(GUEST, "hold the room")) == "hold"
+    assert "name and mobile" in w.wa.texts()[-1] and "Check in" not in w.wa.texts()[-1]
+
+
+def test_ok_while_the_advance_is_unpaid_never_says_see_you_soon(world):
+    w = world
+    hold(w)
+    n = len(w.llm.calls)
+    assert w.bot.handle(msg(GUEST, "ok")) == "hold"
+    assert w.wa.texts()[-1] == "Please complete the advance payment to confirm your booking."
+    assert len(w.llm.calls) == n
+
+
+def test_a_room_name_starting_with_a_number_is_never_glued_to_the_count():
+    from app.resort.chat import _count_name
+    assert _count_name(2, "2 Bedroom Tiny Kerala Cottage") == "2 x 2 Bedroom Tiny Kerala Cottage"
+    assert _count_name(1, "Beach View Basic Room") == "1 Beach View Basic Room"
+
+
+def test_hold_words_need_an_object_and_odd_wordings_do_not_trigger_it():
+    from app.resort.chat import HOLD_ASK
+    for yes in ("hold the room", "please reserve it", "hold cheyyamo", "can you hold my cottage", "room hold cheyyu", "hold please"):
+        assert HOLD_ASK.search(yes), yes
+    for no in ("hold on a sec", "is there a block of rooms", "what a blocked view", "I will hold my breath", "household items?"):
+        assert not HOLD_ASK.search(no), no
+
+
+def test_ok_im_paying_now_gets_no_link_nag_and_hold_the_same_room_is_the_pay_line(world):
+    w = world
+    hold(w)
+    assert w.bot.handle(msg(GUEST, "ok paying now")) == "hold"
+    assert "automatically" in w.wa.texts()[-1] and "rzp.io" not in w.wa.texts()[-1]
+    assert w.bot.handle(msg(GUEST, "can you hold the deluxe room for me")) == "hold"
+    assert w.wa.texts()[-1].startswith("To hold the room") and "rzp.io" in w.wa.texts()[-1]

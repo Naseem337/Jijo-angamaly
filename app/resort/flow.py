@@ -23,7 +23,7 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import _more_rooms_in, BOOKING_WISH, CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, ROOMS_OFFER_ASK, YES_REPLY, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
+from app.resort.chat import _more_rooms_in, PAY_LATER, BOOKING_WISH, CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, ROOMS_OFFER_ASK, YES_REPLY, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
@@ -74,6 +74,10 @@ def profile_name(raw: str | None) -> str:
     if sum(ch.isalpha() for ch in name) < 2 or any(x in name.lower() for x in ("http", "www.", "@")):
         return ""
     return name
+
+PAYING_NOW = re.compile(r"\b(?:paying|paid|pay(?:ing)? now|pay cheythu|payment (?:done|made))\b|"
+                        r"അടച്ചു|അടയ്ക്കാം", re.IGNORECASE)
+
 
 class BookingBot(IdProofMixin, ChatMixin):
     def __init__(self, config: ResortConfig, repo: ResortRepo, whatsapp: WhatsAppClient, payments: Payments,
@@ -287,6 +291,30 @@ class BookingBot(IdProofMixin, ChatMixin):
     def _today(self) -> date:
         return ist_today(self.clock)
 
+    def _unpaid_ack(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """'ok' / 'thanks' / 'ok paying now' while the advance is unpaid (live chat 2026-11-22: 'see you soon' before
+        any payment). Short nudge, or the link when it is not the message just above; 'paying now' only waits.
+        None when no payment is waiting or the message is something else."""
+        if "?" in text:
+            return None
+        paying = bool(PAYING_NOW.search(text)) and len(text.split()) <= 6 and not PAY_LATER.search(text)
+        if not (is_ack(text) or paying):
+            return None
+        now = self.clock.now()
+        held = next((b for b in self.repo.list_bookings(phone=phone, limit=3) if b.status == "hold"
+                     and b.hold_expires_at and b.hold_expires_at > now and b.payment_link_url), None)
+        if held is None:
+            return None
+        lang = st.get("lang", "en")
+        if paying:  # check Razorpay, never nag with the link
+            if not self.check_payments():
+                self._text(phone, t("pay_wait", lang), repeat_ok=True)
+            return "hold"
+        just_sent = held.payment_link_url in (self.repo.last_outbound_text(phone) or "")
+        self._text(phone, t("pay_nudge", lang) if just_sent else t("hold_pay", lang, url=held.payment_link_url),
+                   repeat_ok=True)
+        return "hold"
+
     def _dispatch(self, phone: str, st: dict[str, Any], text: str, rid: str | None, source: str,
                   guest_name: str, in_id: int = 0) -> str:
         typed = rid is None
@@ -353,6 +381,8 @@ class BookingBot(IdProofMixin, ChatMixin):
             if (m := ROOMS_OFFER_ASK.search(last_out)) and (st.get("bk") or {}).get("check_in"):
                 st["suggest_rooms"] = int(m.group(1))  # 'Shall I book 3 rooms?' -> 'Yes': checked in code, 3 rooms
             return self._converse(phone, st, text, in_id)
+        if outcome := self._unpaid_ack(phone, st, text):
+            return outcome
         if is_ack(text) and "?" not in text:  # "ok" mid-chat ("?" is a question, not an ok) (owner, 2026-11-18): carry on to the step still open, else stay quiet
             # 'ok', 'thanks a lot', 'adipoli', 'ok will see': the AI replies politely in its own words, like an agent
             # (owner, 2026-11-21: no fixed replies to fixed words); then the code adds the booking step still open
@@ -376,6 +406,8 @@ class BookingBot(IdProofMixin, ChatMixin):
                 return self._final_ok(phone, st, in_id)
         if outcome := self._room_choice_now(phone, st, text, in_id):
             return outcome  # 'I only need cottage' / 'room 103 venam': that room, with the dates already known
+        if outcome := self._hold_now(phone, st, text, in_id):
+            return outcome  # 'hold the room' / 'pay tomorrow': pay the advance now, one line and the link
         if outcome := self._price_now(phone, st, text):
             return outcome  # the price of the checked stay, from the code: the dates are never asked again
         # 'one more room' / '1 room koode' ADDS a room (checked in code); it is not a request for other room photos

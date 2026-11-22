@@ -266,7 +266,7 @@ def test_standard_full_a_group_needing_4_rooms_gets_cottage_and_basic(live):
     assert "BOT: Yes, rooms are available for your dates." in transcript(w)
     chat(w, "Asha 9847012345")
     summary = next(x for x in w.wa.texts(PHONE) if x.startswith("Following are the glimpse of your enquiry"))
-    assert "4 Rooms" in summary and "*2 2 Bedroom Tiny Kerala Cottage + 2 Beach View Basic Room*" in summary
+    assert "4 Rooms" in summary and "*2 x 2 Bedroom Tiny Kerala Cottage + 2 Beach View Basic Room*" in summary
     parts = w.repo.list_bookings(phone=PHONE)
     assert w.bot.mark_paid(booking_id=parts[0].id) == "paid"
     numbers = sorted(n for b in w.repo.list_bookings(phone=PHONE) for n in b.room_numbers.split(", "))

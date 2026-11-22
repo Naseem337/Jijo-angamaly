@@ -155,7 +155,7 @@ def test_a_room_choice_question_is_answered_in_code_only(resort):
     ({"other_room": True}, "2 Bedroom Tiny Kerala Cottage", "1 Room", "4 Nights"),
     ({"add_rooms": 1}, "Beach View Standard Rooms at First Floor", "2 Rooms", "4 Nights"),
     # 2 per room (owner's rule): 5 persons = 3 rooms; only 2 Standard rooms exist, so the cottage joins
-    ({"adults": 5}, "2 Beach View Standard Rooms at First Floor + 1 2 Bedroom Tiny Kerala Cottage", "3 Rooms",
+    ({"adults": 5}, "2 Beach View Standard Rooms at First Floor + 1 x 2 Bedroom Tiny Kerala Cottage", "3 Rooms",
      "4 Nights"),
     ({"check_in": "2027-01-20", "check_out": "2027-01-22"}, "Beach View Standard Rooms at First Floor", "1 Room",
      "2 Nights"),
@@ -187,7 +187,7 @@ def test_the_prompt_lets_guests_choose_and_remembers_the_enquiry(resort):
     w = resort
     say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
         reply("[no reply]"))
-    say(w, "hmm", GUEST, reply("[no reply]"))
+    say(w, "what is the check-in time?", GUEST, reply("From 12 PM."))
     system = w.llm.calls[-1].system
     assert "may choose ANY room type" in system and "room numbers 103, 104" in system
     assert "CURRENT ENQUIRY" in system and "check-in 2027-01-13" in system and "Payment link: SENT" in system

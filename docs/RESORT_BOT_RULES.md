@@ -117,6 +117,17 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 - Name + mobile ("same number" = the WhatsApp number) -> the enquiry summary ("Following are the glimpse of your
   enquiry," ... "Pay - X") -> "Please pay the advance using this link:\n<url>".
 - Before payment the bot never says booked or confirmed. A payment screenshot never confirms; only Razorpay does.
+- HOLD (owner, 2026-11-23): a room is held only by paying the advance NOW. "hold the room", "reserve", "can I pay
+  tomorrow / later" with the link out -> only "To hold the room, please pay the advance now using this link: <url>"
+  (code, no AI, never an explanation of the hold or of the link expiring, never "paying tomorrow is fine"). Rooms
+  checked but no link yet -> the open step (name and mobile). A hold request needs "hold" / "reserve" WITH an object
+  ("hold the room", "reserve it", "hold cheyyamo", a lone "hold please"); "hold on", "block", "balance", "pay at the
+  resort", "how long" are not hold requests. "Hold the cottage" with the link on another room = a room choice (new
+  link); with the same room = the pay-now line.
+- "ok" / "thanks" while the advance is unpaid (link out) -> "Please complete the advance payment to confirm your
+  booking." (the link again if it is not the message just above). Never "see you soon" before payment.
+  "ok paying now" / "paid" -> Razorpay is checked; if not paid yet only "your booking is confirmed automatically as
+  soon as the payment goes through" (no link nag). "will pay tomorrow" is NOT this: it gets the pay-now line.
 - If the payment link can't be made: "We could not create the payment link just now. Our team will contact you
   shortly." Staff are alerted and the bot keeps answering.
 
@@ -128,15 +139,16 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 ## 10. How the bot talks
 - Every message gets an answer. Casual messages ("ok", "thanks a lot", "adipoli", "ok will see") get a polite reply
   in the AI's own words, then the booking step still open (for example the name and mobile ask). Any spelling of ok
-  counts ("Oky", "okk", "oki").
+  counts ("Oky", "okk", "oki"). Exception: an unpaid payment link (§8).
 - Never the same message twice in a conversation. Allowed again: the code's rooms sentence after a change, the name
   ask after new photos, "rooms available" for new dates, a payment link the guest asks for, an answer asked a day later.
-- No word limits on answers: simple, complete answers. One thing asked at a time.
+- Short answers (owner, 2026-11-23): ONE short line, two at most; answer only what was asked, no explanations,
+  reasons or policies nobody asked for. One thing asked at a time.
 - "sir" / "madam" only once, at the start of the chat; never bro, dear, chetta, chechi or the guest's name.
 - Places to see, how to reach and the weather are answered from knowledge; "the owner will tell" only for the resort's
   own facts that are not in the dashboard (pets, alcohol, couples ... can be added in the dashboard).
 - A guest asking for the owner: the owner gets a summary; the bot keeps answering.
-- Guest images get no reply and are not read by the AI.
+- Guest images: the AI looks at them (payment screenshot rules are in its prompt); this line used to say the opposite.
 
 ## 11. Languages
 - Every text is in English letters. The guest's latest message decides the reply language: English -> English;

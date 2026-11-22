@@ -582,6 +582,20 @@ LOG_LINE = re.compile(r"\[(?:invoice|photos? sent|photo|image|template|restart|n
                       r"(?:\s*\S+\.(?:pdf|jpe?g|png|webp))?", re.IGNORECASE)
 PAYMENT_ASK = re.compile(r"\b(?:pay\w*|paid|link|advance|refund|razorpay|upi|gpay|transaction|amount|balance)\b",
                          re.IGNORECASE)
+# 'hold the room' / 'reserve cheyyu' and 'can I pay tomorrow': a room is held only by paying the advance NOW (owner,
+# 2026-11-22). Answered in code with the link, never with a long talk about the hold or the link expiring.
+HOLD_ASK = re.compile(
+    r"\b(?:hold|reserve)\b(?:\s+(?:the|my|a|this|that|our|one|these))?(?:\s+\w+){0,2}?\s+"
+    r"(?:rooms?|it|this|that|them|booking|resort|cottage)\b"           # 'hold the room', 'reserve it', 'hold my cottage'
+    r"|\b(?:rooms?|it|this|that)\s+(?:hold|reserve)\b"            # 'room hold cheyyu'
+    r"|\b(?:hold|reserve)\s+(?:cheyy\w*|cheyth\w*|venam|pannu\w*|kar\w*)"   # 'hold cheyyamo'
+    r"|^\W*(?:please\s+|pls\s+)?(?:hold|reserve)\W*(?:please|pls)?\W*$"  # a lone 'hold' / 'reserve please'
+    r"|ഹോൾഡ്", re.IGNORECASE)
+HOLD_INFO = re.compile(r"\b(?:how long|how many (?:hours|minutes|days)|ethra|until when|till when|policy|"
+                       r"cancel\w*|refund\w*)\b", re.IGNORECASE)
+PAY_LATER = re.compile(r"\b(?:pay\w*|advance)\b[^.?!]{0,30}\b(?:later|tomorrow|tmrw|naale|nale|pinne|evening|morning)\b"
+                       r"|\b(?:later|tomorrow|tmrw|naale|nale|pinne)\b[^.?!]{0,30}\b(?:pay\w*|advance)\b",
+                       re.IGNORECASE)
 STALE_PAY = re.compile(r"\b(?:payment|pay|paid|link|advance)\b|confirm aak", re.IGNORECASE)
 FORM_LABELS = re.compile(r"check[\s-]?in\s*:|check[\s-]?out\s*:|(?:number of )?persons\s*:|(?:number of )?rooms\s*:",
                          re.IGNORECASE)
@@ -832,6 +846,12 @@ def display_phone(e164: str) -> str:
 
 def _day(d: date) -> str:
     return f"{d.day} {d.strftime('%b')} {d.year}"
+
+
+def _count_name(n: int, name: str) -> str:
+    """'2 Beach View Standard Room'; a room name that starts with a number gets a 'x' ('2 x 2 Bedroom Tiny Kerala
+    Cottage', not the confusing '2 2 Bedroom ...', owner 2026-11-23)."""
+    return f"{n} x {name}" if name[:1].isdigit() else f"{n} {name}"
 
 
 def _money(n: int) -> str:
@@ -1270,6 +1290,39 @@ class ChatMixin:
             self._text(phone, step)  # back to the booking (the name ask), never twice in a row
         self._save(phone, st)
         return "price"
+
+    def _hold_now(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0) -> str | None:
+        """'Hold the room' / 'can I pay tomorrow' (owner, 2026-11-22): a room is held only by paying the advance now.
+        Link out: one line and the link. Rooms checked: the open step (name and mobile). Details given but not
+        checked yet: they are checked now (live chat: a voice 'hold the room' got 'sorry for the confusion' and the
+        whole form again). None when the message is not about holding or paying later."""
+        if not (HOLD_ASK.search(text) or PAY_LATER.search(text)) or HOLD_INFO.search(text):
+            return None
+        place = self._known_place(st)
+        lang = st.get("lang", "en")
+        now = self.clock.now()
+        held = next((b for b in self.repo.list_bookings(phone=phone, limit=3) if b.status == "hold"
+                     and b.hold_expires_at and b.hold_expires_at > now and b.payment_link_url), None)
+        named = place and self._room_in_words(text, self.repo.list_room_types(place.id))
+        if ROOM_NUMBER.search(text) and not held:
+            return None  # 'hold room 103': a room choice, handled first
+        if held is not None:
+            if named and named.id not in {b.room_type_id for b in self._open_hold(phone)}:
+                return None  # 'hold the cottage' while the link is for another room: a room choice (handled first)
+            self._text(phone, t("hold_pay", lang, url=held.payment_link_url), repeat_ok=True)
+            return "hold"
+        bk = st.get("bk") or {}
+        if st.get("checked") and bk.get("check_in"):
+            step = self.next_step(phone, st)
+            if not step:
+                return None
+            if step == (self.repo.last_outbound_text(phone) or ""):
+                step = t("contact_again", lang) if step == t("ask_contact", lang) else step
+            self._text(phone, step, repeat_ok=True)
+            return "hold"
+        if place is not None:
+            return self._converse(phone, st, text, in_id)  # _stay_in_code checks the stay it already knows
+        return None
 
     def _night_line(self, prop: Property, rt: RoomType, ci: date, co: date, lang: str) -> str:
         """'Beach View Standard Room: ₹4,000 per room per night.' (owner, 2026-11-22: a rate question gets the price
@@ -2164,6 +2217,8 @@ class ChatMixin:
             "- Asked how to pay: say only 'You can use UPI, card, net banking or wallet.' Never mention Razorpay, "
             "'secure', the payment page or how it works. Only the advance is paid online; the balance is paid at the "
             "property (say it only if asked).\n"
+            "- HOLDING A ROOM: a room is held only by paying the advance NOW through the link. Never say paying later "
+            "or tomorrow is fine, never explain the hold, the link or its expiry. Answer in ONE short line.\n"
             "- If they say the link is lost, did not open or they want it again, call send_payment_link. If the hold "
             "ran out, offer to book again (check the dates again). Explain any payment doubt simply and patiently. "
             "A confirmation message arrives here automatically as soon as the payment goes through.\n"
@@ -2198,7 +2253,8 @@ class ChatMixin:
             "- A guest who already has a booking and asks for rooms or other dates wants a NEW booking: help with it. "
             "Never ask 'is this a new one?'. A request to CHANGE the dates or rooms of an existing booking is NOT a new booking: say in one short line that the owner will help (the owner is alerted automatically). To CANCEL: call my_bookings and tell them in one short line the charge from if_cancelled_today (e.g. '25% charge, Rs X refunded') and that the owner will confirm; for anything outside the policy call talk_to_owner. With only past stays, add at most one warm welcome-back line.\n"
             "- A new booking always takes its dates, rooms and price from what the guest says now and from the tools, never from an earlier booking. Never paste an old payment link: only the send_payment_link tool sends one, and only for a booking still on hold.\n"
-            "- Warm and easy: one or two short lines, no jargon.\n"
+            "- Warm and easy: ONE short line (two at most), no jargon. Answer only what was asked; never add "
+            "explanations, reasons, policies or advice nobody asked for.\n"
             "- Never address them by name.\n\n"
             "FACTS\n" + self._facts() + "\n\n" + self._guest_memory(phone, fresh) + "\n\n"
             + self._chosen_note(st, phone) + self._language_note(st, text))
@@ -2467,7 +2523,7 @@ class ChatMixin:
             # one by the owner's priority
             others = [rt for rt in rooms if rt.id != named.id]
             target = next((rt for rt in others if rt.id in current), None) or (others[0] if others else None)
-        elif named and (CHOICE_ASK.search(text) or len(words) <= 4):
+        elif named and (CHOICE_ASK.search(text) or HOLD_ASK.search(text) or len(words) <= 4):
             target = named
         elif not target and OTHER_ROOM.search(text) and ROOM_WORD.search(text) and CHOICE_ASK.search(text):
             # 'I want other room' / 'can I change to another room': the next free room type after the one offered
@@ -2481,6 +2537,9 @@ class ChatMixin:
             if not held:
                 return None  # the room already offered: the booking goes on as before
             # their open link is already for that room: said in one line, no new link
+            if HOLD_ASK.search(text) and (live := next((b for b in held if b.payment_link_url), None)):
+                self._text(phone, t("hold_pay", st.get("lang", "en"), url=live.payment_link_url), repeat_ok=True)
+                return "hold"
             self._text(phone, t("room_picked", st.get("lang", "en"), room=target.name), repeat_ok=True)
             return "room_choice"
         st["room_pref"] = target.id
@@ -2540,6 +2599,8 @@ class ChatMixin:
             st["form_place"] = last.property_id
             force = True
         place_id = st.get("form_place") or bk.get("property_id")
+        if HOLD_ASK.search(text) and not bk.get("chosen") and not st.get("checked"):
+            force = True  # 'hold the room' with the stay given but not checked yet: check it now, ask only what is missing
         if switch and bk.get("check_in"):
             bk.pop("chosen", None)  # the figures were for the old room type
             force = True
@@ -2987,7 +3048,7 @@ class ChatMixin:
 
     @staticmethod
     def _mix_label(mix: list[tuple[RoomType, int]]) -> str:
-        return " + ".join(f"{n} {rt.name}" for rt, n in mix)
+        return " + ".join(_count_name(n, rt.name) for rt, n in mix)
 
     def _types(self, prop: Property, bk: dict[str, Any]) -> list[RoomType]:
         """The room types a check may use: the owner's priority order, or ONLY the one the guest picked (owner,
@@ -3379,7 +3440,7 @@ class ChatMixin:
             bk["chosen"] = {"mix": mix, "rooms": rooms, "extra_beds": sum(p.get("beds", 0) for p in mix),
                             "early": False, "total": total,
                             "advance": advance, "turn": st["turn"]}
-            label = " + ".join(f"{p['rooms']} {self.repo.get_room_type(p['room_type_id']).name}" for p in mix)
+            label = " + ".join(_count_name(p["rooms"], self.repo.get_room_type(p["room_type_id"]).name) for p in mix)
             leads.save_lead(self.repo, ctx.phone, self.clock.now(), room_type=label, rooms=rooms, stage="summary")
             return {"place": self._place_label(prop), "room_type": label, "rooms": rooms, "total": total,
                     "advance_now": advance, "balance_at_property": total - advance,
@@ -3489,7 +3550,7 @@ class ChatMixin:
         numbers = [n for x in parts for n in av.split_rooms(x.room_numbers)]
         label = ""
         if len(parts) > 1:
-            label = " + ".join(f"{x.rooms} {(self.repo.get_room_type(x.room_type_id) or rt).name}" for x in parts)
+            label = " + ".join(_count_name(x.rooms, (self.repo.get_room_type(x.room_type_id) or rt).name) for x in parts)
         lines = ["Following are the glimpse of your booking,", ""]
         if b.guest_name:
             lines.append(f"Guest - {b.guest_name}")
