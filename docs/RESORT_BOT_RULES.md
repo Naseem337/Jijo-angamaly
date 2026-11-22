@@ -59,9 +59,20 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
   new persons ("7 ppl"), new rooms ("2 rooms mathi"), added rooms ("one more room", "1 room koode venam", "add a
   room"), new dates ("make it jan 2 to jan 5").
 - "Shall I book 3 rooms?" -> "Yes" / "Ok" books 3 rooms (re-checked in code).
-- Room priority: the top-priority free room type is offered; a group it can't take gets its free rooms first, then
-  the next room type (one summary, one payment link). The guest is never asked which room type and never told how
-  rooms are picked (no "priority", no "the resort will assign").
+- Room priority: the top-priority free room type is offered first; a group it can't take gets its free rooms first,
+  then the next room type (one summary, one payment link). The guest is never asked which room type and never told
+  how rooms are picked (no "priority", no "the resort will assign").
+- The guest may choose ANY room, at any time, in any words (owner, 2026-11-22): a room type ("cottage venam", "the
+  2 bedroom one"), a room number ("room 103"), "the other room", "no standard room", or "what rooms do you have?"
+  (the AI names the room types). The AI understands it and calls `change_enquiry`; the code re-checks with that room.
+  The chosen room is remembered for the rest of the enquiry (also when persons or dates change) and forgotten after
+  payment. If it cannot take the group on those dates: "Sorry, <room> is not free for N persons on your dates."
+- Every change after the room check, before OR after the payment link (room type, room number, more / fewer rooms,
+  persons, dates), uses the stay the bot already knows (memory, like a human): never the form again, never sent to
+  the owner. After the link, a new summary and a new link go at once and the old link is closed. The guest's own
+  open link never blocks their change. Only a change to a PAID booking goes to the owner.
+- The AI is told the CURRENT ENQUIRY (resort, dates, persons, rooms, room type, link sent or not) on every message,
+  and the room numbers of each room type.
 
 ## 6. Photos
 - No photo limit. No photo is sent twice in a conversation.

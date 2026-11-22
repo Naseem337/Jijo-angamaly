@@ -1595,7 +1595,7 @@ def test_the_prompt_hides_rates_and_forbids_a_price_hike_story(world):
     assert "rate" not in system.lower().split("facts")[-1].replace("rated", "")  # no rate table among the facts
     assert "Never tell the guest that rates change" in system and "peak or high season" in system
     assert "Never quote a price from memory" in system
-    assert "NO essays" in system and "Never list room types" in system
+    assert "NO essays" in system and "may choose ANY room type" in system  # guests can pick rooms (2026-11-22)
 
 
 # --------------------------------------------------------------------------- found by playing the bot against the real AI

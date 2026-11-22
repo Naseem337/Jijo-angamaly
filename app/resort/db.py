@@ -226,11 +226,15 @@ class ResortRepo:
                          (room_type_id, *BLOCKING, check_out.isoformat(), check_in.isoformat()))
         return [_booking(r) for r in rows]
 
-    def free_rooms(self, rt: RoomType, check_in: date, check_out: date, now: datetime) -> int:
-        return free_units(rt, self.blocking_bookings(rt.id, check_in, check_out), check_in, check_out, now)
+    def free_rooms(self, rt: RoomType, check_in: date, check_out: date, now: datetime, ignore_phone: str = "") -> int:
+        """ignore_phone: that guest's own unpaid holds count as free (their new enquiry replaces them, 2026-11-22)."""
+        live = [b for b in self.blocking_bookings(rt.id, check_in, check_out)
+                if not (ignore_phone and b.status == "hold" and b.guest_phone == ignore_phone)]
+        return free_units(rt, live, check_in, check_out, now)
 
-    def create_hold(self, b: Booking, now: datetime) -> Booking:
-        """Insert the booking as a hold if enough rooms are free; raise SoldOut otherwise."""
+    def create_hold(self, b: Booking, now: datetime, replace_own: bool = False) -> Booking:
+        """Insert the booking as a hold if enough rooms are free; raise SoldOut otherwise. replace_own: the guest's
+        own older unpaid holds do not count (the bot closes them right after, one open enquiry per guest)."""
         rt = self.get_room_type(b.room_type_id)
         if rt is None:
             raise SoldOut("unknown room type")
@@ -239,7 +243,8 @@ class ResortRepo:
             rows = db.execute(f"SELECT * FROM bookings WHERE room_type_id=? AND status IN ({marks}) "
                               "AND check_in < ? AND check_out > ?",
                               (b.room_type_id, *BLOCKING, b.check_out.isoformat(), b.check_in.isoformat())).fetchall()
-            live = [_booking(r) for r in rows]
+            live = [x for x in (_booking(r) for r in rows)
+                    if not (replace_own and x.status == "hold" and x.guest_phone == b.guest_phone)]
             if free_units(rt, live, b.check_in, b.check_out, now) < b.rooms:
                 raise SoldOut(f"only fewer than {b.rooms} room(s) free")
             if b.status == "paid" and not b.room_numbers and rt.room_list:  # a desk booking paid on the spot
@@ -267,7 +272,7 @@ class ResortRepo:
                 db.execute(f"DELETE FROM {table}")
         return counts
 
-    def create_holds(self, parts: list[Booking], now: datetime) -> list[Booking]:
+    def create_holds(self, parts: list[Booking], now: datetime, replace_own: bool = False) -> list[Booking]:
         """One stay over several room types (1 Basic + 1 Standard): all parts are held together or none (SoldOut).
         Every part gets group_id = the first part's id."""
         with self._tx() as db:
@@ -279,7 +284,9 @@ class ResortRepo:
                 rows = db.execute(f"SELECT * FROM bookings WHERE room_type_id=? AND status IN ({marks}) "
                                   "AND check_in < ? AND check_out > ?",
                                   (b.room_type_id, *BLOCKING, b.check_out.isoformat(), b.check_in.isoformat())).fetchall()
-                if free_units(rt, [_booking(r) for r in rows], b.check_in, b.check_out, now) < b.rooms:
+                live = [x for x in (_booking(r) for r in rows)
+                        if not (replace_own and x.status == "hold" and x.guest_phone == b.guest_phone)]
+                if free_units(rt, live, b.check_in, b.check_out, now) < b.rooms:
                     raise SoldOut(f"only fewer than {b.rooms} {rt.name} room(s) free")
             for b in parts:
                 self._insert_booking(db, b)

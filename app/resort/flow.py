@@ -345,6 +345,8 @@ class BookingBot(IdProofMixin, ChatMixin):
                 return "answered"
             if not self._bot_asked_something(phone, st):
                 return self._final_ok(phone, st, in_id)
+        if outcome := self._room_choice_now(phone, st, text, in_id):
+            return outcome  # 'I only need cottage' / 'room 103 venam': that room, with the dates already known
         if outcome := self._price_now(phone, st, text):
             return outcome  # the price of the checked stay, from the code: the dates are never asked again
         # 'one more room' / '1 room koode' ADDS a room (checked in code); it is not a request for other room photos
@@ -494,6 +496,9 @@ class BookingBot(IdProofMixin, ChatMixin):
         b = parts[0] if b.group_id else b
         if b.status == "paid":
             return "already_paid"
+        st = self.repo.get_state(b.guest_phone)
+        if st.pop("room_pref", None):  # the picked room type was for this stay; the next enquiry starts fresh
+            self._save(b.guest_phone, st)
         gone = False
         for x in parts:
             xrt = self.repo.get_room_type(x.room_type_id)

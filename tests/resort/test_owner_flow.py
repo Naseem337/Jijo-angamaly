@@ -138,8 +138,9 @@ def test_photo_requests_follow_priority_and_availability(live):
     chat(w, "other room photos")
     assert photos(transcript(w))[len(before):] == ["2"] * 9  # the next FREE room by priority: the cottage
     chat(w, "vere room photos undo")
-    assert transcript(w)[-1] == "BOT: Sorry, ningalude dates-il vere room free alla." or \
-        "no other room" in transcript(w)[-1].lower()
+    # the cottage's photos already went and it IS free: said plainly, never 'no other room is free' (2026-11-22)
+    assert transcript(w)[-1] == ("BOT: Und, 2 Bedroom Tiny Kerala Cottage um ningalude dates-il free aanu. "
+                                 "Ee room venamenkil parayoo.")
 
 
 def test_kanthalloor_is_currently_not_available(live):

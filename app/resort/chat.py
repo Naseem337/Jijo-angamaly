@@ -657,6 +657,21 @@ WISH_WORDS = WISH_CORE | {"a", "an", "any", "is", "are", "there", "i", "we", "ne
                           "reservation", "inquiry", "chahte", "chahiye", "ah", "aa", "thanks", "thank", "chey", "cheyy",
                           "cheyyu", "cheyyo", "cheyyamo", "cheyyanam", "pannu", "pannanum", "pannunga", "karo", "karna",
                           "karni", "kar", "do", "make", "it", "ready"}
+# the guest PICKS a room ('I only need cottage', 'ok book cottage', 'can I get room 103', 'I want other room'):
+# switched in code with the dates already known, never the form again (owner, 2026-11-22)
+CHOICE_ASK = re.compile(r"\b(?:want|wanted|need|book|booking|take|prefer|like|liked|only|just|choose|select|go with|"
+                        r"go for|give me|instead|change|switch|shift|that one|this one|venam|venum|veno|mathi|madhi|"
+                        r"mathy|matram|mathram|maathram|edukk\w*|kittumo|chahiye|lena|vendum|podhum|ok|okay|fine|"
+                        r"confirm)\b|\bcan (?:i|we) (?:get|have|take|book)\b", re.IGNORECASE)
+STRONG_CHOICE = re.compile(r"\b(?:book|booking|take|prefer|only|instead|mathi|madhi|matram|mathram|choose|go with|"
+                           r"go for|switch|change|shift)\b|\bneed (?:a |the |that )?(?:rooms?|cottage)\b|"
+                           r"\bcan (?:i|we) (?:get|have|take|book)\b", re.IGNORECASE)
+NOT_WANT = re.compile(r"\b(?:don'?t|dont|do not|no need|not|remove|without|except|venda|vendaa|vendathilla|vendam|"
+                      r"nahi|nahin|illathe)\b", re.IGNORECASE)
+ROOM_NUMBER = re.compile(r"\b(?:room|rm|no|number)\.?\s*#?\s*(\d{2,4})\b|#\s*(\d{2,4})\b", re.IGNORECASE)
+# words that do not tell room types apart ('a room in Kerala' is not the Tiny Kerala Cottage)
+CHOICE_FILLER = {"room", "rooms", "view", "the", "with", "and", "type", "kerala", "india", "floor", "first", "ground",
+                 "second", "bedroom", "bed", "beds", "beach", "sea", "non", "at"}
 RESTART = re.compile(r"^\s*(?:restart|reset|start again|start over|new chat)\s*[.!]*\s*$", re.IGNORECASE)
 RESTART_MARK = "[restart]"  # stored in the chat; the AI's view of the conversation begins after it
 SIR = re.compile(r"\b(?:sir|saar|sar|madam|ma'?am)\b(?:\s*ji\b)?", re.IGNORECASE)
@@ -821,6 +836,7 @@ class _Turn:
     text: str = ""  # the guest's message this turn
     priced: bool = False  # a tool worked out a price this turn (the only source of a price the AI may state)
     none_found: bool = False  # check_availability found no room this turn (the only source of 'fully booked')
+    room_switched: bool = False  # the guest picked a room type this turn (handled in code)
 
 
 LANGUAGE_FIELD = {"type": "string", "enum": list(STYLES),
@@ -892,6 +908,26 @@ TOOLS = [
             "language": LANGUAGE_FIELD},
          "required": ["guest_name", "mobile"]}),
     ToolSpec(
+        "change_enquiry",
+        "The guest changes the stay already checked, before OR after the payment link: picks a room type or a room "
+        "number ('cottage venam', 'room 103', 'the other room'), removes a room type ('no standard room'), adds or "
+        "drops rooms, or changes persons or dates. Pass ONLY what changed; everything else (dates, persons, name, "
+        "mobile) is remembered. Rooms are re-checked and, when the payment link was already sent, a new summary and "
+        "link go automatically. Never send the form or ask the dates again for a change. Reply exactly [no reply].",
+        {"type": "object", "properties": {
+            "room_type": {"type": "string", "description": "the room type they want, as named in the FACTS"},
+            "room_number": {"type": "string", "description": "a room number they asked for, e.g. 103"},
+            "remove_room_type": {"type": "string", "description": "a room type they do NOT want"},
+            "other_room": {"type": "boolean", "description": "true when they want a different room type than offered"},
+            "rooms": {"type": "integer", "description": "the new total number of rooms"},
+            "add_rooms": {"type": "integer", "description": "rooms to add ('one more room' = 1)"},
+            "remove_rooms": {"type": "integer", "description": "rooms to take away ('1 room venda' = 1)"},
+            "adults": {"type": "integer", "description": "the new total number of persons"},
+            "children": {"type": "integer"},
+            "check_in": {"type": "string", "description": "new check-in, YYYY-MM-DD"},
+            "check_out": {"type": "string", "description": "new check-out, YYYY-MM-DD"},
+            "language": LANGUAGE_FIELD}}),
+    ToolSpec(
         "send_payment_link",
         "Send the guest their payment link again (they lost it, it did not open, or they ask for it). Only works "
         "while their booking is still on hold. The link is sent automatically after your reply.",
@@ -919,7 +955,9 @@ TOOLS = [
         "talk_to_owner",
         "The owner gets a short summary and will contact the guest; the bot keeps answering. Use when the guest asks for "
         "the owner / a person / a call, complains, wants a refund or exception outside the policy, makes a price "
-        "counter-offer, or a group / many-room booking. The guest is told automatically; reply exactly [no reply].",
+        "counter-offer, or wants to change a booking that is already PAID. Changes before payment (room type, rooms, "
+        "persons, dates) are never for the owner: call change_enquiry. The guest is told automatically; reply "
+        "exactly [no reply].",
         {"type": "object", "properties": {
             "reason": {"type": "string", "description": "one short line for the owner, e.g. 'wants to cancel RB-1D9E49, "
                                                         "asks full refund'"}},
@@ -942,6 +980,8 @@ class ChatMixin:
         for rt in self.repo.list_room_types(p.id):
             line = (f"  ROOM TYPE '{rt.name}': {rt.units} room(s), max {rt.max_occupancy} guests per room "
                     f"({rt.max_adults} adults, {rt.max_children} children)")
+            if rt.room_list:
+                line += f", room numbers {', '.join(rt.room_list)}"
             extras = " ".join(x for x in (rt.description, rt.amenities) if x and "PLACEHOLDER" not in x)
             lines.append(line + "." + (f" {extras}" if extras else ""))
         return lines
@@ -1005,7 +1045,8 @@ class ChatMixin:
         rooms = self.repo.list_room_types(prop.id)  # the owner's priority order
         bk = st.get("bk") or {}
         dated = bk.get("property_id") == prop.id and bk.get("check_in") and bk.get("check_out")
-        free = [rt for rt, _ in self._fits(prop, bk)] if dated else rooms
+        # every free room type, also when the guest picked one ('other room?' must still find the others)
+        free = [rt for rt, _ in self._fits(prop, {**bk, "pref": None})] if dated else rooms
         sent = self._sent_photos(phone)
 
         def unsent(refs: list[str]) -> list[str]:
@@ -1022,7 +1063,7 @@ class ChatMixin:
             return ([(None, refs)], "", "") if refs else ([], "photos_sent", "")
         if not free:
             return [], "no_other_room", ""
-        chosen_id = (bk.get("chosen") or {}).get("room_type_id")
+        chosen_id = (bk.get("chosen") or {}).get("room_type_id") or bk.get("pref") or st.get("room_pref")
         current = next((rt for rt in free if rt.id == chosen_id), free[0])
         refs_of = {rt.id: self._room_refs(rt, st) for rt in free}
         others = [rt for rt in free if rt is not current and unsent(refs_of[rt.id])]
@@ -1031,11 +1072,22 @@ class ChatMixin:
         none_left = "no_other_room" if dated else "photos_sent"
         if not dated and not others and not unsent(refs_of[current.id]) and (general := unsent(prop.photo_urls)):
             return [(None, general)], "", ""  # every room shown: 'send all photos' / 'more' gets the resort's photos
+        other_free = [rt for rt in free if rt is not current]
         if ALL_ROOMS.search(text or ""):
             todo = [rt for rt in [current, *others] if unsent(refs_of[rt.id])]
-            return ([(rt, unsent(refs_of[rt.id])) for rt in todo], "", "") if todo else ([], none_left, "")
+            if todo:
+                return [(rt, unsent(refs_of[rt.id])) for rt in todo], "", ""
+            if dated and other_free and OTHER_ROOM.search(text or ""):
+                return [], "other_free", other_free[0].name  # 'any other room available?': it IS free (2026-11-22)
+            return [], none_left, ""
         if OTHER_ROOM.search(text or ""):
-            return ([(others[0], unsent(refs_of[others[0].id]))], "", "") if others else ([], none_left, "")
+            if others:
+                return [(others[0], unsent(refs_of[others[0].id]))], "", ""
+            if dated and other_free:
+                # another room IS free, its photos already went (or it has none): never 'no other room is free'
+                # (2026-11-22, two room types were free)
+                return [], "other_free", other_free[0].name
+            return [], none_left, ""
         if unsent(refs_of[current.id]):
             return [(current, unsent(refs_of[current.id]))], "", ""
         if others:
@@ -1879,7 +1931,9 @@ class ChatMixin:
             "- Say \"sir\" only once, at the very start of the chat (\"madam\" only if they are clearly a woman); never "
             "again after that, and never in the middle of the chat. "
             "Never bro, dear, da, chetta, chechi, machane or their name.\n"
-            "- The resort offers ONE room, chosen by the owner's priority. Never list room types or their prices.\n"
+            "- Rooms: the room offered first is picked automatically. The guest may choose ANY room type or room "
+            "number at any time: when they ask which rooms there are, name the room types from the FACTS (prices "
+            "only if asked). Never say a room cannot be chosen, and never send a room change to the owner.\n"
             "- Ask only ONE thing at a time, simply. No emoji piles (one is fine).\n"
             "- Do not paste the property description. Do not mention offers, discounts or 'special' deals. Just "
             "state the price.\n"
@@ -1930,9 +1984,11 @@ class ChatMixin:
             "fewest rooms the group needs unless the guest asked for more. Whether rooms are free, the resort's "
             "details, the photos and the request for name and mobile number are all sent automatically: reply "
             "[no reply].\n"
-            "4. Never ask which room type; the code picks the room. Never tell the guest how rooms are picked: no "
-            "'priority', no 'the resort / owner will assign or decide the room'. Only if the guest asks for a "
-            "particular room type, call prepare_booking with it.\n"
+            "4. Never ask which room type. Never tell the guest how rooms are picked: no 'priority', no 'the resort / "
+            "owner will assign or decide the room'. ANY change to the stay after the room check, before or after "
+            "the payment link (a room type or room number they pick, a room type they do not want, more or fewer "
+            "rooms, persons or dates): call change_enquiry with only what changed. The CURRENT ENQUIRY below has "
+            "everything already known; never ask for it again.\n"
             "- Never state prices, totals or the advance while checking availability; the price reaches the guest "
             "in the resort's details and the enquiry summary. Give a price only if the guest asks for it.\n"
             "- A name correction after the summary or the booking ('my name is not X, it is Y'): call change_name "
@@ -2011,15 +2067,49 @@ class ChatMixin:
             "- Warm and easy: one or two short lines, no jargon.\n"
             "- Never address them by name.\n\n"
             "FACTS\n" + self._facts() + "\n\n" + self._guest_memory(phone, fresh) + "\n\n"
-            + self._chosen_note(st) + self._language_note(st, text))
+            + self._chosen_note(st, phone) + self._language_note(st, text))
 
-    def _chosen_note(self, st: dict[str, Any]) -> str:
-        """The resort the guest already picked (the form was sent for it): the AI must not ask again."""
+    def _chosen_note(self, st: dict[str, Any], phone: str = "") -> str:
+        """The resort the guest already picked, and the stay already known (the room check or the open payment link):
+        the AI must never ask for any of it again (owner, 2026-11-22: 'use memory like a human')."""
+        stay = self._enquiry_note(st, phone)
         prop = self._known_place(st)
         if prop is None:
-            return ""
+            return stay
+        if stay:
+            return stay
         return (f"CHOSEN RESORT: the guest picked {self._place_label(prop)} and got the booking form. When they "
                 "give dates and persons, call check_availability for it right away; never send the form again.\n\n")
+
+    def _enquiry_note(self, st: dict[str, Any], phone: str) -> str:
+        """CURRENT ENQUIRY: what the guest already gave and what was offered, from the room check or their open
+        payment link. Empty when no stay is known yet."""
+        bk = st.get("bk") or {}
+        held = [] if bk.get("check_in") or not phone else self._open_hold(phone)
+        if bk.get("check_in") and bk.get("check_out") and bk.get("adults"):
+            prop = self.repo.get_property(bk["property_id"])
+            chosen = bk.get("chosen") or {}
+            ids = [p["room_type_id"] for p in chosen.get("mix") or bk.get("mix") or []] or \
+                [x for x in (chosen.get("room_type_id"), bk.get("pref")) if x]
+            if not ids and prop and (fits := self._fits(prop, bk)):
+                ids = [fits[0][0].id]
+            ci, co = bk["check_in"], bk["check_out"]
+            persons, children, rooms = bk["adults"], bk.get("children", 0), chosen.get("rooms") or bk.get("rooms")
+            link = "not sent yet (name and mobile still needed)"
+        elif held:
+            prop = self.repo.get_property(held[0].property_id)
+            ids = [b.room_type_id for b in held]
+            ci, co = held[0].check_in.isoformat(), held[0].check_out.isoformat()
+            persons, children = sum(b.adults for b in held), sum(b.children for b in held)
+            rooms = sum(b.rooms for b in held)
+            link = f"SENT and open (guest {held[0].guest_name or '?'}); a change gives a new summary and link"
+        else:
+            return ""
+        names = " + ".join((self.repo.get_room_type(i) or RoomType("", "?")).name for i in ids) or "?"
+        place = self._place_label(prop) if prop else "?"
+        return (f"CURRENT ENQUIRY (remembered; never ask for it again): {place}, check-in {ci}, check-out {co}, "
+                f"{persons} person(s){f' + {children} child(ren)' if children else ''}, {rooms or '?'} room(s), "
+                f"room type {names}. Payment link: {link}. Any change to it: call change_enquiry.\n\n")
 
     # ------------------------------------------------------------------ the conversation
 
@@ -2166,6 +2256,86 @@ class ChatMixin:
         eased = re.sub(rf"\s*,?\s*(?:{SIR.pattern})", "", eased, flags=re.IGNORECASE).strip()
         return eased[:1].upper() + eased[1:] if eased else reply
 
+    @staticmethod
+    def _room_in_words(text: str, rooms: list[RoomType]) -> RoomType | None:
+        """The room type the guest names by its OWN words ('cottage', 'tiny', 'basic', 'standard'), else None."""
+        words = set(re.findall(r"[a-z]{3,}", (text or "").lower()))
+        best, score = None, 0
+        for rt in rooms:
+            names = set(re.findall(r"[a-z]{3,}", rt.name.lower())) - CHOICE_FILLER
+            hits = sum(1 for n in names if any(close_word(w, n) for w in words))
+            if hits > score:
+                best, score = rt, hits
+        return best
+
+    def _room_choice_now(self, phone: str, st: dict[str, Any], text: str, in_id: int = 0) -> str | None:
+        """The guest picks a room type (by name, by room number, 'only X', 'not X', 'another room'). It is remembered
+        and the stay already known (the room check, or the open payment link) is checked again with that room: a new
+        'free' line, or a new summary and link. The dates are never asked again (owner, 2026-11-22: 'if you fetched it,
+        use memory like a human'). None when the message is not a room choice."""
+        if (PHOTO_ASK.search(text) or SEE_ASK.search(text)) and not STRONG_CHOICE.search(text):
+            return None  # 'cottage photos venam' is a photo ask
+        if "?" in text and not STRONG_CHOICE.search(text):
+            return None  # 'is the cottage free?' / 'any other rooms?' are questions (answered elsewhere)
+        bk = st.get("bk") or {}
+        held = [] if bk.get("check_in") else self._open_hold(phone)
+        place_id = bk.get("property_id") or (held[0].property_id if held else "") or st.get("form_place")
+        prop = self.repo.get_property(place_id) if place_id else None
+        if prop is None:
+            return None
+        rooms = self.repo.list_room_types(prop.id)
+        if len(rooms) < 2:
+            return None
+        chosen = bk.get("chosen") or {}
+        current = {x for x in (chosen.get("room_type_id"), st.get("room_pref")) if x}
+        current |= {p["room_type_id"] for p in chosen.get("mix") or []}
+        current |= {b.room_type_id for b in held}
+        dated = bk if bk.get("check_in") and bk.get("check_out") and bk.get("adults") else ({"check_in": held[0].check_in.isoformat(),
+                                                "check_out": held[0].check_out.isoformat(),
+                                                "adults": sum(b.adults for b in held),
+                                                "children": sum(b.children for b in held)} if held else None)
+        free = [rt for rt, _ in self._fits(prop, {**dated, "rooms": 0, "pref": None, "own": phone})] if dated else []
+        if not current and free:
+            current = {free[0].id}  # the room that was offered (the owner's priority)
+        words = _words(text)
+        target = None
+        if (m := ROOM_NUMBER.search(text)) and (CHOICE_ASK.search(text) or len(words) <= 4):
+            number = m.group(1) or m.group(2)
+            target = next((rt for rt in rooms if number in rt.room_list), None)
+        named = None if target else self._room_in_words(text, rooms)
+        if named and NOT_WANT.search(text):
+            # 'I don't want standard rooms' / 'remove standard': the other room type of their enquiry, else the next
+            # one by the owner's priority
+            others = [rt for rt in rooms if rt.id != named.id]
+            target = next((rt for rt in others if rt.id in current), None) or (others[0] if others else None)
+        elif named and (CHOICE_ASK.search(text) or len(words) <= 4):
+            target = named
+        elif not target and OTHER_ROOM.search(text) and ROOM_WORD.search(text) and CHOICE_ASK.search(text):
+            # 'I want other room' / 'can I change to another room': the next free room type after the one offered
+            target = next((rt for rt in (free if dated else rooms) if rt.id not in current), None)
+            if target is None and dated:
+                self._text(phone, t("no_other_room", st.get("lang", "en")), repeat_ok=True)
+                return "room_choice"
+        if target is None:
+            return None
+        if current == {target.id}:
+            if not held:
+                return None  # the room already offered: the booking goes on as before
+            # their open link is already for that room: said in one line, no new link
+            self._text(phone, t("room_picked", st.get("lang", "en"), room=target.name), repeat_ok=True)
+            return "room_choice"
+        st["room_pref"] = target.id
+        if not (bk.get("check_in") or held):
+            self._save(phone, st)  # no dates yet: remembered, and the normal flow asks for them
+            return None
+        st["room_switch"] = True
+        if bk.get("check_in") and (who := contact_in(text)):
+            # 'cottage, Naseem, same number': the new summary and link straight away
+            bk["guest_name"], bk["mobile"] = who[0], phone if who[1] == "same" else who[1]
+            st["rebook"] = True
+        self._save(phone, st)
+        return self._converse(phone, st, text, in_id)
+
     def _stay_in_code(self, ctx: _Turn, text: str, force: bool = False) -> bool:
         """Dates or persons in this message, with the resort known: the code checks the rooms (or asks only for the
         missing lines) instead of the AI, which once reused old dates and once made up 'fully booked' (2026-11-19).
@@ -2180,9 +2350,10 @@ class ChatMixin:
             # 'Lets meet on 21 jan' with a confirmed booking on 21 Jan: talk about THAT booking, never a new enquiry
             # (live chat 2026-11-22: it got the form for a new booking)
             return False
-        changes = bool(mine0.get("rooms") or mine0.get("more_rooms") or mine0.get("less_rooms")
-                       or mine0.get("persons") or mine0.get("children")
-                       or (mine0.get("check_in") and DATE_CHANGE.search(text)))
+        switch = ctx.room_switched = bool(st.pop("room_switch", None))  # the guest picked a room (_room_choice_now)
+        changes = switch or bool(mine0.get("rooms") or mine0.get("more_rooms") or mine0.get("less_rooms")
+                                 or mine0.get("persons") or mine0.get("children")
+                                 or (mine0.get("check_in") and DATE_CHANGE.search(text)))
         if not bk.get("check_in") and changes and not ANOTHER_STAY.search(text) and (held := self._open_hold(phone)):
             # the payment link is out but not paid: a change ('add 1 room', '1 room venda', '6 per', new dates) starts
             # from that enquiry; the rooms are re-checked and a NEW summary and link replace the old ones (owner,
@@ -2210,7 +2381,10 @@ class ChatMixin:
             st["form_place"] = last.property_id
             force = True
         place_id = st.get("form_place") or bk.get("property_id")
-        if not place_id or bk.get("chosen") or (CHANGE_ASK.search(text) and not st.get("rebook")):
+        if switch and bk.get("check_in"):
+            bk.pop("chosen", None)  # the figures were for the old room type
+            force = True
+        if not place_id or bk.get("chosen") or (CHANGE_ASK.search(text) and not st.get("rebook") and not switch):
             return False
         if st.get("suggest_rooms") and (is_ack(text) or YES_REPLY.match(text)):
             bk["rooms"] = st.pop("suggest_rooms")  # 'ok' to 'Shall I go ahead with 5 rooms?'
@@ -2239,16 +2413,112 @@ class ChatMixin:
         elif got or force:
             self._ask_missing(ctx, got)
         if st.pop("rebook", None) and bk.get("check_in") and not ctx.none_found and st.get("checked"):
-            # the change fits: the new summary and payment link straight away (name and mobile are known); the old
-            # link is closed by create_booking (close_old_holds)
-            prep = self._tool_prepare(ctx, {"rooms": got["rooms"]} if got.get("rooms") else {})
-            if "error" not in prep:
-                asks = {t(k, lg) for k in ("ask_contact", "contact_again") for lg in ("en", "mn", "tn", "hn")}
-                ctx.after = [m for m in ctx.after if not (isinstance(m, str) and m in asks)]
-                st.pop("last_summary", None)  # after a change the summary always goes again
-                self._tool_create(ctx, {"guest_name": bk.get("guest_name") or "", "mobile": bk.get("mobile") or "same"})
+            self._relink(ctx, bk.get("guest_name") or "", bk.get("mobile") or "same", int(got.get("rooms") or 0))
         self._save(phone, st)
         return bool(ctx.after or ctx.summary_message)
+
+    def _relink(self, ctx: _Turn, name: str, mobile: str, rooms_said: int = 0) -> dict[str, Any]:
+        """The change fits: the new summary and payment link straight away (name and mobile are known); the old link
+        is closed by create_booking (close_old_holds)."""
+        st = ctx.st
+        # the rooms of the NEW check ('4 persons' after a 1-room link: at least 2 rooms), never the old count
+        rooms_now = int((st.get("bk") or {}).get("rooms") or 0) or rooms_said
+        prep = self._tool_prepare(ctx, {"rooms": rooms_now} if rooms_now else {})
+        if "error" in prep:
+            return prep
+        asks = {t(k, lg) for k in ("ask_contact", "contact_again") for lg in ("en", "mn", "tn", "hn")}
+        ctx.after = [m for m in ctx.after if not (isinstance(m, str) and m in asks)]
+        st.pop("last_summary", None)  # after a change the summary always goes again
+        return self._tool_create(ctx, {"guest_name": name, "mobile": mobile})
+
+    def _tool_change(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        """change_enquiry: the AI understood a change in any words; the code applies it to the stay it remembers
+        (the room check, or the open payment link) and re-checks: a new 'free' line, or a new summary and link."""
+        st, phone = ctx.st, ctx.phone
+        self._set_style(st, a)
+        bk = st.get("bk") or {}
+        held = [] if bk.get("check_in") else self._open_hold(phone)
+        if held:
+            first = held[0]
+            note = re.search(r"Mobile: ([+\d][\d ]{6,})", first.notes or "")
+            bk = {"property_id": first.property_id, "check_in": first.check_in.isoformat(),
+                  "check_out": first.check_out.isoformat(), "adults": sum(b.adults for b in held),
+                  "children": sum(b.children for b in held), "rooms": sum(b.rooms for b in held),
+                  "guest_name": first.guest_name or "",
+                  "mobile": try_normalize_phone(note.group(1)) if note else phone}
+            current = {b.room_type_id for b in held}
+        elif bk.get("check_in") and bk.get("check_out") and bk.get("adults"):
+            chosen = bk.get("chosen") or {}
+            current = {x for x in (chosen.get("room_type_id"), bk.get("pref")) if x}
+            current |= {p["room_type_id"] for p in chosen.get("mix") or bk.get("mix") or []}
+        else:
+            return {"error": "no stay is known yet: if the guest gave dates and persons call check_availability, "
+                             "else call ask_stay_details"}
+        prop = self.repo.get_property(bk["property_id"])
+        if prop is None:
+            return {"error": "unknown resort"}
+        rooms = self.repo.list_room_types(prop.id)
+        if not current and (fits := self._fits(prop, {**bk, "pref": None, "rooms": 0, "own": phone})):
+            current = {fits[0][0].id}
+        target = None
+        if number := str(a.get("room_number") or "").strip().lstrip("#"):
+            target = next((rt for rt in rooms if number in rt.room_list), None)
+            if target is None:
+                return {"error": f"there is no room {number}; the room numbers are in the FACTS"}
+        elif wanted := str(a.get("room_type") or "").strip():
+            target = next((rt for rt in rooms if rt.name.lower() == wanted.lower()), None) or \
+                self._room_in_words(wanted, rooms) or self._room_named(wanted, rooms)
+        elif unwanted := str(a.get("remove_room_type") or "").strip():
+            gone = next((rt for rt in rooms if rt.name.lower() == unwanted.lower()), None) or \
+                self._room_in_words(unwanted, rooms) or self._room_named(unwanted, rooms)
+            others = [rt for rt in rooms if gone is None or rt.id != gone.id]
+            target = next((rt for rt in others if rt.id in current), None) or (others[0] if others else None)
+        elif a.get("other_room"):
+            free = [rt for rt, _ in self._fits(prop, {**bk, "pref": None, "rooms": 0, "own": phone})]
+            target = next((rt for rt in free if rt.id not in current), None)
+            if target is None:
+                ctx.after.append(t("no_other_room", st.get("lang", "en")))
+                ctx.silent = True
+                return {"ok": True, "note": "no other room type is free; the guest is told. Reply exactly [no reply]."}
+        if target is not None:
+            st["room_pref"] = target.id
+        persons = self._int(a, "adults") or int(bk["adults"])
+        children = self._int(a, "children") if a.get("children") is not None else int(bk.get("children") or 0)
+        rooms_now = int(bk.get("rooms") or 0) or int(((st.get("checked") or "").split("|") + [""] * 5)[4] or 0)
+        if self._int(a, "rooms"):
+            rooms_now = self._int(a, "rooms")
+        elif self._int(a, "add_rooms"):
+            rooms_now = (rooms_now or 1) + self._int(a, "add_rooms")
+        elif self._int(a, "remove_rooms"):
+            rooms_now = max(1, (rooms_now or 1) - self._int(a, "remove_rooms"))
+        elif self._int(a, "adults") and self._int(a, "adults") != int(bk["adults"]):
+            rooms_now = 0  # new persons: the fewest rooms that fit them
+        ci, co = str(a.get("check_in") or bk["check_in"]), str(a.get("check_out") or bk["check_out"])
+        if a.get("check_in") and not a.get("check_out"):  # a new check-in keeps the number of nights
+            try:
+                nights = (date.fromisoformat(bk["check_out"]) - date.fromisoformat(bk["check_in"])).days
+                co = (date.fromisoformat(ci) + timedelta(days=nights)).isoformat()
+            except ValueError:
+                return {"error": "check_in must be YYYY-MM-DD"}
+        bk.pop("chosen", None)
+        st["bk"] = bk
+        if held:
+            st.pop("checked", None)  # every change after the link goes out as a fresh check
+        out = self._tool_check(ctx, {"place": self._place_label(prop), "check_in": ci, "check_out": co,
+                                     "adults": persons, "children": children, "rooms": rooms_now,
+                                     "language": st.get("style")})
+        if "error" in out:
+            return out
+        if (held or (bk.get("guest_name") and bk.get("mobile"))) and not ctx.none_found:
+            made = self._relink(ctx, bk.get("guest_name") or "", bk.get("mobile") or "same", rooms_now)
+            if "error" in made:
+                return made
+        self._save(phone, st)
+        ctx.silent = True
+        return {"ok": True, "room_type": (self.repo.get_room_type(st.get("room_pref") or "") or RoomType("", "")).name,
+                "note": "the change was checked and the guest is told automatically (a new summary and link when the "
+                        "link was already sent). Reply exactly [no reply]."}
+
 
     def _other_question(self, text: str) -> bool:
         """other_question() with our town, resort and room type names counted as booking details."""
@@ -2298,7 +2568,7 @@ class ChatMixin:
                                          "only. Do not answer older messages and do not add any new information.]")
         reply = ""
         coded = False if answer_only else self._stay_in_code(ctx, text)
-        if coded and self._other_question(text):
+        if coded and not ctx.room_switched and self._other_question(text):
             # '25-27 Dec, 3 people, is parking free?': the AI answers the parking question first, then the room
             # check's messages go (owner, 2026-11-20: answer like an agent, never drop a question)
             self.answer_question(phone, st, text)
@@ -2502,7 +2772,8 @@ class ChatMixin:
                     "check_availability": self._tool_check, "prepare_booking": self._tool_prepare,
                     "create_booking": self._tool_create, "my_bookings": self._tool_bookings,
                     "send_payment_link": self._tool_resend, "recall_old_chat": self._tool_recall,
-                    "talk_to_owner": self._tool_owner, "change_name": self._tool_change_name}
+                    "talk_to_owner": self._tool_owner, "change_name": self._tool_change_name,
+                    "change_enquiry": self._tool_change}
         handler = handlers.get(call.name)
         if handler is None or call.arguments_error:
             return json.dumps({"error": call.arguments_error or f"unknown tool {call.name}"}), True
@@ -2538,7 +2809,7 @@ class ChatMixin:
         whole group itself; None otherwise (then one room type is offered as before)."""
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
         now = self.clock.now()
-        free = [(rt, self.repo.free_rooms(rt, ci, co, now)) for rt in self.repo.list_room_types(prop.id)]
+        free = [(rt, self.repo.free_rooms(rt, ci, co, now, bk.get("own", ""))) for rt in self._types(prop, bk)]
         mix = av.mixed_rooms(free, bk["adults"], bk["children"], wanted, bool(prop.extra_bed_rate))
         if not mix or len(mix) < 2:
             return None
@@ -2559,13 +2830,21 @@ class ChatMixin:
     def _mix_label(mix: list[tuple[RoomType, int]]) -> str:
         return " + ".join(f"{n} {rt.name}" for rt, n in mix)
 
+    def _types(self, prop: Property, bk: dict[str, Any]) -> list[RoomType]:
+        """The room types a check may use: the owner's priority order, or ONLY the one the guest picked (owner,
+        2026-11-22: 'I only need cottage' must give the cottage, never the top-priority room again)."""
+        rooms = self.repo.list_room_types(prop.id)
+        picked = [rt for rt in rooms if rt.id == bk.get("pref")]
+        return picked or rooms
+
     def _fits(self, prop: Property, bk: dict[str, Any]) -> list[tuple[RoomType, list[int]]]:
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
         now = self.clock.now()
         out = []
         beds_ok = bool(prop.extra_bed_rate)
-        for rt in self.repo.list_room_types(prop.id):
-            plan = av.plan_rooms(rt, bk["adults"], bk["children"], self.repo.free_rooms(rt, ci, co, now),
+        for rt in self._types(prop, bk):
+            plan = av.plan_rooms(rt, bk["adults"], bk["children"],
+                                 self.repo.free_rooms(rt, ci, co, now, bk.get("own", "")),
                                  int(bk.get("rooms") or 0), beds_ok)
             if plan:
                 out.append((rt, [plan[0]]))
@@ -2694,8 +2973,9 @@ class ChatMixin:
         adults, children = self._int(a, "adults"), self._int(a, "children")
         if adults < 1:  # no fixed maximum (owner, 2026-11-20): the room check says what the free rooms can hold
             return {"error": "at least 1 adult is needed"}
+        # "own": this guest's unpaid holds count as free rooms (a new summary replaces their open link)
         bk = {"property_id": prop.id, "check_in": ci.isoformat(), "check_out": co.isoformat(),
-              "adults": adults, "children": children, "rooms": self._int(a, "rooms")}
+              "adults": adults, "children": children, "rooms": self._int(a, "rooms"), "own": ctx.phone}
         st["bk"] = bk
         wanted = self._int(a, "rooms")
         if wanted and (least := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children)) \
@@ -2705,6 +2985,14 @@ class ChatMixin:
             ctx.after.append(t("min_rooms", st.get("lang", "en"), persons=adults + children, rooms=least))
             wanted = least
             bk["rooms"] = least
+        if (pref := st.get("room_pref")) and (prt := self.repo.get_room_type(pref)) and prt.property_id == prop.id:
+            # the room type the guest picked is remembered (owner, 2026-11-22); if it cannot take them on these
+            # dates they are told plainly and the owner's priority goes on as before
+            bk["pref"] = pref
+            if not self._fits(prop, bk):
+                ctx.after.append(t("room_pick_no", st.get("lang", "en"), room=prt.name, persons=adults + children))
+                bk.pop("pref", None)
+                st.pop("room_pref", None)
         leads.save_lead(self.repo, ctx.phone, self.clock.now(), property_id=prop.id, check_in=ci.isoformat(),
                         check_out=co.isoformat(), adults=adults, children=children, rooms=wanted, room_type="",
                         stage="asked", booking_id="")
@@ -2774,8 +3062,11 @@ class ChatMixin:
         # the rooms the guest asked for are part of the check: '2 rooms mathi' after 3 were quoted is a NEW check;
         # asking for the number already quoted ('1 room') changes nothing
         quoted_now = int((options[0] if options else {}).get("quoted_for_rooms") or 1)
-        key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}|{quoted_now}"
+        key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}|{quoted_now}|{bk.get('pref') or ''}"
         lang = st.get("lang", "en")
+        # a room type the guest just picked: said first, in code ('Sure, 2 Bedroom Tiny Kerala Cottage is free')
+        picked = (t("room_picked", lang, room=offered[0].name)
+                  if bk.get("pref") and offered and (st.get("checked") or "").split("|")[5:6] != [bk["pref"]] else "")
         same_dates = (st.get("checked") or "").split("|")[:3] == key.split("|")[:3]
         # whose photos go: ONLY the one room offered (top priority AND free). Both room types only when the group is
         # split over two (1 Basic + 1 Standard). A live chat got Basic + Standard photos together (owner, 2026-11-19).
@@ -2803,6 +3094,8 @@ class ChatMixin:
             # A different room now fits: its photos only. Then the name question, unless it is already the last ask.
             st["checked"] = key
             ctx.silent = True
+            if picked:
+                ctx.after.append(picked)
             if rooms_line:  # the persons changed: the rooms sentence for the NEW number, from the code
                 ctx.after.append(rooms_line)
             sent = self._sent_photos(ctx.phone)
@@ -2821,7 +3114,7 @@ class ChatMixin:
             out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
         elif st.get("checked") != key:
             st["checked"] = key
-            ctx.after.append(t("rooms_ok", lang))
+            ctx.after.append(picked or t("rooms_ok", lang))
             if rooms_line:
                 ctx.after.append(rooms_line)
             ctx.silent = True
@@ -2853,7 +3146,8 @@ class ChatMixin:
         st.pop("alt_dates", None)
         if not wanted and prop.extra_bed_rate:
             now = self.clock.now()
-            free = [(rt, self.repo.free_rooms(rt, ci, co, now)) for rt in self.repo.list_room_types(prop.id)]
+            free = [(rt, self.repo.free_rooms(rt, ci, co, now, bk.get("own", "")))
+                    for rt in self.repo.list_room_types(prop.id)]
             least = av.fewest_rooms([rt for rt, _ in free], adults, children)
             for n in range(max(least, 1), sum(f for _, f in free) + 1):
                 if any(av.plan_rooms(rt, adults, children, f, n) for rt, f in free) or av.mixed_rooms(
@@ -2862,7 +3156,8 @@ class ChatMixin:
                     return t("beds_offer", lang, persons=adults + children, rooms=n, rate=f"{prop.extra_bed_rate:,}")
         # a group bigger than every free room together (no fixed guest limit, owner 2026-11-20): say what IS free
         now = self.clock.now()
-        free = [(rt, self.repo.free_rooms(rt, ci, co, now)) for rt in self.repo.list_room_types(prop.id)]
+        free = [(rt, self.repo.free_rooms(rt, ci, co, now, bk.get("own", "")))
+                for rt in self.repo.list_room_types(prop.id)]
         beds_ok = bool(prop.extra_bed_rate)
         cap = sum(f * (rt.max_occupancy if beds_ok else av.base_per_room(rt, False)) for rt, f in free if f > 0)
         if 0 < cap < adults + children:
@@ -2934,7 +3229,7 @@ class ChatMixin:
         rooms = self._int(a, "rooms", options[0])
         if rooms not in options:  # the guest asks for another number of rooms: allowed if it works (owner's rule)
             ci_, co_ = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
-            plan = av.plan_rooms(rt, bk["adults"], bk["children"], self.repo.free_rooms(rt, ci_, co_, self.clock.now()),
+            plan = av.plan_rooms(rt, bk["adults"], bk["children"], self.repo.free_rooms(rt, ci_, co_, self.clock.now(), bk.get("own", "")),
                                  rooms, bool(prop.extra_bed_rate))
             if plan:
                 options = [plan[0]]
@@ -3118,7 +3413,7 @@ class ChatMixin:
                                      bk["adults"] + bk["children"], name=name, mobile=mobile, fee=fee,
                                      total=total, advance=advance)
         try:
-            self.repo.create_hold(booking, now)
+            self.repo.create_hold(booking, now, replace_own=True)
         except SoldOut:
             bk.pop("chosen", None)
             self._sold_out(ctx)
@@ -3181,7 +3476,7 @@ class ChatMixin:
             types.append((rt, p["rooms"]))
         label = self._mix_label(types)
         try:
-            self.repo.create_holds(parts, now)
+            self.repo.create_holds(parts, now, replace_own=True)
         except SoldOut:
             bk.pop("chosen", None)
             self._sold_out(ctx)
