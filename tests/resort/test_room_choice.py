@@ -296,13 +296,12 @@ def test_guest_picks_two_different_room_types_one_each(resort):
     assert sorted(booked(w)) == sorted(["Beach View Standard Rooms at First Floor", "2 Bedroom Tiny Kerala Cottage"])
 
 
-def test_ok_to_a_room_offer_goes_on_to_the_name_and_mobile_step(resort):
-    """Live chat 2026-11-23: 'Shall I go ahead with that?' -> 'ok' -> 'Great.' and nothing more."""
-    w = resort
-    say(w, "I want the cottage", GUEST, tool("change_enquiry", room_type="2 Bedroom Tiny Kerala Cottage"),
-        reply("[no reply]"))
-    w.wa.sent.clear()
+def test_ok_to_the_bots_own_question_tells_the_ai_what_it_answers(resort):
+    """Live chat 2026-11-23: 'Shall I go ahead with that?' -> 'ok' -> 'Great.': the AI must act on the offer."""
     from app.resort.models import ChatMessage
-    w.repo.add_chat(ChatMessage(GUEST, "out", "Shall I go ahead with the 2 Bedroom Tiny Kerala Cottage?", w.clock.now(), "text"))
-    say(w, "ok", GUEST, reply("Great."))
-    assert any("name" in x.lower() and "mobile" in x.lower() for x in w.wa.texts()), w.wa.texts()
+    w = resort
+    w.repo.add_chat(ChatMessage(GUEST, "out", "Shall I go ahead with the 2 Bedroom Tiny Kerala Cottage?",
+                                w.clock.now(), "text"))
+    say(w, "ok", GUEST, tool("change_enquiry", room_type="2 Bedroom Tiny Kerala Cottage"), reply("[no reply]"))
+    assert "YES/OK TO YOUR OWN LAST MESSAGE" in w.llm.calls[-1].system
+    assert any("Tiny Kerala Cottage is free" in x for x in w.wa.texts()), w.wa.texts()

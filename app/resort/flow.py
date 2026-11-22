@@ -76,8 +76,8 @@ def profile_name(raw: str | None) -> str:
     return name
 
 NOT_PAID = re.compile(
-    r"(?:not|never|haven'?t|hasn'?t|didn'?t|did not|have not|yet to|still)[^.?!]{0,15}(?:paid|pay|payment)"
-    r"|unpaid|pay\s*(?:cheythilla|cheythittilla|cheyyilla|chythilla)|അടച്ചില്ല", re.IGNORECASE)
+    r"\b(?:not|never|haven'?t|hasn'?t|didn'?t|did not|have not|yet to|still)\b[^.?!]{0,15}\b(?:paid|pay|payment)\b"
+    r"|\bunpaid\b|pay\s*(?:cheythilla|cheythittilla|cheyyilla|chythilla)|അടച്ചില്ല", re.IGNORECASE)
 PAYING_NOW = re.compile(r"\b(?:paying|paid|pay(?:ing)? now|pay cheythu|payment (?:done|made))\b|"
                         r"അടച്ചു|അടയ്ക്കാം", re.IGNORECASE)
 
@@ -388,17 +388,10 @@ class BookingBot(IdProofMixin, ChatMixin):
             # never silence (live chat 2026-11-20: 'Yes' and 'Ok' got nothing)
             if (m := ROOMS_OFFER_ASK.search(last_out)) and (st.get("bk") or {}).get("check_in"):
                 st["suggest_rooms"] = int(m.group(1))  # 'Shall I book 3 rooms?' -> 'Yes': checked in code, 3 rooms
-            outcome = self._converse(phone, st, text, in_id)
-            st = self.repo.get_state(phone)
-            if step := self.next_step(phone, st):
-                # 'ok' to 'Shall I go ahead with that?' got only 'Great.' and the guest was left hanging (live chat
-                # 2026-11-23): the open booking step (name and mobile) always follows
-                if step != (self.repo.last_outbound_text(phone) or ""):
-                    st["ok_reminded"] = step
-                    self._save(phone, st)
-                    self._text(phone, step, repeat_ok=True)
-                return "next_step"
-            return outcome
+            # 'ok' to 'Shall I go ahead with that?' got only 'Great.' (live chat 2026-11-23): the AI is told which
+            # question the 'ok' answers and acts on it; no fixed step is pushed
+            st["ok_for"] = last_out
+            return self._converse(phone, st, text, in_id)
         if outcome := self._unpaid_ack(phone, st, text):
             return outcome
         if is_ack(text) and "?" not in text:  # "ok" mid-chat ("?" is a question, not an ok) (owner, 2026-11-18): carry on to the step still open, else stay quiet

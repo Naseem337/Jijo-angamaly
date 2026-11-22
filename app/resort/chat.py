@@ -2090,6 +2090,11 @@ class ChatMixin:
             "bills, rules or facts. If a message makes no sense to you, ask the guest to say it again in a few words.\n"
             "- Every reply must make sense on its own to a guest reading it on WhatsApp.\n\n"
             f"Today is {today.isoformat()} ({today.strftime('%A')}), India time.\n\n"
+            + (f"THE GUEST'S LATEST MESSAGE IS A YES/OK TO YOUR OWN LAST MESSAGE: \"{ok_for[:300]}\". Work out what "
+               "you offered or asked there and DO it now (call the matching tool: change_enquiry, check_availability, "
+               "etc.) or answer what follows logically. Never reply with just 'Great.'/'Sure.' and stop. Do not ask "
+               "for the name and mobile again if they were already asked.\n\n"
+               if (ok_for := st.pop("ok_for", "")) else "") +
             "LANGUAGE\n"
             "- Work out the guest's language from their message. Never ask which language they want.\n"
             "- Reply in the same language but ALWAYS in English letters, never in Malayalam, Tamil or Hindi script: "
