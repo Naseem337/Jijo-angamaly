@@ -75,6 +75,9 @@ def profile_name(raw: str | None) -> str:
         return ""
     return name
 
+NOT_PAID = re.compile(
+    r"(?:not|never|haven'?t|hasn'?t|didn'?t|did not|have not|yet to|still)[^.?!]{0,15}(?:paid|pay|payment)"
+    r"|unpaid|pay\s*(?:cheythilla|cheythittilla|cheyyilla|chythilla)|അടച്ചില്ല", re.IGNORECASE)
 PAYING_NOW = re.compile(r"\b(?:paying|paid|pay(?:ing)? now|pay cheythu|payment (?:done|made))\b|"
                         r"അടച്ചു|അടയ്ക്കാം", re.IGNORECASE)
 
@@ -258,7 +261,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             pass
         if not self.READ_IMAGES:
             try:
-                self.check_payments()
+                self.check_payments(phone)
             except Exception as exc:
                 log.warning("Payment check failed: %s", exc)
             return "image_ignored"
@@ -273,7 +276,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             self._text(phone, t("unsupported", st.get("lang", "en")))
             return "unsupported"
         try:
-            self.check_payments()
+            self.check_payments(phone)
         except Exception as exc:
             log.warning("Payment check failed: %s", exc)
         st.setdefault("lang", "en")
@@ -297,8 +300,9 @@ class BookingBot(IdProofMixin, ChatMixin):
         None when no payment is waiting or the message is something else."""
         if "?" in text:
             return None
-        paying = bool(PAYING_NOW.search(text)) and len(text.split()) <= 6 and not PAY_LATER.search(text)
-        if not (is_ack(text) or paying):
+        not_paid = bool(NOT_PAID.search(text)) and len(text.split()) <= 8
+        paying = bool(PAYING_NOW.search(text)) and len(text.split()) <= 6 and not PAY_LATER.search(text) and not not_paid
+        if not (is_ack(text) or paying or not_paid):
             return None
         now = self.clock.now()
         held = next((b for b in self.repo.list_bookings(phone=phone, limit=3) if b.status == "hold"
@@ -306,9 +310,13 @@ class BookingBot(IdProofMixin, ChatMixin):
         if held is None:
             return None
         lang = st.get("lang", "en")
-        if paying:  # check Razorpay, never nag with the link
-            if not self.check_payments():
-                self._text(phone, t("pay_wait", lang), repeat_ok=True)
+        if paying or not_paid:
+            # the guest's own link is asked at the provider (never the guest's word): paid -> the confirmation goes
+            # (mark_paid); not paid -> say so truthfully
+            if self.check_payments(phone):
+                return "hold"
+            self._text(phone, t("hold_pay", lang, url=held.payment_link_url) if not_paid else t("pay_wait", lang),
+                       repeat_ok=True)
             return "hold"
         just_sent = held.payment_link_url in (self.repo.last_outbound_text(phone) or "")
         self._text(phone, t("pay_nudge", lang) if just_sent else t("hold_pay", lang, url=held.payment_link_url),
@@ -380,7 +388,17 @@ class BookingBot(IdProofMixin, ChatMixin):
             # never silence (live chat 2026-11-20: 'Yes' and 'Ok' got nothing)
             if (m := ROOMS_OFFER_ASK.search(last_out)) and (st.get("bk") or {}).get("check_in"):
                 st["suggest_rooms"] = int(m.group(1))  # 'Shall I book 3 rooms?' -> 'Yes': checked in code, 3 rooms
-            return self._converse(phone, st, text, in_id)
+            outcome = self._converse(phone, st, text, in_id)
+            st = self.repo.get_state(phone)
+            if step := self.next_step(phone, st):
+                # 'ok' to 'Shall I go ahead with that?' got only 'Great.' and the guest was left hanging (live chat
+                # 2026-11-23): the open booking step (name and mobile) always follows
+                if step != (self.repo.last_outbound_text(phone) or ""):
+                    st["ok_reminded"] = step
+                    self._save(phone, st)
+                    self._text(phone, step, repeat_ok=True)
+                return "next_step"
+            return outcome
         if outcome := self._unpaid_ack(phone, st, text):
             return outcome
         if is_ack(text) and "?" not in text:  # "ok" mid-chat ("?" is a question, not an ok) (owner, 2026-11-18): carry on to the step still open, else stay quiet
@@ -736,13 +754,22 @@ class BookingBot(IdProofMixin, ChatMixin):
         last = self.repo.last_outbound_text(phone)
         return last is None or "?" in last
 
-    def check_payments(self) -> int:
-        """Ask the payment provider about every unpaid hold. A paid link is confirmed exactly as the webhook would."""
+    PAY_CHECK_GAP_S = 15  # a guest who keeps writing 'paid' costs at most one Razorpay check per 15 s
+
+    def check_payments(self, phone: str | None = None) -> int:
+        """Ask the payment provider about unpaid holds: every guest's (the sweep) or only `phone`'s (a guest message).
+        Only the provider decides: what a guest says about paying never confirms a booking. A paid link is confirmed
+        exactly as the webhook would."""
         link_status = getattr(self.payments, "link_status", None)
         if link_status is None:
             return 0
+        if phone:
+            last = self.__dict__.setdefault("_pay_checked", {})
+            if time.monotonic() - last.get(phone, -1e9) < self.PAY_CHECK_GAP_S:
+                return 0  # just checked: the answer would be the same
+            last[phone] = time.monotonic()
         found = 0
-        for b in self.repo.list_bookings(status="hold", limit=200):
+        for b in self.repo.list_bookings(status="hold", phone=phone, limit=200):
             if not b.payment_link_id or (b.group_id and b.group_id != b.id):
                 continue  # the second part of a two-room-type stay shares the first part's link
             try:

@@ -183,3 +183,8 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 ## Waiting on the owner / go-live
 - Razorpay: the test account hit its 30-link limit; live keys (or a new test account) are needed on Railway.
 - Facts to add in the dashboard so the bot can answer them directly: pets, alcohol, couples.
+
+- Several rooms of different types (owner chat, 2026-11-23): '1 standard + 1 cottage' or 'I need 109 and 103' is ONE
+  change_enquiry with `room_picks` (one entry per room, type name or number); the code books exactly that mix if free
+  and big enough, never replaces the first room, never says specific rooms cannot be booked. An 'ok' to the bot's own
+  question is always followed by the open booking step (name and mobile), never a lone 'Great.'.

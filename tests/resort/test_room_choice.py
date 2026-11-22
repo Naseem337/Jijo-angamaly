@@ -285,3 +285,24 @@ def test_after_the_payment_link_the_form_is_never_sent_again(resort):
     for text in ("Same date", "Same persons and rooms", "Same"):
         say(w, text, GUEST, tool("ask_stay_details", place="Alleppey"), reply("[no reply]"))
         assert not any(x.startswith(FORM) for x in w.wa.texts()), (text, w.wa.texts())
+
+
+def test_guest_picks_two_different_room_types_one_each(resort):
+    """Live chat 2026-11-23: '1 standard + 1 cottage' / 'I need 109 and 103' replaced the first room, then refused."""
+    w = resort
+    say(w, "I need 109 and 103", GUEST, tool("change_enquiry", room_picks=["109", "103"]), reply("[no reply]"))
+    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+        reply("[no reply]"))
+    assert sorted(booked(w)) == sorted(["Beach View Standard Rooms at First Floor", "2 Bedroom Tiny Kerala Cottage"])
+
+
+def test_ok_to_a_room_offer_goes_on_to_the_name_and_mobile_step(resort):
+    """Live chat 2026-11-23: 'Shall I go ahead with that?' -> 'ok' -> 'Great.' and nothing more."""
+    w = resort
+    say(w, "I want the cottage", GUEST, tool("change_enquiry", room_type="2 Bedroom Tiny Kerala Cottage"),
+        reply("[no reply]"))
+    w.wa.sent.clear()
+    from app.resort.models import ChatMessage
+    w.repo.add_chat(ChatMessage(GUEST, "out", "Shall I go ahead with the 2 Bedroom Tiny Kerala Cottage?", w.clock.now(), "text"))
+    say(w, "ok", GUEST, reply("Great."))
+    assert any("name" in x.lower() and "mobile" in x.lower() for x in w.wa.texts()), w.wa.texts()

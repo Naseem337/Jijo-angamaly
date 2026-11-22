@@ -955,6 +955,10 @@ TOOLS = [
         {"type": "object", "properties": {
             "room_type": {"type": "string", "description": "the room type they want, as named in the FACTS"},
             "room_number": {"type": "string", "description": "a room number they asked for, e.g. 103"},
+            "room_picks": {"type": "array", "items": {"type": "string"},
+                           "description": "when the guest wants SEVERAL rooms of different types ('one standard and one "
+                                          "cottage', 'I need 109 and 103'): one entry per room, each a room type name "
+                                          "or a room number. Use this instead of room_type/room_number."},
             "remove_room_type": {"type": "string", "description": "a room type they do NOT want"},
             "other_room": {"type": "boolean", "description": "true when they want a different room type than offered"},
             "rooms": {"type": "integer", "description": "the new total number of rooms"},
@@ -2120,6 +2124,8 @@ class ChatMixin:
             "- Rooms: the room offered first is picked automatically. The guest may choose ANY room type or room "
             "number at any time: when they ask which rooms there are, name the room types from the FACTS (prices "
             "only if asked). Never say a room cannot be chosen, and never send a room change to the owner. Never tell "
+            "Several rooms of different types ('1 standard + 1 cottage', 'I need 109 and 103'): ONE change_enquiry with "
+            "room_picks (one entry per room); never say specific rooms cannot be booked. "
             "room numbers: 'is there 2 rooms in X?' -> 'Yes, 2 rooms available.' (a number only if the guest named it).\n"
             "- Ask only ONE thing at a time, simply. No emoji piles (one is fine).\n"
             "- Do not paste the property description. Do not mention offers, discounts or 'special' deals. Just "
@@ -2681,7 +2687,25 @@ class ChatMixin:
         if not current and (fits := self._fits(prop, {**bk, "pref": None, "rooms": 0, "own": phone})):
             current = {fits[0][0].id}
         target = None
-        if number := str(a.get("room_number") or "").strip().lstrip("#"):
+        picks = [str(x).strip().lstrip("#") for x in (a.get("room_picks") or []) if str(x).strip()]
+        if len(picks) >= 2:
+            ids: list[str] = []
+            for p in picks:
+                rt = next((r for r in rooms if p in r.room_list), None) or \
+                    next((r for r in rooms if r.name.lower() == p.lower()), None) or \
+                    self._room_in_words(p, rooms) or self._room_named(p, rooms)
+                if rt is None:
+                    return {"error": f"there is no room or room type '{p}'; the room types are in the FACTS"}
+                ids.append(rt.id)
+            if len(set(ids)) == 1:
+                target = next(r for r in rooms if r.id == ids[0])
+                a = {**a, "rooms": len(ids)}
+                st.pop("room_mix", None)
+            else:
+                st["room_mix"] = ids  # the guest's own mix: one entry per room (owner chat 2026-11-23)
+                st.pop("room_pref", None)
+                a = {**a, "rooms": len(ids)}
+        elif number := str(a.get("room_number") or "").strip().lstrip("#"):
             target = next((rt for rt in rooms if number in rt.room_list), None)
             if target is None:
                 return {"error": f"there is no room {number}; the room numbers are in the FACTS"}
@@ -2702,7 +2726,8 @@ class ChatMixin:
                 return {"ok": True, "note": "no other room type is free; the guest is told. Reply exactly [no reply]."}
         if target is not None:
             st["room_pref"] = target.id
-        persons = self._int(a, "adults") or int(bk["adults"])
+            st.pop("room_mix", None)
+        persons =self._int(a, "adults") or int(bk["adults"])
         children = self._int(a, "children") if a.get("children") is not None else int(bk.get("children") or 0)
         rooms_now = int(bk.get("rooms") or 0) or int(((st.get("checked") or "").split("|") + [""] * 5)[4] or 0)
         if self._int(a, "rooms"):
@@ -3029,6 +3054,17 @@ class ChatMixin:
         whole group itself; None otherwise (then one room type is offered as before)."""
         ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
         now = self.clock.now()
+        if bk.get("pick"):  # the guest chose the rooms themselves: exactly those, if free and big enough
+            by_id = {rt.id: rt for rt in self.repo.list_room_types(prop.id)}
+            counts: dict[str, int] = {}
+            for i in bk["pick"]:
+                counts[i] = counts.get(i, 0) + 1
+            chosen = [(by_id[i], n) for i, n in counts.items() if i in by_id]
+            if len(chosen) >= 2 and all(self.repo.free_rooms(rt, ci, co, now, bk.get("own", "")) >= n
+                                        for rt, n in chosen):
+                cap = sum(rt.max_occupancy * n for rt, n in chosen)
+                if cap >= bk["adults"] + bk["children"]:
+                    return chosen
         free = [(rt, self.repo.free_rooms(rt, ci, co, now, bk.get("own", ""))) for rt in self._types(prop, bk)]
         mix = av.mixed_rooms(free, bk["adults"], bk["children"], wanted, bool(prop.extra_bed_rate))
         if not mix or len(mix) < 2:
@@ -3205,6 +3241,8 @@ class ChatMixin:
         # "own": this guest's unpaid holds count as free rooms (a new summary replaces their open link)
         bk = {"property_id": prop.id, "check_in": ci.isoformat(), "check_out": co.isoformat(),
               "adults": adults, "children": children, "rooms": self._int(a, "rooms"), "own": ctx.phone}
+        if st.get("room_mix"):
+            bk["pick"] = list(st["room_mix"])
         st["bk"] = bk
         wanted = self._int(a, "rooms")
         if wanted and (least := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children)) \
@@ -3776,7 +3814,7 @@ class ChatMixin:
 
     def _tool_bookings(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
         ctx.priced = True  # amounts in the guest's own booking records may be stated (balance, paid)
-        paid_now = self.check_payments()  # a guest who says "I paid" gets their confirmation without waiting
+        paid_now = self.check_payments(ctx.phone)  # a guest who says "I paid" gets their confirmation without waiting
         rows = []
         for b in self.repo.list_bookings(phone=ctx.phone, limit=5):
             prop = self.repo.get_property(b.property_id)

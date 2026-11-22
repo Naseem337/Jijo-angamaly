@@ -1932,3 +1932,38 @@ def test_ok_im_paying_now_gets_no_link_nag_and_hold_the_same_room_is_the_pay_lin
     assert "automatically" in w.wa.texts()[-1] and "rzp.io" not in w.wa.texts()[-1]
     assert w.bot.handle(msg(GUEST, "can you hold the deluxe room for me")) == "hold"
     assert w.wa.texts()[-1].startswith("To hold the room") and "rzp.io" in w.wa.texts()[-1]
+
+
+def test_payment_is_decided_only_by_the_provider_never_by_the_guests_word(world):
+    w = world
+    hold(w)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    w.bot.PAY_CHECK_GAP_S = 0
+    # 'I paid' with nothing at Razorpay: truthfully not received, the booking stays on hold
+    assert w.bot.handle(msg(GUEST, "I paid")) == "hold"
+    assert "not received the payment yet" in w.wa.texts()[-1]
+    assert w.repo.get_booking(b.id).status == "hold"
+    # 'I haven't paid yet' is not a claim: the link goes
+    assert w.bot.handle(msg(GUEST, "I haven't paid yet")) == "hold"
+    assert w.wa.texts()[-1].startswith("To hold the room") and "rzp.io" in w.wa.texts()[-1]
+    # Razorpay says paid: the next 'paid' gets the real confirmation
+    w.pay.paid_links[b.payment_link_id] = "pay_1"
+    assert w.bot.handle(msg(GUEST, "paid")) == "hold"
+    assert w.repo.get_booking(b.id).status == "paid"
+
+
+def test_a_guests_payment_check_asks_only_their_own_link_and_not_more_than_once_per_gap(world):
+    w = world
+    hold(w)
+    other = "919999000111"
+    hold(w, phone=other)
+    asked = []
+    real = w.pay.link_status
+    w.pay.link_status = lambda lid: (asked.append(lid), real(lid))[1]
+    mine = w.repo.list_bookings(phone=GUEST)[0].payment_link_id
+    w.bot.check_payments(GUEST)
+    assert asked == [mine]
+    w.bot.check_payments(GUEST)  # within the gap: no second call
+    assert asked == [mine]
+    w.bot.check_payments()  # the sweep still covers everyone
+    assert len(asked) == 3
