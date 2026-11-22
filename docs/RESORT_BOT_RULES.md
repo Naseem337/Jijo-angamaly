@@ -116,7 +116,7 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 ## 8. Name, number and payment
 - Name + mobile ("same number" = the WhatsApp number) -> the enquiry summary ("Following are the glimpse of your
   enquiry," ... "Pay - X") -> "Please pay the advance using this link:\n<url>".
-- Before payment the bot never says booked or confirmed. A payment screenshot never confirms; only Razorpay does.
+- Before payment the bot never says booked or confirmed. A payment screenshot or the guest's word never confirms; only the payment check does.
 - HOLD (owner, 2026-11-23): a room is held only by paying the advance NOW. "hold the room", "reserve", "can I pay
   tomorrow / later" with the link out -> only "To hold the room, please pay the advance now using this link: <url>"
   (code, no AI, never an explanation of the hold or of the link expiring, never "paying tomorrow is fine"). Rooms
@@ -126,8 +126,11 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
   link); with the same room = the pay-now line.
 - "ok" / "thanks" while the advance is unpaid (link out) -> "Please complete the advance payment to confirm your
   booking." (the link again if it is not the message just above). Never "see you soon" before payment.
-  "ok paying now" / "paid" -> Razorpay is checked; if not paid yet only "your booking is confirmed automatically as
-  soon as the payment goes through" (no link nag). "will pay tomorrow" is NOT this: it gets the pay-now line.
+  "ok paying now" / "paid" / "I haven't paid yet" -> the payment is checked (the guest's own link only, at most
+  once every 15 s; never the guest's word). Paid -> the normal confirmation. Not paid -> "We have not received the
+  payment yet. Once it goes through (usually within a minute or two) your booking is confirmed automatically; no
+  need to pay again." "I haven't paid yet" / "not paid" -> the pay-now link. "will pay tomorrow" is NOT this: it
+  gets the pay-now line.
 - If the payment link can't be made: "We could not create the payment link just now. Our team will contact you
   shortly." Staff are alerted and the bot keeps answering.
 
