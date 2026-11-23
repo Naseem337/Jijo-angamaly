@@ -995,7 +995,7 @@ TOOLS = [
          "required": ["name"]}),
     ToolSpec(
         "talk_to_owner",
-        "The owner gets a short summary and will contact the guest; the bot keeps answering. Use when the guest asks for "
+        "The owner gets a short summary and the guest is told to contact the owner directly (with the numbers); the bot keeps answering. Use when the guest asks for "
         "the owner / a person / a call, complains, wants a refund or exception outside the policy, makes a price "
         "counter-offer, or wants to change a booking that is already PAID. Changes before payment (room type, rooms, "
         "persons, dates) are never for the owner: call change_enquiry. The guest is told automatically; reply "
@@ -1656,7 +1656,7 @@ class ChatMixin:
             return "handoff"
         if CHANGE_ASK.search(text) and any(b.status in ("paid", "checked_in", "hold")
                                            for b in self.repo.list_bookings(phone=phone, limit=5)):
-            msg = t("owner_will_help", lang)  # the owner was alerted when the message came in
+            msg = self._owner_msg("owner_will_help", st)  # the owner was alerted; the guest is told to contact the owner
         elif closed := self._closed_place(text, True):
             numbers = ", ".join(display_phone(n) for n in (closed.contact_numbers or self._all_contact_numbers()))
             msg = t("closed_place", lang, place=(closed.city or closed.place or closed.name).split(",")[0].strip(), numbers=numbers)
@@ -1733,6 +1733,15 @@ class ChatMixin:
 
     def _all_contact_numbers(self) -> list[str]:
         return [n for p in self.repo.list_properties(active_only=False) for n in p.contact_numbers][:2]
+
+    def _owner_msg(self, key: str, st: dict[str, Any]) -> str:
+        """A line that sends the guest to the owner: 'Please contact the owner directly: <numbers>' (owner, 2026-11-23:
+        tell them to contact the owner; never 'the owner will contact you'). The resort's own numbers when it is known."""
+        prop = self._known_place(st)
+        numbers = " / ".join(display_phone(n) for n in
+                             (prop.contact_numbers if prop and prop.contact_numbers else self._all_contact_numbers())[:2])
+        msg = t(key, st.get("lang", "en"), numbers=numbers)
+        return msg if numbers else re.sub(r":\s*([.\u0964]?)$", r"\1", msg)  # no number saved: no dangling colon
 
     def _place_by_start(self, text: str) -> Property | None:
         """An answer to the location question that starts like one of our towns ('alloy', 'allep', 'kanth'): that one,
@@ -2189,8 +2198,16 @@ class ChatMixin:
             "weather, best season) helpfully, like a friendly person at the front desk. Places to see, how to reach, "
             "weather and best season: answer from what you know about the town (name 3-4 well-known places), never "
             "'the owner will guide you'. For the resort's own rules and services (pets, alcohol, extra services) use "
-            "the FACTS; if a fact is not there, say the owner will confirm and give the owner's numbers. Only for things that have nothing to "
+            "the FACTS; if a fact is not there, tell them to contact the owner directly and give the owner's numbers ('Please contact the owner: <numbers>'). Only for things that have nothing to "
             "do with the trip (news, jokes, coding) say politely in one line that you help with stays at the resort.\n"
+            "- NEVER GUESS, NEVER PROMISE A CALLBACK (owner, 2026-11-23): anything you do not know or cannot handle "
+            "(a fact not in the FACTS, a complaint, a request outside the policy, a guest asking for 'contact' / the "
+            "number): do not predict or guess. Give the owner's numbers: 'Please contact the owner directly: "
+            "<numbers>'. Never say the owner or the team 'will contact you', 'will message you' or 'will get back'.\n"
+            "- TOO MANY QUESTIONS (owner, 2026-11-23): when ONE message asks 3 or more separate questions about the "
+            "resort (a long list of things, not booking details like dates or persons), do not answer them all: answer "
+            "nothing in detail and say in one short line to contact the owner directly, with the owner's numbers "
+            "('Please contact the owner directly: <numbers>').\n"
             "- When the guest's message also asks a question, ANSWER that question in one or two short lines even "
             "when a tool tells you to reply [no reply]: the booking messages still go automatically after your answer. "
             "Never repeat those booking messages yourself.\n"
@@ -2263,7 +2280,7 @@ class ChatMixin:
             "you know their dates, call ask_stay_details.\n"
             "- Every price, date, room count and availability you state must come from the tool results or the "
             "FACTS below. Never calculate your own totals. Never invent the resort's amenities or policies; a resort "
-            "fact you do not have: the owner will tell them (give the owner's number).\n"
+            "fact you do not have: tell them to contact the owner directly (give the owner's numbers).\n"
             "- Never invent charges, bills (electricity, water, utility), deposits, fees or rules that are not in the "
             "FACTS. If a message makes no sense (often a voice note heard wrongly), ask the guest to say it again in a "
             "few words; never guess what they meant.\n"
@@ -2286,7 +2303,7 @@ class ChatMixin:
             "the payment, usually within a minute or two, and that they need not pay again. NEVER confirm a booking "
             "from a screenshot alone: only Razorpay confirms. If the screenshot shows a failed payment, tell them it "
             "did not go through and use send_payment_link. If it is not a payment (a photo, a document), answer "
-            "naturally about what it shows or say the team will look at it.\n"
+            "naturally about what it shows, or tell them to contact the owner directly with the owner's numbers.\n"
             "- If money was deducted but they got no confirmation, tell them not to pay again, that it normally "
             "shows within a few minutes, and give the owner's number. Never promise a refund.\n\n"
             "CANCELLATION, CHANGES AND REFUNDS\n"
@@ -2308,7 +2325,7 @@ class ChatMixin:
             "- Look things up only when needed, to save effort: a guest who asks about an earlier booking, a payment, a link, a stay date or something said before gets the real answer (use the records, my_bookings and/or recall_old_chat). A guest who only says hi, makes small talk or jokes gets a short, polite, friendly reply with no lookup.\n"
             "- Earlier bookings: if they ask about one, answer from the records or my_bookings in plain words: dates, place, rooms, whether it is confirmed, how much was paid and what is left to pay at the property. Paid and upcoming: say you can see it and be warm about their coming stay. Past: a warm thanks or welcome back. ON HOLD and still valid: tell them it is waiting for payment and offer the link (send_payment_link). Expired, cancelled or failed: say so kindly and offer to book again. Payment queries are answered politely and respectfully, never defensively.\n"
             "- A guest who already has a booking and asks for rooms or other dates wants a NEW booking: help with it. "
-            "Never ask 'is this a new one?'. A request to CHANGE the dates or rooms of an existing booking is NOT a new booking: say in one short line that the owner will help (the owner is alerted automatically). To CANCEL: call my_bookings and tell them in one short line the charge from if_cancelled_today (e.g. '25% charge, Rs X refunded') and that the owner will confirm; for anything outside the policy call talk_to_owner. With only past stays, add at most one warm welcome-back line.\n"
+            "Never ask 'is this a new one?'. A request to CHANGE the dates or rooms of an existing booking is NOT a new booking: tell them in one short line to contact the owner directly, with the owner's numbers (the owner is alerted too). To CANCEL: call my_bookings and tell them in one short line the charge from if_cancelled_today (e.g. '25% charge, Rs X refunded') and to contact the owner directly to confirm; for anything outside the policy call talk_to_owner. With only past stays, add at most one warm welcome-back line.\n"
             "- A new booking always takes its dates, rooms and price from what the guest says now and from the tools, never from an earlier booking. Never paste an old payment link: only the send_payment_link tool sends one, and only for a booking still on hold.\n"
             "- Warm and easy: ONE short line (two at most), no jargon. Answer only what was asked; never add "
             "explanations, reasons, policies or advice nobody asked for.\n"
@@ -2973,7 +2990,7 @@ class ChatMixin:
         if quiet and not queued:
             return "quiet"
         if not reply and not queued:
-            self._text(phone, t("ai_down", st.get("lang", "en")))
+            self._text(phone, self._owner_msg("ai_down", st))
             now = self.clock.now()
             last = getattr(self, "_down_alerted", None)
             if last is None or now - last >= timedelta(minutes=30):  # one staff alert per outage, not per message
@@ -3748,10 +3765,10 @@ class ChatMixin:
             log.error("Payment link failed for %s: %s", booking.id, exc)
             booking.status, booking.notes = "failed", f"payment link failed: {exc}"
             self.repo.save_booking(booking)
-            self._text(phone, t("pay_failed_link", lang))
+            self._text(phone, self._owner_msg("pay_failed_link", ctx.st))
             self.handoff(phone, st, f"payment link could not be created for {booking.id}", notify_guest=False)
             ctx.handed_off = True
-            return {"error": "payment link failed; the team has been told and will contact the guest"}
+            return {"error": "payment link failed; the guest is told to contact the owner directly (with the numbers) and the team has been alerted"}
         booking.payment_link_id, booking.payment_link_url = link.id, link.url
         self.repo.save_booking(booking)
         self.close_old_holds(phone, {booking.id})  # one open enquiry per guest: the new one replaces older ones
@@ -3812,10 +3829,10 @@ class ChatMixin:
             for b in parts:
                 b.status, b.notes = "failed", f"payment link failed: {exc}"
                 self.repo.save_booking(b)
-            self._text(phone, t("pay_failed_link", lang))
+            self._text(phone, self._owner_msg("pay_failed_link", ctx.st))
             self.handoff(phone, st, f"payment link could not be created for {parts[0].id}", notify_guest=False)
             ctx.handed_off = True
-            return {"error": "payment link failed; the team has been told and will contact the guest"}
+            return {"error": "payment link failed; the guest is told to contact the owner directly (with the numbers) and the team has been alerted"}
         ids = [b.id for b in parts]
         for b in parts:
             b.payment_link_id, b.payment_link_url = link.id, link.url

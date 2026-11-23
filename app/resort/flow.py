@@ -508,7 +508,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         # the bot never pauses itself (owner, 2026-11-20: a guest's 'Hi' after a failed payment link got silence for
         # 24 h): staff get the summary and the bot keeps answering. Only staff pause a chat (dashboard / their reply).
         if notify_guest:
-            self._text(phone, t("handoff", st.get("lang", "en")))
+            self._text(phone, self._owner_msg("handoff", st))
         self.alert_staff(summary, st.get("property_id"))
         return "handoff"
 

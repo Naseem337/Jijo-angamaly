@@ -133,8 +133,8 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
   payment yet. Once it goes through (usually within a minute or two) your booking is confirmed automatically; no
   need to pay again." "I haven't paid yet" / "not paid" -> the pay-now link. "will pay tomorrow" is NOT this: it
   gets the pay-now line.
-- If the payment link can't be made: "We could not create the payment link just now. Our team will contact you
-  shortly." Staff are alerted and the bot keeps answering.
+- If the payment link can't be made: "We could not create the payment link just now. Please contact the owner
+  directly: <numbers>." Staff are alerted and the bot keeps answering.
 
 ## 9. After payment
 - "Following are the glimpse of your booking, ... *Booking Confirmed ✅*" (with the room numbers) -> the cancellation
@@ -150,9 +150,14 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 - Short answers (owner, 2026-11-23): ONE short line, two at most; answer only what was asked, no explanations,
   reasons or policies nobody asked for. One thing asked at a time.
 - "sir" / "madam" only once, at the start of the chat; never bro, dear, chetta, chechi or the guest's name.
-- Places to see, how to reach and the weather are answered from knowledge; "the owner will tell" only for the resort's
+- Places to see, how to reach and the weather are answered from knowledge; "please contact the owner" (with the numbers) only for the resort's
   own facts that are not in the dashboard (pets, alcohol, couples ... can be added in the dashboard).
-- A guest asking for the owner: the owner gets a summary; the bot keeps answering.
+- A guest asking for the owner: the owner gets a summary; the bot keeps answering. The GUEST is told to contact the
+  owner: "Thank you. Please contact the owner directly: <numbers>." (owner, 2026-11-23). Never "the owner / our team
+  will contact you". The same line (with the numbers) for: a change to a paid booking, an AI outage, a payment link
+  that failed, and a fact the dashboard does not have. In Manglish / Tanglish / Hinglish too.
+- Too many questions at once (owner, 2026-11-23): when ONE message asks 3 or more separate questions about the resort,
+  the AI does not answer them all; it says in one short line to contact the owner directly, with the numbers.
 - Guest images: the AI looks at them (payment screenshot rules are in its prompt); this line used to say the opposite.
 
 ## 11. Languages
@@ -164,7 +169,7 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 
 ## 12. Changes and cancellations of a PAID booking
 - (Changes before payment are made by the bot itself, see §5.) The bot cannot change or cancel a paid booking. A change goes to the owner (alerted). A cancellation: the bot states the
-  policy charge and says the owner will confirm.
+  policy charge and tells them to contact the owner directly to confirm.
 
 ## 13. Memory and conversations
 - A conversation ends on "restart" or when a booking is confirmed / cancelled. After a pause of 24 h the guest's words

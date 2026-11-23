@@ -670,7 +670,7 @@ def test_payment_link_failure_hands_off(world, monkeypatch):
     assert w.repo.list_bookings(phone=GUEST)[0].status == "failed"
     # the bot never pauses itself (owner, 2026-11-20): the guest's 'Hi' afterwards still gets an answer
     assert say(w, "Hi", GUEST, reply("Hi, how can I help?")) != "paused"
-    assert w.wa.texts()[-1] != "We could not create the payment link just now. Our team will contact you shortly."
+    assert "Please contact the owner directly: 9497861924 / 9995855789." in " ".join(w.wa.texts())
 
 
 # --------------------------------------------------------------------------- languages and voice
@@ -807,7 +807,7 @@ def test_talk_to_owner_sends_the_owner_a_summary_and_the_bot_keeps_answering(wor
     w = world
     say(w, "I want to talk to the owner", GUEST, tool("talk_to_owner", reason="guest asked for the owner"),
         reply("[no reply]"))
-    assert w.wa.texts()[-1] == "Thank you. Our team will message you here shortly."
+    assert w.wa.texts()[-1] == "Thank you. Please contact the owner directly: 9497861924 / 9995855789."  # never "will contact you"
     staff = w.wa.texts(STAFF)[-1]
     assert staff.startswith("Guest needs the team: guest asked for the owner") and GUEST in staff
     assert not w.repo.is_paused(GUEST)[0]  # the bot never pauses itself (owner, 2026-11-20)
@@ -1967,3 +1967,30 @@ def test_a_guests_payment_check_asks_only_their_own_link_and_not_more_than_once_
     assert asked == [mine]
     w.bot.check_payments()  # the sweep still covers everyone
     assert len(asked) == 3
+
+
+def test_every_hand_over_line_tells_the_guest_to_contact_the_owner_with_the_numbers(world):
+    """Owner, 2026-11-23: tell them 'please contact the owner' with the numbers; never 'the owner / team will contact
+    you'. The same in Manglish, Tanglish and Hinglish; with no number saved there is no dangling colon."""
+    w = world
+    for key in ("owner_will_help", "handoff", "ai_down", "pay_failed_link"):
+        for lang in ("en", "mn", "tn", "hn"):
+            text = w.bot._owner_msg(key, {"lang": lang, "form_place": w.p1.id})
+            assert "9497861924 / 9995855789" in text, (key, lang, text)
+            assert not re.search(r"will (?:contact|message|help)", text), (key, lang, text)
+    w.p1.contact_numbers = []
+    w.repo.save_property(w.p1)
+    for p in w.repo.list_properties(active_only=False):
+        p.contact_numbers = []
+        w.repo.save_property(p)
+    text = w.bot._owner_msg("handoff", {"lang": "en", "form_place": w.p1.id})
+    assert text == "Thank you. Please contact the owner directly.", text
+
+
+def test_the_ai_is_told_to_hand_over_to_the_owner_when_too_many_things_are_asked(world):
+    w = world
+    say(w, "is there parking, pool, wifi, pets, food and a beach?", GUEST, reply("Please contact the owner directly: 9497861924."))
+    system = w.llm.calls[-1].system
+    assert "TOO MANY QUESTIONS" in system and "contact the owner directly" in system
+    assert "the owner will contact" not in system and "owner will confirm" not in system
+    assert "NEVER GUESS, NEVER PROMISE A CALLBACK" in system and "Never say the owner or the team" in system
