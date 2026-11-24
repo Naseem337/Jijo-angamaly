@@ -173,3 +173,12 @@ def test_a_bad_agent_mode_is_refused(monkeypatch):
     with pytest.raises(ConfigError):
         load_resort_config()
     assert ResortConfig.model_fields["agent_mode"].default == "old"
+
+
+def test_a_marker_shows_in_sent_but_sends_nothing():
+    sent: list = []
+    box = Outbox(PHONE, lambda to, text: sent.append(text), lambda to, refs: sent.append(refs))
+    box.text("rooms_ok", "Yes.")
+    box.marker("photos:pending")
+    box.flush()
+    assert sent == ["Yes."] and box.keys == ["rooms_ok", "photos:pending"]

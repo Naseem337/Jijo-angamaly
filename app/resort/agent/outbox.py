@@ -34,6 +34,10 @@ class Outbox:
     def photos(self, key: str, refs: list[str]) -> None:
         self.queue.append(Item("photos", key, refs=tuple(refs)))
 
+    def marker(self, key: str) -> None:
+        """A placeholder in `sent` that sends nothing (e.g. 'photos:pending' until the photo flow is built, Step AI-2b)."""
+        self.queue.append(Item("marker", key))
+
     @property
     def keys(self) -> list[str]:
         """The keys sent or queued this turn: the tool result's `sent` list."""
