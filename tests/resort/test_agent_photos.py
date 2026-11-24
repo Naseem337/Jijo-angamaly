@@ -87,12 +87,12 @@ def test_the_glimpse_goes_once_and_a_second_check_sends_no_photo_twice(pw):
     assert photo_rows(w) == w.general + w.refs["deluxe"]
 
 
-def test_a_new_room_after_a_change_of_persons_gets_only_its_own_photos(pw):
+def test_a_new_room_after_a_change_gets_only_its_own_photos(pw):
     w = pw
     run(w, "update_enquiry", STAY)
-    result, items, _ = run(w, "update_enquiry", {**STAY, "adults": 4, "rooms": 1})  # now the Family Suite fits one room
-    assert result["sent"] == ["rooms_plain", "room_label", "photos:2", "ask_contact"]
-    assert items[1][1] == "*Family Suite*" and photo_rows(w)[-2:] == w.refs["family"]
+    result, items, _ = run(w, "update_enquiry", {**STAY, "room_picks": [{"room_type": "Family Suite"}]})  # same dates
+    assert result["sent"] == ["room_picked", "rooms_plain", "room_label", "photos:2", "ask_contact"]
+    assert items[2][1] == "*Family Suite*" and photo_rows(w)[-2:] == w.refs["family"]
 
 
 def test_a_group_split_over_two_room_types_shows_both(pw):

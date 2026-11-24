@@ -189,7 +189,7 @@ def test_hi_in_the_middle_of_a_chat_carries_on_instead_of_starting_again(world):
     w = world
     assert say(w, "hi") == "greeting"
     say(w, "need a room in Pozhiyoram", GUEST, reply("Sure. Which dates?"))
-    form = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
+    form = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"
     assert w.wa.texts()[-1] == form  # never the AI's own 'Which dates?' (client, 2026-11-18)
     assert say(w, "hi") == "greeting"  # mid-chat: 'Hi' and the open step, no AI call (owner, 2026-11-22)
     assert w.wa.texts()[-2:] == [form, "Hi. Please share the details above."]
@@ -295,7 +295,7 @@ def test_a_misspelt_place_is_understood_and_the_form_follows(world, answer, plac
     assert w.wa.texts()[-1].startswith("Please share these details")
 
 
-FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
+FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"
 
 
 def test_restart_starts_a_fresh_conversation_and_keeps_bookings(world):
@@ -355,11 +355,11 @@ def test_details_spread_over_messages_are_checked_in_code_not_asked_again(world)
     w = world
     say(w, "need a room in Alleppey", GUEST, tool("ask_stay_details", place="Alleppey"), reply("[no reply]"))
     say(w, "dec 12", GUEST)
-    assert w.wa.texts() == [FORM, "Please share these details:\n\nCheck out :\nNumber of persons :\nNumber of rooms:"]  # only what is missing
+    assert w.wa.texts() == [FORM, "Please share these details:\n\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"]  # only what is missing
     say(w, "3 persons, till 15", GUEST)
     texts = w.wa.texts()
     assert "Yes, rooms are available for your dates." in texts[-3:]
-    assert texts[-2].startswith("For 3 persons, 2 rooms are needed.")  # the rooms note before the ask
+    assert texts[-2].startswith("For 3 persons, 2 rooms are needed (2 per room).")  # the rooms note before the ask
     assert texts[-1] == "Please share your name and mobile number to proceed."
     assert w.repo.get_state(GUEST)["bk"]["check_out"] == "2026-12-15"
 
@@ -550,10 +550,11 @@ def test_ten_guests_never_one_room(world):
     say(w, "10 of us, Alleppey 10 Nov 1 night", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=1, adults=10), reply("ok"))
     options = last_tool(w)["options"]
-    # Family Suite fits 4 adults: 10 people need 3 rooms (3 free), never 1 or 2. Deluxe can't take them.
-    assert [(o["room_type"], o["rooms_possible"]) for o in options] == [("Family Suite", [3])]
+    # 2 adults per room (owner, 2026-11-24): 10 people need 5 rooms (2 Deluxe + 3 Family Suite), never 1 or 2.
+    assert [(o["room_type"], o["rooms_possible"]) for o in options] == [("2 Deluxe + 3 Family Suite", [5])]
     say(w, "1 room", GUEST)  # too few rooms: the fixed line with the minimum, never the AI (owner, 2026-11-19)
-    assert w.wa.texts()[-1] == "Max 3 persons per room (2 + 1 extra bed), so 10 persons need at least 3 rooms."
+    assert "Max 3 persons per room, so 10 persons need at least 4 rooms." in w.wa.texts()
+    assert w.wa.texts()[-1] == "Do you need an extra bed?"  # 3 + 3 + 2 + 2: two rooms hold 3 adults, asked once
 
 
 def test_no_room_fits_says_so(world):
@@ -1561,7 +1562,7 @@ def test_the_form_then_glimpse_then_ask_name_in_the_clients_order(world):
         if rt.name != "Deluxe":
             w.repo.save_room_type(RoomType(**{**rt.__dict__, "active": False}))
     say(w, "Pozhiyoram", GUEST, tool("ask_stay_details", place="Pozhiyoram"), reply("[no reply]"))
-    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
+    assert w.wa.texts()[-1] == "Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"
     say(w, "Check in : 10 Nov\nCheck out : 12 Nov\nNumber of persons : 2", GUEST,
         tool("check_availability", place="Pozhiyoram", check_in="2026-11-10", check_out="2026-11-12", adults=2),
         reply("Rooms are available sir. Beach View AC Room - 3000 per night, total 6000. Name and mobile please."))

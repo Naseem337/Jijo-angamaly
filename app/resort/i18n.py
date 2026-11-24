@@ -42,7 +42,9 @@ S: dict[str, dict[str, str]] = {
     # the client's words (2026-11-17); {towns} comes from the properties in the dashboard
     "ask_location": _t(*["Sure, Kindly confirm the Location 📍\n{towns} ?"] * 4),
     # the client's booking form (2026-11-17), always this English template
-    "form": _t(*["Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"] * 4),
+    "form": _t(*["Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"] * 4),
+    # asked once, only when a room will hold 3 adults (owner, 2026-11-24); the extra bed is never added by itself
+    "ask_extra_bed": _t(*["Do you need an extra bed?"] * 4),
     "ask_contact": _t(*["Please share your name and mobile number to proceed."] * 4),
     "ask_name": _t(*["Please share your name."] * 4),
     "closed_place": _t(*["Sorry, {place} is currently not available."] * 4),
@@ -67,8 +69,8 @@ S: dict[str, dict[str, str]] = {
     "photos_sent": _t(*["All the photos are sent above."] * 4),
     "dates_for_availability": _t(*["To check which rooms are available, we need your check-in and check-out dates."] * 4),
     "rooms_plain": _t(*["For {persons} persons: {rooms} room(s)."] * 4),
-    "rooms_note": _t(*["For {persons} persons, {rooms} rooms are needed. Or {persons} persons can stay in {fewer} "
-                       "room(s) with extra beds (₹{rate} per extra bed per night)."] * 4),
+    "rooms_note": _t(*["For {persons} persons, {rooms} rooms are needed (2 per room). Or {persons} persons can stay in "
+                       "{fewer} room(s), up to 3 per room."] * 4),
     "extra_bed": _t(*["{beds} extra bed(s) added: ₹{rate} per bed per night."] * 4),
     "price_answer": _t(*["{rooms} room(s), {room}{beds}, {dates} ({nights} nights): total {total}."] * 4),
     "price_beds": _t(*[" + {beds} extra bed(s)"] * 4),
@@ -76,11 +78,11 @@ S: dict[str, dict[str, str]] = {
     "past_date": _t(*["{day} has already passed. Please send your check-in and check-out dates again."] * 4),
     "rooms_beds": _t(*["For {persons} persons: {rooms} room(s) + {beds} extra bed(s) (₹{rate} per extra bed per night)."] * 4),
     "rooms_none_alt": _t(*["Sorry, rooms are not available for your dates. Rooms are free on {dates}."] * 4),
-    "beds_offer": _t(*["{persons} persons fit in {rooms} rooms with extra beds (2 + 1 per room, ₹{rate} per extra bed "
-                       "per night). Shall I go ahead with {rooms} rooms?"] * 4),
+    "beds_offer": _t(*["{persons} persons fit in {rooms} rooms (up to 3 per room). Shall I go ahead with {rooms} "
+                       "rooms?"] * 4),
     "rooms_most": _t(*["For your dates {rooms} room(s) are free, enough for up to {cap} persons. Please tell me how many "
                        "persons will come, or send other dates for all {persons}."] * 4),
-    "min_rooms": _t(*["Max 3 persons per room (2 + 1 extra bed), so {persons} persons need at least {rooms} rooms."] * 4),
+    "min_rooms": _t(*["Max 3 persons per room, so {persons} persons need at least {rooms} rooms."] * 4),
     "or": _t("or", "അല്ലെങ്കിൽ", "அல்லது", "या"),
     # the client wants no talk about payment here (2026-11-17): just the link and "please pay"
     "pay": _t('Please pay the advance using this link:\n{url}',
@@ -210,8 +212,9 @@ MN = {
     "photos_sent": "Ella photos-um mukalil ayachittund.",
     "dates_for_availability": "Rooms available aano ennu nokkan check-in, check-out dates venam.",
     "rooms_plain": "{persons} perkku {rooms} room.",
-    "rooms_note": "{persons} perkku {rooms} rooms venam. Allenkil {fewer} room-il extra bed vechu {persons} perkkum "
-                  "nikkam (oru extra bed-inu ₹{rate} per night).",
+    "ask_extra_bed": "Extra bed venamo?",
+    "rooms_note": "{persons} perkku {rooms} rooms venam (oru room-il 2 per). Allenkil {fewer} room-il {persons} perkkum "
+                  "nikkam (oru room-il max 3).",
     "extra_bed": "{beds} extra bed add cheyyum: oru bed-inu ₹{rate} per night.",
     "price_answer": "{rooms} room, {room}{beds}, {dates} ({nights} night): motham {total}.",
     "price_beds": " + {beds} extra bed",
@@ -219,11 +222,10 @@ MN = {
     "past_date": "{day} kazhinju poyi. Check-in, check-out dates onnu koodi ayakkamo?",
     "rooms_beds": "{persons} perkku {rooms} room + {beds} extra bed venam (oru extra bed-inu ₹{rate} per night).",
     "rooms_none_alt": "Sorry, ningalude dates-il rooms available alla. {dates} dates-il rooms und.",
-    "beds_offer": "{persons} perkku {rooms} rooms-il extra bed vechu set aakam (oru room-il 2 + 1, extra bed-inu "
-                  "₹{rate} per night). {rooms} rooms book cheyyatte?",
+    "beds_offer": "{persons} perkku {rooms} rooms-il set aakam (oru room-il max 3 per). {rooms} rooms book cheyyatte?",
     "rooms_most": "Ningalude dates-il {rooms} rooms free undu, {cap} perkku vare. Ethra per varum ennu parayamo, "
                   "allenkil {persons} perkkum vere dates ayakkamo.",
-    "min_rooms": "Oru room-il max 3 per (2 + 1 extra bed), athukond {persons} perkku kurachu {rooms} rooms venam.",
+    "min_rooms": "Oru room-il max 3 per, athukond {persons} perkku kurachu {rooms} rooms venam.",
     "owner_will_help": "Please owner-ne direct contact cheyyuka: {numbers}.",
     "pay_failed_link": "Payment link ippo undaakkaan pattiyilla. Please owner-ne direct contact cheyyuka: {numbers}.",
     "room_not_free": "Sorry, ningalude dates-il {room} free alla.",
@@ -295,8 +297,9 @@ TN = {
     "photos_sent": "Ella photos-um mela anupitten.",
     "dates_for_availability": "Rooms available-a nu paakka check-in, check-out dates venum.",
     "rooms_plain": "{persons} perukku {rooms} room.",
-    "rooms_note": "{persons} perukku {rooms} rooms venum. Illana {fewer} room-la extra bed vechu {persons} perum "
-                  "thangalam (oru extra bed ₹{rate} per night).",
+    "ask_extra_bed": "Extra bed venumaa?",
+    "rooms_note": "{persons} perukku {rooms} rooms venum (oru room-la 2 per). Illana {fewer} room-la {persons} perum "
+                  "thangalam (oru room-la max 3).",
     "extra_bed": "{beds} extra bed add pannuvom: oru bed-ku ₹{rate} per night.",
     "price_answer": "{rooms} room, {room}{beds}, {dates} ({nights} night): total {total}.",
     "price_beds": " + {beds} extra bed",
@@ -304,11 +307,10 @@ TN = {
     "past_date": "{day} mudinjiduchu. Check-in, check-out dates innoru thadava anuppunga.",
     "rooms_beds": "{persons} perukku {rooms} room + {beds} extra bed venum (oru extra bed ₹{rate} per night).",
     "rooms_none_alt": "Sorry, unga dates-la rooms illa. {dates} dates-la rooms irukku.",
-    "beds_offer": "{persons} perukku {rooms} rooms-la extra bed vechu adjust pannalam (2 + 1 per room, extra bed "
-                  "₹{rate} per night). {rooms} rooms book pannatuma?",
+    "beds_offer": "{persons} perukku {rooms} rooms-la adjust pannalam (oru room-la max 3 per). {rooms} rooms book pannatuma?",
     "rooms_most": "Unga dates-la {rooms} rooms free irukku, {cap} per varaikkum. Evlo per varuvaanga nu sollunga, "
                   "illa {persons} perukkum vera dates anuppunga.",
-    "min_rooms": "Oru room-la max 3 per (2 + 1 extra bed), so {persons} perukku kammiyaa {rooms} rooms venum.",
+    "min_rooms": "Oru room-la max 3 per, so {persons} perukku kammiyaa {rooms} rooms venum.",
     "failed": "Payment nadakkala pola irukku. Innoru thadava try pannunga:",
     "retry_link": "{url}",
     "pending": "Payment link innum {minutes} nimisham irukku: {url}",
@@ -354,8 +356,9 @@ HN = {
     "photos_sent": "Saari photos upar bhej di hain.",
     "dates_for_availability": "Rooms available hain ya nahi dekhne ke liye check-in aur check-out dates chahiye.",
     "rooms_plain": "{persons} logon ke liye {rooms} room.",
-    "rooms_note": "{persons} logon ke liye {rooms} rooms chahiye. Ya {fewer} room mein extra bed ke saath {persons} "
-                  "log reh sakte hain (ek extra bed ₹{rate} per night).",
+    "ask_extra_bed": "Kya aapko extra bed chahiye?",
+    "rooms_note": "{persons} logon ke liye {rooms} rooms chahiye (ek room mein 2 log). Ya {fewer} room mein {persons} "
+                  "log reh sakte hain (ek room mein max 3).",
     "extra_bed": "{beds} extra bed add karenge: ek bed ka ₹{rate} per night.",
     "price_answer": "{rooms} room, {room}{beds}, {dates} ({nights} night): total {total}.",
     "price_beds": " + {beds} extra bed",
@@ -363,11 +366,10 @@ HN = {
     "past_date": "{day} nikal chuka hai. Check-in aur check-out dates phir se bhejiye.",
     "rooms_beds": "{persons} logon ke liye {rooms} room + {beds} extra bed chahiye (ek extra bed ₹{rate} per night).",
     "rooms_none_alt": "Sorry, aapki dates par rooms available nahi hain. {dates} ko rooms free hain.",
-    "beds_offer": "{persons} logon ke liye {rooms} rooms mein extra bed ke saath ho jayega (2 + 1 per room, extra bed "
-                  "₹{rate} per night). {rooms} rooms book karun?",
+    "beds_offer": "{persons} logon ke liye {rooms} rooms mein ho jayega (ek room mein max 3 log). {rooms} rooms book karun?",
     "rooms_most": "Aapki dates par {rooms} rooms free hain, {cap} logon tak. Kitne log aayenge bataiye, "
                   "ya sabhi {persons} ke liye doosri dates bhejiye.",
-    "min_rooms": "Ek room mein max 3 log (2 + 1 extra bed), isliye {persons} logon ke liye kam se kam {rooms} rooms chahiye.",
+    "min_rooms": "Ek room mein max 3 log, isliye {persons} logon ke liye kam se kam {rooms} rooms chahiye.",
     "failed": "Lagta hai payment nahi hua. Ek baar phir try kijiye:",
     "retry_link": "{url}",
     "pending": "Payment link abhi {minutes} minute aur chalega: {url}",

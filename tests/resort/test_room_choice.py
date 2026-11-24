@@ -234,7 +234,8 @@ def test_a_hi_in_the_middle_of_the_chat_gives_what_we_know_and_the_open_step(res
     texts = w.wa.texts()
     assert "Hi, How may I assist you?" not in texts
     assert texts[0] == "Hi. Your enquiry: Pozhiyoram, Alleppey, 13 Jan 2027 to 17 Jan 2027, 3 person(s), 1 room(s).", texts
-    assert texts[-1] == "Please send your name and mobile number here to go ahead with the booking."  # the ask is just above
+    # 3 persons in 1 room: the extra-bed question was the last message, so the name ask goes in full (owner, 2026-11-24)
+    assert texts[-1] == "Please share your name and mobile number to proceed."
     w.wa.sent.clear()
     say(w, "hi")  # again: still answered
     assert w.wa.texts() and w.wa.texts()[0].startswith("Hi. Your enquiry:")

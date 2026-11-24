@@ -16,7 +16,7 @@ from app.resort.agent.tools import TOOLS, AgentTools
 from app.resort.i18n import t
 from app.resort.models import Booking
 
-FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
+FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"
 STAY = {"place": "Alleppey", "check_in": "2026-11-10", "check_out": "2026-11-12"}  # today in the tests is 2 Nov 2026
 
 
@@ -110,7 +110,7 @@ def test_the_form_has_only_the_missing_lines(world):
 
 def test_persons_missing_asks_only_for_persons(world):
     _, texts, _ = update(world, {**STAY})
-    assert texts["form"] == "Please share these details:\n\nNumber of persons :\nNumber of rooms:"
+    assert texts["form"] == "Please share these details:\n\nNumber of adults (above 6 years) :\nNumber of rooms:"
 
 
 def test_nights_give_the_check_out(world):
@@ -168,9 +168,9 @@ def test_the_same_stay_again_sends_nothing(world):
 
 def test_only_the_persons_changed_gives_the_new_rooms_sentence_and_the_name_ask(world):
     update(world, {**STAY, "adults": 2})
-    result, texts, _ = update(world, {**STAY, "adults": 4})
+    result, texts, _ = update(world, {**STAY, "adults": 3})  # 3 adults: 2 rooms by default (2 per room)
     assert result["sent"] == ["rooms_note", "ask_contact"] and "rooms_ok" not in texts  # same dates: not said twice
-    assert result["facts"]["rooms"] == 2
+    assert result["facts"]["rooms"] == 2 and result["facts"]["extra_bed_question"] is False
 
 
 def test_new_dates_say_rooms_available_again(world):
@@ -181,8 +181,8 @@ def test_new_dates_say_rooms_available_again(world):
 
 def test_a_field_the_ai_leaves_out_is_never_lost(world):
     update(world, {**STAY, "adults": 2})
-    result, _, _ = update(world, {"place": "Alleppey", "children": 1})
-    assert result["facts"]["adults"] == 2 and result["facts"]["children"] == 1
+    result, _, _ = update(world, {"place": "Alleppey", "rooms": 2})
+    assert result["facts"]["adults"] == 2 and result["facts"]["rooms"] == 2
     assert result["facts"]["check_in"] == "2026-11-10"
 
 
@@ -190,15 +190,19 @@ def test_a_field_the_ai_leaves_out_is_never_lost(world):
 
 
 def test_no_number_of_rooms_means_the_fewest_that_fit(world):
-    result, texts, _ = update(world, {**STAY, "adults": 4})
+    result, texts, _ = update(world, {**STAY, "adults": 4})  # 2 adults per room
     assert result["facts"]["rooms"] == 2 and result["facts"]["rooms_offered"] == "2 Deluxe"
-    assert texts["rooms_note"].startswith("For 4 persons, 2 rooms are needed. Or 4 persons can stay in 1 room(s)")
+    assert texts["rooms_plain"] == "For 4 persons: 2 room(s)." and "rooms_note" not in texts
+    three, texts, _ = update(world, {**STAY, "adults": 3})  # 3 adults: 2 rooms, never an extra-bed question
+    assert three["facts"]["rooms"] == 2 and three["facts"]["extra_bed_question"] is False
+    assert texts["rooms_note"] == ("For 3 persons, 2 rooms are needed (2 per room). Or 3 persons can stay in 1 room(s), "
+                                   "up to 3 per room.") and "ask_extra_bed" not in texts
 
 
 def test_a_number_of_rooms_the_guest_gave_is_used(world):
-    result, texts, _ = update(world, {**STAY, "adults": 4, "rooms": 1})
-    assert result["facts"]["rooms"] == 1 and result["facts"]["rooms_offered"] == "1 Family Suite"
-    assert texts["rooms_plain"] == "For 4 persons: 1 room(s)."
+    result, texts, _ = update(world, {**STAY, "adults": 3, "rooms": 1})  # fewer rooms: 3 adults in one room
+    assert result["facts"]["rooms"] == 1 and result["facts"]["rooms_offered"] == "1 Deluxe"
+    assert texts["rooms_plain"] == "For 3 persons: 1 room(s)."
     more, _, _ = update(world, {"place": "Alleppey", "adults": 2, "rooms": 2})
     assert more["facts"]["rooms"] == 2 and more["facts"]["rooms_offered"] == "2 Deluxe"
     assert Enquiry.load(world.repo, GUEST).rooms == 2
@@ -206,7 +210,7 @@ def test_a_number_of_rooms_the_guest_gave_is_used(world):
 
 def test_too_few_rooms_say_the_minimum_and_the_check_goes_on(world):
     result, texts, _ = update(world, {**STAY, "adults": 9, "rooms": 1})
-    assert result["sent"][0] == "min_rooms" and texts["min_rooms"] == "Max 3 persons per room (2 + 1 extra bed), so 9 persons need at least 3 rooms."
+    assert result["sent"][0] == "min_rooms" and texts["min_rooms"] == "Max 3 persons per room, so 9 persons need at least 3 rooms."
     assert result["facts"]["rooms"] == 3 and result["facts"]["available"]
     assert Enquiry.load(world.repo, GUEST).rooms == 1  # only what the guest said is remembered, not the minimum
     again, _, _ = update(world, {"place": "Alleppey", "adults": 2})
@@ -217,8 +221,8 @@ def test_a_room_type_pick_is_checked_and_remembered(world):
     result, texts, _ = update(world, {**STAY, "adults": 2, "room_picks": [{"room_type": "family suite"}]})
     assert result["facts"]["rooms_offered"] == "1 Family Suite" and texts["room_picked"] == "Sure, Family Suite is free for your dates."
     assert "rooms_ok" not in texts  # 'Sure, X is free' replaces it
-    later, _, _ = update(world, {"place": "Alleppey", "adults": 3})
-    assert later["facts"]["rooms_offered"] == "1 Family Suite"  # the pick survives a change of persons
+    later, _, _ = update(world, {"place": "Alleppey", "adults": 3})  # 3 adults: 2 rooms, still Family Suites
+    assert later["facts"]["rooms_offered"] == "2 Family Suite"  # the pick survives a change of persons
     assert Enquiry.load(world.repo, GUEST).room_picks == [{"room_type": "Family Suite", "count": 1}]
 
 

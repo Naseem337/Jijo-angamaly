@@ -43,7 +43,7 @@ LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
 TOOL_SCHEMAS = [
     ToolSpec(
         "update_enquiry",
-        "Use this whenever the guest says anything about their stay: the place, dates or nights, number of persons, number "
+        "Use this whenever the guest says anything about their stay: the place, dates or nights, number of adults, number "
         "of rooms, a room type or room number, 'one more room', 'make it 5 persons', 'change to jan 2-5', 'no cottage'. "
         "Pass the FULL stay as you now understand it (CURRENT ENQUIRY plus what the guest just said), not only the change, "
         "and leave out what is still unknown. It asks the guest for anything missing and checks the rooms, and the owner's "
@@ -53,8 +53,8 @@ TOOL_SCHEMAS = [
             "check_in": {"type": "string", "description": "YYYY-MM-DD; a date with no year is the next time it comes"},
             "check_out": {"type": "string", "description": "YYYY-MM-DD"},
             "nights": {"type": "integer", "description": "instead of check_out, if the guest gave nights"},
-            "adults": {"type": "integer", "description": "total persons as the guest said them (never assume)"},
-            "children": {"type": "integer"},
+            "adults": {"type": "integer", "description": "total adults above 6 years as the guest said them (never assume); "
+                                                         "children are not asked or counted"},
             "rooms": {"type": "integer", "description": "only if the guest said a number of rooms; 0 = let the code pick"},
             "room_picks": {"type": "array", "description": "rooms the guest chose, one entry per kind; [] clears the choice",
                            "items": {"type": "object", "properties": {
@@ -63,7 +63,9 @@ TOOL_SCHEMAS = [
                                "count": {"type": "integer"}}}},
             "exclude_room_types": {"type": "array", "items": {"type": "string"},
                                    "description": "room types the guest does not want"},
-            "extra_beds": {"type": "integer"},
+            "extra_beds": {"type": "integer", "description": "pass it ONLY when the guest answers 'Do you need an extra "
+                                                                "bed?' (a number for yes, 0 for no) or asks for an extra bed "
+                                                                "on their own; at most one per room"},
             "early_checkin": {"type": "boolean", "description": "true only if the guest asked for early check-in (it adds "
                                                                 "a charge); false removes it"},
             "language": LANGUAGE_FIELD}}),
@@ -154,6 +156,15 @@ def _int(args: dict[str, Any], key: str, default: int | None = None) -> int | No
     return int(value)
 
 
+def _beds_on(booking: Any) -> int:
+    """The extra beds on a booking: its notes carry 'Extra beds: N'."""
+    for note in (booking.notes or "").split(";"):
+        if note.strip().startswith("Extra beds:"):
+            digits = note.split(":", 1)[1].strip()
+            return int(digits) if digits.isdigit() else 0
+    return 0
+
+
 def _day(value: Any) -> date | None:
     return date.fromisoformat(str(value)) if value else None
 
@@ -219,20 +230,21 @@ class AgentTools:
         bot = self.bot
         mix = bot._mix(prop, bk, wanted)
         if mix:  # the top room type cannot take the whole group: its free rooms first, then the next room type
-            beds_left = max(0, bk["adults"] + bk["children"] - sum(av.base_per_room(rt) * n for rt, n in mix)) \
-                if prop.extra_bed_rate else 0
-            parts = []
-            for rt, n in mix:
-                beds = min(beds_left, n * max(0, rt.max_occupancy - av.base_per_room(rt)))
-                beds_left -= beds
-                parts.append({"rt": rt, "rooms": n, "beds": beds})
-            return parts, mix
+            return [{"rt": rt, "rooms": n, "beds": 0} for rt, n in mix], mix
         fits = bot._fits(prop, bk)
         if not fits:
             return [], None
         rt, ok = fits[0]
         rooms = wanted if wanted in ok else ok[0]
-        return [{"rt": rt, "rooms": rooms, "beds": bot._beds_for(prop, rt, bk["adults"], bk["children"], rooms)}], None
+        return [{"rt": rt, "rooms": rooms, "beds": 0}], None  # an extra bed is never added by itself (_apply_beds)
+
+    @staticmethod
+    def _apply_beds(parts: list[dict[str, Any]], beds: int) -> None:
+        """The extra beds the guest said yes to (or asked for), at most one per room, over the rooms in order."""
+        left = max(0, beds)
+        for part in parts:
+            part["beds"] = min(left, part["rooms"])
+            left -= part["beds"]
 
     def _price_of(self, prop: Property, parts: list[dict[str, Any]], ci: date, co: date,
                   early: bool = False) -> dict[str, Any]:
@@ -264,8 +276,8 @@ class AgentTools:
         if beds := sum(p["beds"] for p in parts):
             return "rooms_beds", t("rooms_beds", lang, persons=persons, rooms=quoted, beds=beds,
                                    rate=f"{prop.extra_bed_rate:,}")
-        fewer = av.fewest_rooms(self.bot.repo.list_room_types(prop.id), adults, children) if prop.extra_bed_rate else 0
-        if not wanted and prop.extra_bed_rate and fewer and fewer < quoted:
+        fewer = av.fewest_rooms(self.bot.repo.list_room_types(prop.id), adults, children)
+        if not wanted and fewer and fewer < quoted:
             return "rooms_note", t("rooms_note", lang, persons=persons, rooms=quoted, fewer=fewer,
                                    rate=f"{prop.extra_bed_rate:,}")
         return "rooms_plain", t("rooms_plain", lang, persons=persons, rooms=quoted)
@@ -324,7 +336,7 @@ class AgentTools:
         ci = ci or cur.check_in
         co = co or (ci + timedelta(days=nights) if ci and nights else cur.check_out)
         adults = _int(args, "adults", cur.adults)
-        children = _int(args, "children", cur.children or 0) or 0
+        children = 0  # children are not asked and not counted (owner, 2026-11-24)
         wanted = _int(args, "rooms", cur.rooms) or 0
         beds_arg = _int(args, "extra_beds", cur.extra_beds) or 0
         picks_arg = args["room_picks"] if args.get("room_picks") is not None else cur.room_picks
@@ -352,7 +364,7 @@ class AgentTools:
         if ci and co and (problem := av.check_dates(ci, co, today)):
             return done(False, {"problem": problem}, "Ask the guest for the correct dates in one short line.")
 
-        enq.check_in, enq.check_out, enq.adults, enq.children = ci, co, adults, children
+        enq.check_in, enq.check_out, enq.adults, enq.children = ci, co, adults, None
         enq.extra_beds = beds_arg
         enq.rooms = wanted or None
         early = cur.early_checkin if args.get("early_checkin") is None else bool(args["early_checkin"])
@@ -382,7 +394,7 @@ class AgentTools:
         if ids and (len(set(ids)) > 1 or counted):
             wanted = len(ids)  # the guest counted the rooms (or mixed room types): that is how many are checked
         bk: dict[str, Any] = {"property_id": prop.id, "check_in": ci.isoformat(), "check_out": co.isoformat(),
-                              "adults": adults, "children": children, "rooms": wanted, "own": phone}
+                              "adults": adults, "children": 0, "rooms": wanted, "own": phone}
         if pick:
             bk["pick"] = pick
         if pref:
@@ -407,8 +419,6 @@ class AgentTools:
             enq.early_checkin = False
             return done(False, {"problem": "early check-in for a stay over two room types is arranged by the owner"},
                         "Use talk_to_owner for this.")
-        key = (f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}|{sum(p['rooms'] for p in parts)}|{pref}"
-               f"|{int(early)}")
         if not parts:  # not available: never a dead end (extra-bed offer, or the nearest free dates)
             scratch: dict[str, Any] = {"lang": lang}
             text = bot._no_room_answer(scratch, prop, bk, ci, co, adults, children, wanted)
@@ -425,14 +435,39 @@ class AgentTools:
             return done(True, facts, UNCHANGED_NOTE)
 
         quoted = sum(p["rooms"] for p in parts)
+        # extra beds (owner, 2026-11-24): never added by themselves. Asked ONCE, only when a room will hold 3 adults; the
+        # answer (or a bed the guest asks for on their own) comes back as extra_beds, a number (0 = no)
+        shape = f"{adults}|{quoted}"
+        beds_given = args.get("extra_beds") is not None
+        beds = beds_arg if (beds_given or cur.bed_answered_for == shape) else 0
+        if beds and not prop.extra_bed_rate:
+            enq.extra_beds = 0
+            return done(False, {"problem": "extra beds are not offered at this resort"},
+                        "Give the owner's numbers with talk_to_owner; never promise one.")
+        if beds > quoted:
+            enq.extra_beds = 0
+            return done(False, {"problem": f"at most one extra bed per room ({quoted} room(s))"},
+                        "Call again with a smaller extra_beds.")
+        self._apply_beds(parts, beds)
+        enq.extra_beds = beds
+        asking = bool(prop.extra_bed_rate and av.rooms_with_three(adults, quoted))
+        enq.bed_answered_for = shape if beds_given else (shape if cur.bed_answered_for == shape else None)
+        pending = asking and enq.bed_answered_for != shape
+        ask_now = pending and cur.bed_asked_for != shape
+        enq.bed_asked_for = shape if pending else None
+        base = (f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults}|{quoted}|{pref}|{int(early)}|{beds}")
+        key = f"{base}|{int(pending)}"
+        answered_only = bool((cur.checked or {}).get("extra_bed_pending")) and not pending \
+            and (cur.checked or {}).get("base") == base  # only the answer to the extra-bed question came
         price = self._price_of(prop, parts, ci, co, early)
         offered = [p["rt"] for p in parts]
         summary = " + ".join(_count_name(p["rooms"], p["rt"].name) for p in parts)
-        enq.checked = {"available": True, "summary": summary, "rooms": quoted, "key": key, "pref": pref}
+        enq.checked = {"available": True, "summary": summary, "rooms": quoted, "key": key, "pref": pref,
+                       "base": base, "extra_bed_pending": pending}
         facts = {"available": True, "place": bot._place_label(prop), "check_in": ci.isoformat(),
-                 "check_out": co.isoformat(), "nights": (co - ci).days, "adults": adults, "children": children,
+                 "check_out": co.isoformat(), "nights": (co - ci).days, "adults": adults,
                  "rooms": quoted, "rooms_offered": summary, "extra_beds": sum(p["beds"] for p in parts),
-                 "early_checkin": early, "price": price}
+                 "extra_bed_question": pending, "early_checkin": early, "price": price}
         last = (cur.checked or {}).get("key", "").split("|")
         changed = (cur.checked or {}).get("key") != key
         same_dates = last[:3] == key.split("|")[:3] or (
@@ -441,17 +476,22 @@ class AgentTools:
         line_key, rooms_line = self._rooms_line(prop, parts, adults, children, wanted, lang)
         picked_now = bool(pref) and picked_before != pref
 
-        if held and changed:  # a change after the payment link: the old link is closed, a new summary and link go
-            held_key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}|{sum(b.rooms for b in held)}"
+        if held and changed and not pending:  # a change after the payment link: the old link is closed, a new link goes
+            held_key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults}|{sum(b.rooms for b in held)}"
             held_types = {b.room_type_id for b in held}
             held_early = "Early check-in" in (held[0].notes or "")
             if key.split("|")[:5] == held_key.split("|") and held_types == {rt.id for rt in offered} \
-                    and held_early == early:
+                    and held_early == early and sum(_beds_on(b) for b in held) == beds:
                 return done(True, facts, UNCHANGED_NOTE)  # the same stay as the open link
             return self._relink(enq, prop, bk, parts, mix, held, lang, (line_key, rooms_line), same_dates, picked_now,
                                 facts, start)
         if not changed:
             return done(True, facts, UNCHANGED_NOTE)
+        if answered_only:  # the answer to the extra-bed question: the new rooms sentence if a bed was added, then the ask
+            if beds:
+                self.out.text(line_key, rooms_line)
+            self._send("ask_contact", lang)
+            return done(True, facts, SENT_NOTE)
         if picked_now:
             self._send("room_picked", lang, room=offered[0].name)
         if not same_dates:  # new dates: rooms available, the rooms sentence, the photo flow, then the name ask
@@ -462,7 +502,11 @@ class AgentTools:
         else:  # only persons, rooms or the room type changed: the new rooms sentence, a new room's photos, the name ask
             self.out.text(line_key, rooms_line)
             self._stay_photos(enq, prop, parts, bool(mix), price, False)
-        self._send("ask_contact", lang)
+        if pending:  # a room will hold 3 adults: the extra-bed question, once; the booking waits for the answer
+            if ask_now:
+                self._send("ask_extra_bed", lang)
+        else:
+            self._send("ask_contact", lang)
         return done(True, facts, SENT_NOTE)
 
     def _stay_photos(self, enq: Enquiry, prop: Property, parts: list[dict[str, Any]], mixed: bool,
@@ -569,7 +613,9 @@ class AgentTools:
                           "advance": p["advance"]} for p in parts]
         scratch = {"lang": lang, "style": enq.language, "turn": 1, "bk": bk, "property_id": prop.id}
         ctx = _Turn(self.phone, scratch, text="", quiet=True)
-        prep = bot._tool_prepare(ctx, {"rooms": sum(p["rooms"] for p in parts), **({"early_checkin": True} if early else {})})
+        beds = sum(p["beds"] for p in parts)
+        prep = bot._tool_prepare(ctx, {"rooms": sum(p["rooms"] for p in parts), **({"extra_beds": beds} if beds else {}),
+                                       **({"early_checkin": True} if early else {})})
         if "error" in prep:
             self._queue_quiet(ctx, lang, prop)  # e.g. the last rooms were just taken: the owner's text
             enq.save(bot.repo, self.phone)
@@ -612,7 +658,7 @@ class AgentTools:
         held = bot._held_stay(phone)
         if enq.place and enq.check_in and enq.check_out and enq.adults:
             prop = repo.get_property(enq.place)
-            ci, co, adults, children = enq.check_in, enq.check_out, enq.adults, enq.children or 0
+            ci, co, adults, children = enq.check_in, enq.check_out, enq.adults, 0
             wanted, pref, early = enq.rooms or 0, "", enq.early_checkin
             if len({p.get("room_type") for p in enq.room_picks}) == 1:
                 rt0 = self._room(repo.list_room_types(prop.id), enq.room_picks[0]["room_type"]) if prop else None
@@ -620,7 +666,7 @@ class AgentTools:
         elif held:  # the payment link is out: its stay is what we know
             prop = repo.get_property(held["property_id"])
             ci, co = date.fromisoformat(held["check_in"]), date.fromisoformat(held["check_out"])
-            adults, children, wanted = held["adults"], held["children"], int(held.get("rooms") or 0)
+            adults, children, wanted = held["adults"], 0, int(held.get("rooms") or 0)
             pref = held["room_type_ids"][0] if len(set(held["room_type_ids"])) == 1 else ""
             early = any("Early check-in" in (b.notes or "") for b in bot._open_hold(phone))
         else:
@@ -643,6 +689,9 @@ class AgentTools:
         parts, _ = self._plan(prop, bk, wanted)
         if not parts and wanted:
             parts, _ = self._plan(prop, {**bk, "rooms": 0}, 0)
+        if parts:
+            self._apply_beds(parts, enq.extra_beds if (enq.place and enq.check_in and enq.adults)
+                             else sum(_beds_on(b) for b in bot._open_hold(phone)))
         if not parts:
             rt = repo.get_room_type(pref) if pref else None
             if rt is not None:
@@ -692,6 +741,10 @@ class AgentTools:
         if prop is None or not (enq.check_in and enq.check_out and enq.adults) or not (enq.checked or {}).get("available"):
             return self._result(False, {"problem": "no available stay has been checked yet"}, start, enq,
                                 "Call update_enquiry with the stay first; the owner's messages for it are sent for you.")
+        if (enq.checked or {}).get("extra_bed_pending"):  # the summary and the link wait for the answer
+            return self._result(False, {"problem": "the extra-bed question is not answered yet"}, start, enq,
+                                "'Do you need an extra bed?' was already sent. When the guest answers, call update_enquiry "
+                                "with extra_beds (a number for yes, 0 for no), then create_booking.")
         ids, _, problem = self._picks(prop, list(enq.room_picks or []), [])
         if problem:
             return self._result(False, {"problem": problem}, start, enq, "Ask the guest which room they mean.")
@@ -699,15 +752,17 @@ class AgentTools:
         wanted = len(ids) if len(set(ids)) > 1 else (enq.rooms or 0)
         bk: dict[str, Any] = {"property_id": prop.id, "check_in": enq.check_in.isoformat(),
                               "check_out": enq.check_out.isoformat(), "adults": enq.adults,
-                              "children": enq.children or 0, "rooms": wanted, "own": phone}
+                              "children": 0, "rooms": wanted, "own": phone}
         if len(set(ids)) > 1:
             bk["pick"] = ids
         if pref:
             bk["pref"] = pref
-        least = av.fewest_rooms(repo.list_room_types(prop.id), enq.adults, enq.children or 0)
+        least = av.fewest_rooms(repo.list_room_types(prop.id), enq.adults, 0)
         if wanted and least and wanted < least:
             wanted = bk["rooms"] = least
         parts, mix = self._plan(prop, bk, wanted)
+        if parts:
+            self._apply_beds(parts, enq.extra_beds if prop.extra_bed_rate else 0)
         if not parts:  # the rooms went to someone else since the check
             self._send("rooms_none", lang)
             enq.checked = None

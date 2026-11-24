@@ -16,12 +16,14 @@ LANGUAGES = ("en", "manglish", "tanglish", "hinglish")
 
 # What the guest or the AI should do next. `check` is the one value beyond the design's list: everything is known but
 # no room check has run yet (a tool normally runs it in the same call).
-NEXT_STEPS = ("ask_location", "ask_details", "check", "ask_contact", "pay", "done")
+NEXT_STEPS = ("ask_location", "ask_details", "check", "ask_extra_bed", "ask_contact", "pay", "done")
 
 _NEXT_TEXT = {
     "ask_location": "the resort is not known: ask the location",
     "ask_details": "dates or persons are missing: send the booking form",
     "check": "everything is known: check the rooms",
+    "ask_extra_bed": "a room will hold 3 adults and 'Do you need an extra bed?' was asked: wait for the answer, then "
+                     "call update_enquiry with extra_beds (a number for yes, 0 for no)",
     "ask_contact": "rooms are available: ask for the guest's name and mobile number",
     "pay": "guest should pay the advance",
     "done": "booking paid and confirmed",
@@ -50,6 +52,8 @@ class Enquiry:
     language: str = "en"  # en | manglish | tanglish | hinglish
     photo_wish: dict[str, Any] | None = None  # photos asked for before any resort: {"kind", "room_type"}; sent once the place is known
     intro_sent: str | None = None  # the resort whose glimpse (Property.intro) was already sent in this enquiry
+    bed_asked_for: str | None = None  # "adults|rooms": the layout the extra-bed question was asked for (asked once)
+    bed_answered_for: str | None = None  # the layout the guest answered it for (or asked for a bed on their own)
 
     # ------------------------------------------------------------------ computed
 
@@ -85,6 +89,8 @@ class Enquiry:
             return "check"
         if self.checked.get("available") is False:
             return "ask_details"  # not available: other dates are needed
+        if self.checked.get("extra_bed_pending"):
+            return "ask_extra_bed"
         return "ask_contact"
 
     # ------------------------------------------------------------------ the AI's view
@@ -139,7 +145,8 @@ class Enquiry:
                 "children": self.children, "rooms": self.rooms, "room_picks": self.room_picks,
                 "extra_beds": self.extra_beds, "early_checkin": self.early_checkin, "checked": self.checked, "booking_id": self.booking_id,
                 "link_open": self.link_open, "paid": self.paid, "language": self.language,
-                "photo_wish": self.photo_wish, "intro_sent": self.intro_sent}
+                "photo_wish": self.photo_wish, "intro_sent": self.intro_sent,
+                "bed_asked_for": self.bed_asked_for, "bed_answered_for": self.bed_answered_for}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> Enquiry:
@@ -157,7 +164,8 @@ class Enquiry:
                    extra_beds=int(d.get("extra_beds") or 0), early_checkin=bool(d.get("early_checkin")),
                    checked=d.get("checked"), booking_id=d.get("booking_id"),
                    link_open=bool(d.get("link_open")), paid=bool(d.get("paid")), language=lang,
-                   photo_wish=d.get("photo_wish") or None, intro_sent=d.get("intro_sent") or None)
+                   photo_wish=d.get("photo_wish") or None, intro_sent=d.get("intro_sent") or None,
+                   bed_asked_for=d.get("bed_asked_for") or None, bed_answered_for=d.get("bed_answered_for") or None)
 
     @classmethod
     def load(cls, repo: Any, phone: str) -> Enquiry:

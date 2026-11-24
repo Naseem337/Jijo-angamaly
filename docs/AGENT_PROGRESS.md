@@ -9,7 +9,9 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
 - AI-2b photo flow + send_photos: 820c015
 - AI-2c remaining tools + TOOL_SCHEMAS (11 tools), staff alerts through the outbox, dry run never calls WhatsApp: 916b5d7
 - early_checkin flag on update_enquiry: 7b07d82
-- AI-3 prompt + loop (this commit): `agent/prompt.py`, `agent/turn.py`, optional `temperature` on the LLM providers
+- AI-3 prompt + loop: e6c2042 (`agent/prompt.py`, `agent/turn.py`, optional `temperature` on the LLM providers)
+- Owner rule 2026-11-24 (old bot AND agent), own commit: 3 adults per room at most, extra bed asked once and never automatic,
+  adults above 6 years only, new form text (see below)
 
 ## Next
 - AI-4 gate (dedupe, voice, STOP/START, restart, pause, lock) + guard (design section 6, retry with feedback) + outbox rules
@@ -26,6 +28,14 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
 - The model comes from LLM_CHAIN only (nothing in the agent names a model).
 
 ## Decisions and facts to remember
+- OWNER RULE 2026-11-24 (rules/resort_booking/RULES.md section 5): persons = ADULTS above 6 years only, children are never asked
+  or counted. 2 adults per room by default; if the guest chooses fewer rooms, up to 3 adults in one room, never more
+  (`availability.room_cap`, `base_per_room`, `rooms_with_three`). An extra bed is NEVER added by itself: only when a room will
+  hold 3 adults (and the resort has an extra-bed rate) the fixed text `ask_extra_bed` ("Do you need an extra bed?") is sent ONCE
+  per layout; yes = charged per bed per night, no = nothing; a bed the guest asks for is charged (max one per room).
+  Agent: `update_enquiry` returns next_step `ask_extra_bed`, the answer comes back as `extra_beds` (0 = no), `create_booking`
+  waits. Old bot: the question replaces the name ask once; the AI answers through `prepare_booking(extra_beds=N)` (it does not
+  block the booking). Form line: "Number of adults (above 6 years) :". Old-bot parsing still reads a reply to the old wording.
 - `temperature` is an optional argument of `complete()` (None = the provider's own); only the agent passes 0.3.
 - The swipe-reply note is on the guest's message, not in the system prompt (keeps the prompt cacheable).
 - Tools never read guest text; `_Turn.quiet` makes the reused prepare/create code read nothing from the old chat log and send

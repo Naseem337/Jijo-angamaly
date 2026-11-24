@@ -152,7 +152,7 @@ _STAY_LENGTH = re.compile(r"\d+\s*(?:nights?|days?|d?h?ivas\w*|disam|dhisam|ra+t
 _NIGHTS = re.compile(r"\b(\d{1,2})\s*(?:nights?|ra+thri|raat|raatein|iravu|days?|d?h?ivas\w*|disam|dhisam|din|naal\w*)\b", re.IGNORECASE)
 # 'Person 3' at the start of a line, '3 persons', 'persons : 3'. Never across a line break: 'To 23\nPerson 3' was once
 # read as 23 persons (live chat, 2026-11-19).
-_PERSONS = re.compile(r"(?:number of persons|no of persons|number of people|persons|pax|guests|people)[ \t]*(?:[:=,-]|is|are)?[ \t]*(\d{1,2})\b(?![ \t]*(?:rooms?|nights?|days?)\b)|(?:we are|we're|we r|njangal|njmal|nangal|hum)[ \t]+(\d{1,2})\b|\b(\d{1,2})[ \t]*(?:persons?|"
+_PERSONS = re.compile(r"(?:number of adults(?:[ \t]*\(above[ \t]*6[ \t]*years\))?|number of persons|no of persons|number of people|persons|pax|guests|people)[ \t]*(?:[:=,-]|is|are)?[ \t]*(\d{1,2})\b(?![ \t]*(?:rooms?|nights?|days?)\b)|(?:we are|we're|we r|njangal|njmal|nangal|hum)[ \t]+(\d{1,2})\b|\b(\d{1,2})[ \t]*(?:persons?|"
                       r"people|ppl|pple|pax|per\b|peru|adults?|members|guests?|aal\w*|log)\b|"
                       r"(?:^|\n)[ \t]*(?:persons?|people|pax|guests?|adults?|members)[ \t]*[:=-]?[ \t]*(\d{1,2})[ \t]*(?:$|\n)",
                       re.IGNORECASE)
@@ -348,8 +348,6 @@ def parse_stay(text: str, today: date) -> dict[str, Any]:
                 pass
         if "persons" in got:
             out["persons"] = got["persons"]
-        if "children" in got:
-            out["children"] = got["children"]
         if "rooms" in got:
             out["rooms"] = got["rooms"]
             out.pop("more_rooms", None)
@@ -552,8 +550,7 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
             persons = [int(lines[0].strip(" .!"))]  # a line with only a number next to the dates is the persons (live chat 2026-11-23)
     if persons and 0 < persons[-1] <= 500:  # no 40 cap (owner, 2026-11-20); 500 only keeps a year out
         out["persons"] = persons[-1]  # the latest number they gave
-    if kids := _kids_in(text):
-        out["children"] = kids  # 'pinne oru kuttiyum' / '2 kids': children on top of the persons
+    # children are not asked and not counted (owner, 2026-11-24): persons are adults above 6 years only
     if less := _less_rooms_in(text):
         out["less_rooms"] = less  # rooms taken AWAY from the ones quoted / held (owner, 2026-11-21)
     elif more := _more_rooms_in(text):
@@ -962,7 +959,7 @@ TOOLS = [
          "required": ["place"]}),
     ToolSpec(
         "ask_stay_details",
-        "Send the guest the booking form (Check in / Check out / Number of persons) for the resort they chose. Use it "
+        "Send the guest the booking form (Check in / Check out / Number of adults above 6 years) for the resort they chose. Use it "
         "once the resort is known and the guest has NOT yet given ALL of check-in, check-out and persons (also to ask "
         "for a missing part). If they already "
         "gave them, call check_availability instead. The form is sent automatically; reply exactly [no reply].",
@@ -978,8 +975,7 @@ TOOLS = [
             "check_in": {"type": "string", "description": "YYYY-MM-DD"},
             "check_out": {"type": "string", "description": "YYYY-MM-DD (or give nights instead)"},
             "nights": {"type": "integer"},
-            "adults": {"type": "integer", "description": "total persons as the guest said them (never assume 1)"},
-            "children": {"type": "integer", "description": "only when the guest mentioned children"},
+            "adults": {"type": "integer", "description": "total adults (above 6 years) as the guest said them (never assume 1)"},
             "rooms": {"type": "integer", "description": "rooms the guest asked for, if any"},
             "language": LANGUAGE_FIELD},
          "required": ["place", "check_in", "adults"]}),
@@ -1026,8 +1022,7 @@ TOOLS = [
             "rooms": {"type": "integer", "description": "the new total number of rooms"},
             "add_rooms": {"type": "integer", "description": "rooms to add ('one more room' = 1)"},
             "remove_rooms": {"type": "integer", "description": "rooms to take away ('1 room venda' = 1)"},
-            "adults": {"type": "integer", "description": "the new total number of persons"},
-            "children": {"type": "integer"},
+            "adults": {"type": "integer", "description": "the new total number of adults (above 6 years)"},
             "check_in": {"type": "string", "description": "new check-in, YYYY-MM-DD"},
             "check_out": {"type": "string", "description": "new check-out, YYYY-MM-DD"},
             "language": LANGUAGE_FIELD}}),
@@ -1091,8 +1086,7 @@ class ChatMixin:
     def _rooms_facts(self, p: Property) -> list[str]:
         lines = []
         for rt in self.repo.list_room_types(p.id):
-            line = (f"  ROOM TYPE '{rt.name}': {rt.units} room(s), max {rt.max_occupancy} guests per room "
-                    f"({rt.max_adults} adults, {rt.max_children} children)")
+            line = f"  ROOM TYPE '{rt.name}': {rt.units} room(s), max {av.room_cap(rt)} adults per room"
             if rt.room_list:
                 line += f", room numbers {', '.join(rt.room_list)} (only to understand a guest who names one; never tell them)"
             extras = " ".join(y for y in (self._no_amounts(x) for x in (rt.description, rt.amenities)
@@ -1778,7 +1772,9 @@ class ChatMixin:
         phone, st = ctx.phone, ctx.st
         lang = st.get("lang", "en")
         asked = "?" in (self.repo.last_outbound_text(phone) or "")
-        if ((is_ack(text) and "?" not in text and not asked) or (NOT_NOW.search(text) and "?" not in text)) \
+        # an 'ok' to the extra-bed question is an answer too, never left silent (owner, 2026-11-24)
+        bed_question = (self.repo.last_outbound_text(phone) or "") in {t("ask_extra_bed", lg) for lg in ("en", "mn", "tn", "hn")}
+        if ((is_ack(text) and "?" not in text and not asked) or (NOT_NOW.search(text) and "?" not in text and not bed_question)) \
                 and not CHANGE_ASK.search(text):
             return None  # an 'ok' to OUR question is an answer: it is never left silent (live chat 2026-11-20)
         now = self.clock.now()
@@ -2016,7 +2012,7 @@ class ChatMixin:
         """'Please share these details:' with only the lines the guest has not given yet ('dec 20 nu' leaves Check out and
         Number of persons). With nothing given it is the full form."""
         lines = t("form", lang).split("\n")
-        have = {"check in": "check_in", "check out": "check_out", "number of persons": "persons",
+        have = {"check in": "check_in", "check out": "check_out", "number of adults": "persons",
                 "number of rooms": "rooms"}  # rooms is optional: left blank, 2 persons per room are planned
         keep = [ln for ln in lines if not any(ln.lower().startswith(k) and got.get(v) for k, v in have.items())]
         return "\n".join(keep)
@@ -2406,7 +2402,7 @@ class ChatMixin:
             "alappuzha, kanthaloor, poziyoram): a close spelling IS that place. Carry on; never correct their spelling "
             "or ask which place they meant.\n"
             "2. As soon as the resort is known and the guest has not given their dates and persons, call "
-            "ask_stay_details: it sends the form (Check in / Check out / Number of persons). Reply [no reply]. NEVER ask for "
+            "ask_stay_details: it sends the form (Check in / Check out / Number of adults above 6 years). Reply [no reply]. NEVER ask for "
             "dates, nights or persons in your own words (not even only the missing part): call ask_stay_details again "
             "and the form is sent. If a date has no year, use the next time "
             "it comes. Never assume the number of persons or nights.\n"
@@ -2455,9 +2451,13 @@ class ChatMixin:
             "see, a special request, a discount, an exception), never guess or say you did not catch it: call talk_to_owner "
             "and say only 'Please contact the owner directly: <the owner's numbers>'. Only a VOICE note that was clearly "
             "heard wrongly may be answered by asking the guest to say it again in a few words.\n"
-            "- Rooms and extra beds (the owner's rule): 2 persons per room. Fewer rooms only when the guest asks for "
-            "fewer: then up to 3 per room, the 3rd on an extra bed (its cost comes from the tools). When the guest asks for a "
-            "number of rooms, call check_availability with that rooms number; the code adds the beds and the cost.\n\n"
+            "- Rooms and extra beds (the owner's rule, 2026-11-24): persons are ADULTS above 6 years only; never ask about or "
+            "count children. 2 adults per room by default; fewer rooms only when the guest asks for fewer: then up to 3 adults "
+            "in one room, never more. An extra bed is NEVER added by itself. Only when a room will hold 3 adults the code asks "
+            "'Do you need an extra bed?' once: if the guest says yes call prepare_booking with extra_beds = the number of rooms "
+            "that hold 3 adults (its cost comes from the tools); if no, nothing is added and the booking goes on. An extra bed "
+            "the guest asks for on their own at any time: prepare_booking with extra_beds (it is charged). When the guest asks "
+            "for a number of rooms, call check_availability with that rooms number.\n\n"
             "PAYMENT\n"
             "- Asked how to pay: say only 'You can use UPI, card, net banking or wallet.' Never mention Razorpay, "
             "'secure', the payment page or how it works. Only the advance is paid online; the balance is paid at the "
@@ -2967,7 +2967,7 @@ class ChatMixin:
             st["room_pref"] = target.id
             st.pop("room_mix", None)
         persons =self._int(a, "adults") or int(bk["adults"])
-        children = self._int(a, "children") if a.get("children") is not None else int(bk.get("children") or 0)
+        children = 0  # children are not asked or counted (owner, 2026-11-24)
         rooms_now = int(bk.get("rooms") or 0) or int(((st.get("checked") or "").split("|") + [""] * 5)[4] or 0)
         if self._int(a, "rooms"):
             rooms_now = self._int(a, "rooms")
@@ -3306,8 +3306,8 @@ class ChatMixin:
             chosen = [(by_id[i], n) for i, n in counts.items() if i in by_id]
             if len(chosen) >= 2 and all(self.repo.free_rooms(rt, ci, co, now, bk.get("own", "")) >= n
                                         for rt, n in chosen):
-                cap = sum(rt.max_occupancy * n for rt, n in chosen)
-                if cap >= bk["adults"] + bk["children"]:
+                cap = sum(av.room_cap(rt) * n for rt, n in chosen)
+                if cap >= bk["adults"]:
                     return chosen
         free = [(rt, self.repo.free_rooms(rt, ci, co, now, bk.get("own", ""))) for rt in self._types(prop, bk)]
         mix = av.mixed_rooms(free, bk["adults"], bk["children"], wanted, bool(prop.extra_bed_rate))
@@ -3353,9 +3353,7 @@ class ChatMixin:
     @staticmethod
     def _beds_for(prop: Property, rt: RoomType, adults: int, children: int, rooms: int) -> int:
         """Extra beds when more persons than the normal 2 per room share the rooms (only when the guest asked)."""
-        if not prop.extra_bed_rate:
-            return 0
-        return max(0, adults + children - av.base_per_room(rt) * rooms)
+        return 0  # never automatic (owner, 2026-11-24): the guest says yes to the question, or asks for one
 
     @staticmethod
     def _without_name(text: str, name: str) -> str:
@@ -3479,7 +3477,7 @@ class ChatMixin:
             self._ask_missing(ctx, got)
             return {"error": "the guest has not given the check-out date; the form was sent to ask it. Reply exactly "
                              "[no reply]."}
-        adults, children = self._int(a, "adults"), self._int(a, "children")
+        adults, children = self._int(a, "adults"), 0  # children are not asked or counted (owner, 2026-11-24)
         if adults < 1:  # no fixed maximum (owner, 2026-11-20): the room check says what the free rooms can hold
             return {"error": "at least 1 adult is needed"}
         # "own": this guest's unpaid holds count as free rooms (a new summary replaces their open link)
@@ -3513,8 +3511,7 @@ class ChatMixin:
             # the top-priority room type cannot take the whole group: its free rooms first, then the next room type
             # (owner, 2026-11-19: 4 guests, 1 Basic left -> 1 Basic + 1 Standard)
             parts = []
-            beds_left = max(0, adults + children - sum(av.base_per_room(rt) * n for rt, n in mix)) \
-                if prop.extra_bed_rate else 0
+            beds_left = 0  # extra beds are never automatic (owner, 2026-11-24)
             for rt, n in mix:
                 beds = min(beds_left, n * max(0, rt.max_occupancy - av.base_per_room(rt)))
                 beds_left -= beds
@@ -3589,7 +3586,7 @@ class ChatMixin:
             # owner, 2026-11-21: always say plainly how many rooms AND extra beds ('2 rooms + 1 extra bed')
             rooms_line = t("rooms_beds", lang, persons=adults + children, rooms=quoted, beds=beds,
                            rate=f"{prop.extra_bed_rate:,}")
-        elif (not wanted and prop.extra_bed_rate
+        elif (not wanted
               and (fewer := av.fewest_rooms(self.repo.list_room_types(prop.id), adults, children))
               and fewer < quoted):
             # owner, 2026-11-20: before the photos say how many rooms are needed, or that 3 can share one room
@@ -3619,7 +3616,7 @@ class ChatMixin:
             # after a change the next step is asked again, never a bare 'noted' (owner, 2026-11-21); only when the
             # name ask is the message just above (nothing new was said) does 'noted' go instead
             if fresh or rooms_line or (self.repo.last_outbound_text(ctx.phone) or "") not in asks:
-                ctx.after.append(t("ask_contact", lang))
+                ctx.after.append(self._contact_or_bed(st, prop, lang, adults, quoted))
             else:
                 ctx.after.append(t("noted", lang))
             out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
@@ -3642,11 +3639,21 @@ class ChatMixin:
             for rt in shown:  # each room's number and name as a text, then its photos (owner, 2026-11-20)
                 if refs := [x for x in self._room_refs(rt, st, self._rooms_of(rt, bk, options)) if x not in sent]:
                     self._queue_room_photos(ctx, rt, refs[:MAX_ROOM_PHOTOS])
-            ctx.after.append(t("ask_contact", lang))
+            ctx.after.append(self._contact_or_bed(st, prop, lang, adults, quoted))
             out["note"] += " Messages to the guest are sent automatically. Reply exactly [no reply]."
         else:
             out["note"] += " Rooms are still available. Answer only what the guest asked, in one short line."
         return out
+
+    def _contact_or_bed(self, st: dict[str, Any], prop: Property, lang: str, adults: int, rooms: int) -> str:
+        """After the rooms are found: the name and mobile ask, or, only when a room will hold 3 adults (and extra beds are
+        offered), the extra-bed question first, once for this layout (owner, 2026-11-24)."""
+        shape = f"{adults}|{rooms}"
+        if prop.extra_bed_rate and av.rooms_with_three(adults, rooms) and st.get("bed_ans") != shape \
+                and st.get("bed_ask") != shape:
+            st["bed_ask"] = shape
+            return t("ask_extra_bed", lang)
+        return t("ask_contact", lang)
 
     def _no_room_answer(self, st: dict[str, Any], prop: Property, bk: dict[str, Any], ci: date, co: date,
                         adults: int, children: int, wanted: int) -> str:
@@ -3655,7 +3662,7 @@ class ChatMixin:
         lang = st.get("lang", "en")
         st.pop("suggest_rooms", None)
         st.pop("alt_dates", None)
-        if not wanted and prop.extra_bed_rate:
+        if not wanted:
             now = self.clock.now()
             free = [(rt, self.repo.free_rooms(rt, ci, co, now, bk.get("own", "")))
                     for rt in self.repo.list_room_types(prop.id)]
@@ -3664,13 +3671,12 @@ class ChatMixin:
                 if any(av.plan_rooms(rt, adults, children, f, n) for rt, f in free) or av.mixed_rooms(
                         free, adults, children, n):
                     st["suggest_rooms"] = n
-                    return t("beds_offer", lang, persons=adults + children, rooms=n, rate=f"{prop.extra_bed_rate:,}")
+                    return t("beds_offer", lang, persons=adults + children, rooms=n)
         # a group bigger than every free room together (no fixed guest limit, owner 2026-11-20): say what IS free
         now = self.clock.now()
         free = [(rt, self.repo.free_rooms(rt, ci, co, now, bk.get("own", "")))
                 for rt in self.repo.list_room_types(prop.id)]
-        beds_ok = bool(prop.extra_bed_rate)
-        cap = sum(f * (rt.max_occupancy if beds_ok else av.base_per_room(rt, False)) for rt, f in free if f > 0)
+        cap = sum(f * av.room_cap(rt) for rt, f in free if f > 0)
         if 0 < cap < adults + children:
             return t("rooms_most", lang, rooms=sum(f for _, f in free if f > 0), cap=cap, persons=adults + children)
         nights, today = (co - ci).days, self._today()
@@ -3721,6 +3727,20 @@ class ChatMixin:
             if a.get("early_checkin") and str(a.get("early_checkin")).lower() not in ("false", "0", "no"):
                 return {"error": "early check-in for a stay over two room types is arranged by the owner: "
                                  "call talk_to_owner"}
+            if a.get("extra_beds") is not None and st.get("bed_ask"):
+                st["bed_ans"] = st["bed_ask"]  # answered (0 = no)
+            if beds_req := self._int(a, "extra_beds"):  # the guest said yes (or asked): one bed per room, charged
+                if not prop.extra_bed_rate or beds_req > sum(p["rooms"] for p in mix):
+                    return {"error": "extra beds are not available" if not prop.extra_bed_rate
+                            else f"at most one extra bed per room ({sum(p['rooms'] for p in mix)})"}
+                left = beds_req
+                ci_m, co_m = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
+                for part in mix:
+                    part["beds"] = min(left, part["rooms"])
+                    left -= part["beds"]
+                    q_m = av.quote(prop, self.repo.get_room_type(part["room_type_id"]),
+                                   self.repo.list_rate_rules(part["room_type_id"]), ci_m, co_m, part["rooms"], part["beds"])
+                    part["total"], part["advance"] = q_m.total, q_m.advance
             total, advance = sum(p["total"] for p in mix), sum(p["advance"] for p in mix)
             rooms = sum(p["rooms"] for p in mix)
             bk["chosen"] = {"mix": mix, "rooms": rooms, "extra_beds": sum(p.get("beds", 0) for p in mix),
@@ -3749,6 +3769,8 @@ class ChatMixin:
             if plan:
                 options = [plan[0]]
         beds = self._int(a, "extra_beds") or self._beds_for(prop, rt, bk["adults"], bk["children"], rooms)
+        if a.get("extra_beds") is not None and st.get("bed_ask"):
+            st["bed_ans"] = st["bed_ask"]  # answered (0 = no): the question is never asked again for this layout
         early = bool(a.get("early_checkin")) and str(a.get("early_checkin")).lower() not in ("false", "0", "no")
         if rooms not in options:
             return {"error": f"{rooms} room(s) is not possible; choose one of {options}"}

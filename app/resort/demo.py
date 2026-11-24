@@ -33,7 +33,7 @@ CHATS = {
     "Anjali Krishnan": [
         ("in", "Hi"), ("out", "Hi, How may I assist you?"), ("in", "Need a room for this weekend"),
         ("out", "Sure, Kindly confirm the Location 📍\nAlleppey or Kanthalloor ?"), ("in", "Alleppey"),
-        ("out", "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :"),
+        ("out", "Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :"),
         ("in", "22 nov to 24 nov, 2 people"), ("out", "Yes, rooms are available for your dates."),
         ("out", "Please share your name and mobile number to proceed."), ("in", "Anjali 9633660078"),
         ("out", "Please pay the advance using this link:\nhttps://rzp.io/demo"),
@@ -53,7 +53,7 @@ CHATS = {
         ("out", "Please pay the advance using this link:\nhttps://rzp.io/demo"), ("out", "*Booking Confirmed ✅*"),
     ],
     "Vishnu Prasad": [
-        ("in", "Hello, is a room free on 26 Nov?"), ("out", "Please share these details:\n\nCheck out :\nNumber of persons :"),
+        ("in", "Hello, is a room free on 26 Nov?"), ("out", "Please share these details:\n\nCheck out :\nNumber of adults (above 6 years) :"),
         ("in", "1 night, 2 people"), ("out", "Yes, rooms are available for your dates."), ("in", "Vishnu 9605222345"),
         ("out", "Please pay the advance using this link:\nhttps://rzp.io/demo"),
     ],

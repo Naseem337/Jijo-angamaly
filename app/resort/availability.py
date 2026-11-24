@@ -40,48 +40,60 @@ def room_options(rt: RoomType, adults: int, children: int, available_units: int)
     return list(range(low, high + 1)) if low <= high else []
 
 
+# The owner's room rule (2026-11-24): persons are ADULTS above 6 years only (children are not asked and not counted).
+# 2 adults per room by default (the fewest rooms at 2 per room); the guest may choose fewer rooms, up to 3 adults in one
+# room; never more. An extra bed is never added by itself: it is asked once, only when a room will hold 3 adults.
+BASE_ADULTS_PER_ROOM = 2
+MAX_ADULTS_PER_ROOM = 3
+
+
+def room_cap(rt: RoomType) -> int:
+    """The most adults one room of this type takes (3, or the dashboard's 'max guests per room' when that is lower)."""
+    return max(1, min(MAX_ADULTS_PER_ROOM, rt.max_occupancy))
+
+
 def base_per_room(rt: RoomType, beds_ok: bool = True) -> int:
-    """Guests a room takes WITHOUT an extra bed (owner, 2026-11-19: 2 per room; the 3rd needs an extra bed). With
-    extra beds offered, 'max guests per room' in the dashboard is the normal guests + 1 extra bed."""
-    return max(1, rt.max_occupancy - 1) if beds_ok and rt.max_occupancy >= 2 else max(1, rt.max_occupancy)
+    """Adults a room takes by default: 2. (beds_ok is kept only so old callers still work.)"""
+    return max(1, min(BASE_ADULTS_PER_ROOM, rt.max_occupancy))
+
+
+def rooms_with_three(adults: int, rooms: int) -> int:
+    """How many rooms will hold 3 adults when `adults` are spread as evenly as possible over `rooms` rooms. Only then is
+    the extra-bed question asked: 3 adults in 2 rooms is 2 + 1 (none), 5 in 2 rooms is 3 + 2 (one), 3 in 1 room is one."""
+    if rooms < 1:
+        return 0
+    low, extra = divmod(adults, rooms)  # `extra` rooms hold low + 1 adults, the others low
+    return (extra if low + 1 >= 3 else 0) + ((rooms - extra) if low >= 3 else 0)
 
 
 def plan_rooms(rt: RoomType, adults: int, children: int, free: int, wanted: int = 0,
                beds_ok: bool = True) -> tuple[int, int] | None:
-    """(rooms, extra beds) for the party in this room type, or None if it can't (owner, 2026-11-19):
-    - normally enough rooms for the normal guests per room (8 persons -> 4 rooms), no extra beds;
-    - FEWER rooms only when the guest asks for that number: then up to 'max guests per room' each, the extra persons
-      on extra beds (8 persons in 3 rooms -> 2 extra beds)."""
-    total = adults + children
-    if adults < 1 or children < 0 or rt.max_adults < 1 or rt.max_occupancy < 1:
+    """(rooms, extra beds) for the adults in this room type, or None if it can't. Extra beds are never planned (0):
+    - normally enough rooms for 2 adults each (8 adults -> 4 rooms);
+    - FEWER rooms only when the guest asks for that number: then up to 3 adults per room (8 adults in 3 rooms)."""
+    if adults < 1 or rt.max_occupancy < 1:
         return None
-    if children and rt.max_children < 1:
-        return None
-    base = base_per_room(rt, beds_ok)
-    need = max(-(-adults // rt.max_adults), -(-children // rt.max_children) if children else 1)
+    cap, base = room_cap(rt), base_per_room(rt)
     if wanted:
-        lowest = max(need, -(-total // rt.max_occupancy))
-        if not (lowest <= wanted <= min(free, adults)):
+        if not (-(-adults // cap) <= wanted <= min(free, adults)):
             return None
-        return wanted, max(0, total - base * wanted) if beds_ok else 0
-    rooms = min(max(need, -(-total // base)), adults)
-    if rooms > free or total > rooms * rt.max_occupancy:
+        return wanted, 0
+    rooms = min(-(-adults // base), adults)
+    if rooms > free or adults > rooms * cap:
         return None
-    return rooms, max(0, total - base * rooms) if beds_ok else 0
+    return rooms, 0
 
 
 def fewest_rooms(rts: list[RoomType], adults: int, children: int) -> int:
-    """The fewest rooms any room type could take the party in, with extra beds (for 'at least N rooms')."""
-    total = adults + children
-    return min((max(-(-total // rt.max_occupancy), -(-adults // max(rt.max_adults, 1))) for rt in rts), default=0)
+    """The fewest rooms any room type could take the adults in, at 3 per room (for 'at least N rooms')."""
+    return min((-(-adults // room_cap(rt)) for rt in rts), default=0)
 
 
-def party_fits(rooms: list[RoomType], adults: int, children: int, beds_ok: bool = True) -> bool:
-    """Can these rooms (one entry per room) hold the party at the normal guests per room (no extra beds), with at
-    least one adult in each room?"""
-    return (len(rooms) <= adults and adults <= sum(r.max_adults for r in rooms)
-            and adults + children <= sum(base_per_room(r, beds_ok) for r in rooms)
-            and children <= sum(r.max_children for r in rooms))
+def party_fits(rooms: list[RoomType], adults: int, children: int, by_base: bool = True) -> bool:
+    """Can these rooms (one entry per room) hold the adults at 2 per room (by_base) or at 3 per room, with at least one
+    adult in each room?"""
+    per = base_per_room if by_base else room_cap
+    return len(rooms) <= adults and adults <= sum(per(r) for r in rooms)
 
 
 def mixed_rooms(free: list[tuple[RoomType, int]], adults: int, children: int,
@@ -92,9 +104,8 @@ def mixed_rooms(free: list[tuple[RoomType, int]], adults: int, children: int,
     units = [rt for rt, n in free for _ in range(max(n, 0)) if rt.max_adults >= 1 and rt.max_occupancy >= 1]
     for n in ([wanted] if wanted else range(1, min(len(units), adults) + 1)):
         pick = units[:n]
-        # the guest asked for this number of rooms: extra beds may take the 3rd person (owner, 2026-11-19)
-        if len(pick) == n and (party_fits(pick, adults, children, beds_ok) or (
-                wanted and beds_ok and party_fits(pick, adults, children, False))):
+        # the guest asked for this number of rooms: up to 3 adults per room (owner, 2026-11-24)
+        if len(pick) == n and (party_fits(pick, adults, children) or (wanted and party_fits(pick, adults, children, False))):
             out: list[tuple[RoomType, int]] = []
             for rt in pick:
                 if out and out[-1][0] is rt:

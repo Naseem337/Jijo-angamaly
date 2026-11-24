@@ -66,19 +66,19 @@ class Enquiry:
     place: str | None            # resort slug
     check_in: date | None
     check_out: date | None
-    adults: int | None
-    children: int | None
+    adults: int | None           # adults above 6 years only; children are not asked and not counted
     rooms: int | None            # None = code picks fewest
     room_picks: list[dict]       # [{"room_type": "cottage", "count": 1}, {"room_number": "103"}]
-    extra_beds: int
+    extra_beds: int              # never added by itself: only after "Do you need an extra bed?" is answered yes, or asked
     checked: dict | None         # last availability result (room plan, totals) — from code
     booking_id: str | None       # internal only, never shown to guest
     link_open: bool
     paid: bool
     language: str                # en | manglish | tanglish | hinglish
     missing: list[str]           # computed: what the next step needs
-    next_step: str               # computed: ask_location | ask_details | check | ask_contact | pay | done
+    next_step: str               # computed: ask_location | ask_details | check | ask_extra_bed | ask_contact | pay | done
                                  # check = everything is known but the room check has not run yet
+                                 # ask_extra_bed = a room will hold 3 adults and the question is waiting for its answer
 ```
 
 Rendered to the AI as plain lines, for example:
@@ -119,12 +119,11 @@ The AI passes the **whole stay as it understands it now**, not a diff. Code comp
   "check_in": "YYYY-MM-DD|null",
   "check_out": "YYYY-MM-DD|null",
   "nights": "int|null",
-  "adults": "int|null",
-  "children": "int|null",
+  "adults": "int|null — adults above 6 years only (children are not asked or counted)",
   "rooms": "int|null — only if the guest said a number",
   "room_picks": [{"room_type": "string", "room_number": "string", "count": "int"}],
   "exclude_room_types": ["string"],
-  "extra_beds": "int|null",
+  "extra_beds": "int|null — ONLY the guest's answer to the extra-bed question (a number, 0 = no) or a bed they ask for",
   "language": "en|manglish|tanglish|hinglish"
 }
 ```
@@ -133,7 +132,12 @@ What code does, in order:
 1. Place unknown → sends `ask_location`. Place switched off → sends `closed_place`.
 2. Dates/persons missing → sends `form` with only the missing lines.
 3. Date already passed → sends `past_date`. Month far in the past → next year (code decides, not the AI).
-4. Everything known → room check with today's rules (2 per room, extra beds, priority, picks).
+4. Everything known → room check with today's rules (2 adults per room by default, up to 3 only when the guest chose fewer
+   rooms, never more; priority, picks).
+   - A room will hold 3 adults (and the resort offers extra beds) → sends `ask_extra_bed` ("Do you need an extra bed?")
+     once instead of `ask_contact` and returns `next_step: ask_extra_bed`. `create_booking` waits (summary and link only
+     after the answer). The answer comes back as `update_enquiry(extra_beds=N)` (0 = no): yes → the bed is added and charged
+     per bed per night, no → nothing is added. Never asked when every room has 2 adults or fewer.
    - Available and stay is new/changed → sends `rooms_ok` → rooms sentence → **photo flow step 2** → `ask_contact`.
    - Changed after a link was sent → closes old link, new summary + new link.
    - Not available → `rooms_none` + nearest free dates.
@@ -211,6 +215,10 @@ TRUTH
 - If you do not know or cannot do something: talk_to_owner.
 
 BOOKING
+- Persons are ADULTS above 6 years only: never ask about or count children.
+- Extra bed: never offer it yourself. When a tool's next_step is ask_extra_bed, the question "Do you need an extra bed?"
+  was already sent: pass the guest's answer to update_enquiry as extra_beds (a number for yes, 0 for no). An extra bed the
+  guest asks for on their own: update_enquiry with extra_beds.
 - When the guest says anything about their stay (place, dates, nights, persons, rooms, a room type or number, "one
   more room", "make it 5", "change to jan 2-5", "no cottage"): call update_enquiry with the FULL stay as you now
   understand it (CURRENT ENQUIRY + what the guest just said). The tool asks for anything missing.

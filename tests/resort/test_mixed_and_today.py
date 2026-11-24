@@ -9,7 +9,7 @@ from app.resort.chat import MSG_SEP, parse_stay
 from app.resort.models import Booking
 from test_bot import GUEST, reply, say, tool, world  # noqa: F401  (fixture)
 
-FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:"
+FORM = "Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"
 TODAY = date(2026, 11, 2)
 
 
@@ -79,11 +79,12 @@ def test_four_guests_two_rooms_one_deluxe_left_gets_one_deluxe_and_one_family_su
     assert w.bot.mark_paid(link_id=parts[0].payment_link_id) == "already_paid"
 
 
-def test_ten_guests_still_get_the_fewest_rooms_of_one_type(world):
+def test_ten_guests_get_5_rooms_at_two_per_room_over_two_room_types(world):
     w = world
     say(w, "10 of us, Alleppey 10 Nov 1 night", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-11-10", nights=1, adults=10), reply("ok"))
-    assert "mix" not in w.repo.get_state(GUEST)["bk"]
+    mix = w.repo.get_state(GUEST)["bk"]["mix"]  # Deluxe has 2 rooms, Family Suite 3: 2 adults in each of 5 rooms
+    assert sum(p["rooms"] for p in mix) == 5 and all(p["beds"] == 0 for p in mix)
 
 
 def test_a_final_ok_gets_anything_else_once_and_no_gets_nothing(world):
@@ -127,10 +128,10 @@ def test_demo_data_is_removed_and_real_data_stays(world):
     assert [b.guest_phone for b in w.repo.list_bookings()] == [GUEST]
 
 
-def test_malayalam_voice_today_two_days_three_persons_and_a_child():
+def test_malayalam_voice_today_two_days_three_persons_a_child_is_not_counted():
     got = parse_stay("നമ്മൾ ഇന്ന് വരും, 2 ദിവസം അവിടെ ഉണ്ടാവും, പിന്നെ നമ്മൾ 3 പേരാണ് ടോട്ടൽ ഉള്ളത്, പിന്നെ ഒരു "
                      "കുട്ടിയുണ്ട്.", TODAY)
-    assert got == {"check_in": TODAY, "check_out": TODAY + timedelta(days=2), "persons": 3, "children": 1}
+    assert got == {"check_in": TODAY, "check_out": TODAY + timedelta(days=2), "persons": 3}  # adults only (2026-11-24)
 
 
 def test_a_name_sent_alone_then_the_number_is_used_not_an_old_saved_name(world):
@@ -147,7 +148,7 @@ def test_a_name_sent_alone_then_the_number_is_used_not_an_old_saved_name(world):
     assert "Guest - Naseem" in summary and "Kochu" not in summary
 
 
-def test_a_child_added_after_the_check_repeats_nothing(world):
+def test_a_child_mentioned_after_the_check_is_not_counted_and_repeats_nothing(world):
     w = world
     say(w, "Rooms?")
     say(w, "Alleppey")
@@ -158,7 +159,7 @@ def test_a_child_added_after_the_check_repeats_nothing(world):
     texts = w.wa.texts()
     assert sum("rooms are available" in x or "rooms available aanu" in x for x in texts) == 1 and n_ok >= 1
     assert sum("name" in x and "mobile" in x for x in texts) <= asks + 1  # after a change the name ask goes once more (owner, 2026-11-21)
-    assert w.repo.get_state(GUEST)["bk"]["children"] == 1
+    assert not w.repo.get_state(GUEST)["bk"].get("children")  # children are not counted (owner, 2026-11-24)
 
 
 def test_the_manglish_anything_else_is_sent(world):

@@ -36,8 +36,10 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 - Spellings are understood, also from voice notes: allepy, alappuzha, aalappee, alappi, ആലപ്പി, അലപ്പി = Alleppey.
 
 ## 3. The form, dates and persons
-- Resort known: "Please share these details:\n\nCheck in :\nCheck out :\nNumber of persons :\nNumber of rooms:".
+- Resort known: "Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:".
   When part is given, only the missing lines are sent.
+- Persons are ADULTS above 6 years only (owner, 2026-11-24). Children are never asked and never counted, in the form, the
+  AI's words, the prompts and the tool arguments; a guest who mentions a child changes nothing.
 - Dates, persons and rooms are read in code, in any language, script or voice note: "jan 1 to jan 4", "today",
   "naale", "number of persons 2" (no colon), "two persons", "moonu per", "5 പേരാണ്", "2 റൂം മതി", a bare "2." answering
   the form, "rooms 2". Nothing is assumed (never 1 person, never 1 night).
@@ -49,18 +51,28 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 ## 4. Rooms available
 - Complete details, in this order: "Yes, rooms are available for your dates." -> the rooms sentence -> the glimpse
   (`Property.intro`) -> general photos -> each room's photos -> "Please share your name and mobile number to proceed."
-- The rooms sentence always comes from the code after a room check: "For 4 persons: 2 room(s)." A group that needs
-  an odd room gets both choices: "For 5 persons, 3 rooms are needed. Or 5 persons can stay in 2 room(s) with extra
-  beds (...)". Only when the guest picks fewer rooms: "For 5 persons: 2 room(s) + 1 extra bed(s) (₹500 per extra bed
-  per night)."
+- The rooms sentence always comes from the code after a room check: "For 4 persons: 2 room(s)." A group that fits fewer
+  rooms gets both choices: "For 3 persons, 2 rooms are needed (2 per room). Or 3 persons can stay in 1 room(s), up to 3
+  per room." (no sentence ever says a 3rd person needs an extra bed). Only when the guest said yes to the extra bed:
+  "For 3 persons: 1 room(s) + 1 extra bed(s) (₹500 per extra bed per night)."
 - A group bigger than every free room: "For your dates 6 room(s) are free, enough for up to 18 persons. Please tell
   me how many persons will come, or send other dates for all 60."
 - Not available: "Sorry, rooms are not available for your dates." (with the nearest free dates when there are any).
 
 ## 5. Rooms, extra beds and changes
-- 2 persons per room. Up to 3 per room (2 + 1 extra bed at the extra-bed rate) only when the guest asks for fewer
-  rooms. Dashboard "max guests per room" = 3 means 2 + 1 extra bed.
-- Too few rooms asked: the minimum is said and checked ("Max 3 persons per room ... at least 3 rooms"), no dead end.
+- Owner rule, 2026-11-24: 2 adults per room by default (the fewest rooms at 2 per room). If the guest chooses fewer
+  rooms, up to 3 adults in one room; never more than 3 (the dashboard's "max guests per room" is used when lower).
+- EXTRA BED: never added by itself. ONLY when a room will hold 3 adults (the guest chose fewer rooms) the bot asks ONCE,
+  with a fixed text, "Do you need an extra bed?" (Manglish "Extra bed venamo?", Tanglish "Extra bed venumaa?", Hinglish
+  "Kya aapko extra bed chahiye?"). Yes -> the bed is added, charged at the extra-bed rate per bed per night, the price is
+  worked out again. No -> the room stays as it is, no charge. Every room with 2 adults or fewer: never asked. A bed the guest
+  asks for on their own, at any time, is added and charged (at most one per room). Examples: 3 adults, no room count = 2
+  rooms, no question; 3 adults in 2 rooms = no question; 3 adults in 1 room = the question; 4 adults in 1 room = not allowed
+  (2 rooms, "Max 3 persons per room, so 4 persons need at least 2 rooms."); 5 adults in 2 rooms (3 + 2) = the question once.
+  The question is asked once per layout (adults and rooms); a new layout asks again. The agent waits for the answer before
+  the summary and the payment link (next_step ask_extra_bed); the answer comes back as extra_beds (a number, 0 = no).
+- Too few rooms asked: the minimum is said and checked ("Max 3 persons per room, so N persons need at least M rooms"), no
+  dead end.
 - Everything the guest changes is re-checked in code, and the new rooms sentence goes:
   new persons ("7 ppl"), new rooms ("2 rooms mathi"), added rooms ("one more room", "1 room koode venam", "add a
   room"), new dates ("make it jan 2 to jan 5").
@@ -103,7 +115,8 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
 
 ## 7. Prices
 - "Price etreya", "how much", "rate?" once the stay is checked: the code sends the real price of that stay:
-  "2 room(s), Beach View Standard Rooms + 1 extra bed(s), 22 Nov to 30 Nov 2026 (8 nights): total ₹52,000."
+  "2 room(s), Beach View Standard Rooms + 1 extra bed(s), 22 Nov to 30 Nov 2026 (8 nights): total ₹52,000." (the bed
+  only after the guest said yes; otherwise "2 room(s), Beach View Standard Rooms, ...: total ₹48,000.")
   The dates are never asked again.
 - A rate question also gets the price per room per night ("Beach View Standard Room: ₹3,000 per room per night."),
   but only when every night of the stay costs the same; otherwise only the total (owner, 2026-11-22).

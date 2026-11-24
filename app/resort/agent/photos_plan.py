@@ -227,6 +227,8 @@ def open_step(bot: Any, enq: Enquiry, lang: str) -> tuple[str, str] | None:
         got = {"check_in": bool(enq.check_in), "check_out": bool(enq.check_out), "persons": bool(enq.adults),
                "rooms": enq.rooms or 0}
         return "form", bot._missing_form(lang, got)
+    if step == "ask_extra_bed":
+        return "ask_extra_bed", t("ask_extra_bed", lang)
     if step == "ask_contact":
         return "ask_contact", t("ask_contact", lang)
     return None
