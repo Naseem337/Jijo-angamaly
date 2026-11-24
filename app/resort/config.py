@@ -15,6 +15,9 @@ from app.settings import PROJECT_ROOT, load_dotenv
 DEFAULT_PATH = PROJECT_ROOT / "clients" / "resort" / "resort.yaml"
 
 
+AGENT_MODES = ("old", "shadow", "agent")
+
+
 class ResortTemplates(BaseModel):
     paid: str = ""
     failed: str = ""
@@ -28,10 +31,21 @@ class ResortConfig(BaseModel):
     languages: list[str] = ["en", "ml", "ta", "hi"]
     hold_minutes: int = 15
     max_audio_seconds: int = 60
+    # Which brain answers guests (docs/AI_AGENT_DESIGN.md): old = today's bot, shadow = old answers and the AI-first
+    # agent runs dry on the same message, agent = the AI-first agent answers. Set with AGENT_MODE.
+    agent_mode: str = "old"
     staff_numbers: list[str] = []
     templates: ResortTemplates = ResortTemplates()
     speaking_style: str = ""
     providers: ProvidersConfig
+
+    @field_validator("agent_mode", mode="before")
+    @classmethod
+    def _mode(cls, v: Any) -> str:
+        mode = str(v or "old").strip().lower()
+        if mode not in AGENT_MODES:
+            raise ValueError(f"agent_mode must be one of {', '.join(AGENT_MODES)} (got {v!r})")
+        return mode
 
     @field_validator("staff_numbers", mode="before")
     @classmethod

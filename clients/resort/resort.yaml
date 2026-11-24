@@ -7,6 +7,7 @@ display_name: Resort Booking Assistant
 bot_name: Resort Assistant       # shown to guests; change to the client's brand
 languages: [en, ml, ta, hi]
 hold_minutes: 15                 # rooms are held this long while the guest pays
+agent_mode: "${AGENT_MODE:-old}" # old = today's bot | shadow = old answers, the AI-first agent runs dry | agent = AI-first (docs/AI_AGENT_DESIGN.md)
 max_audio_seconds: 0             # 0 = no limit (owner, 2026-11-20); long notes are cut into pieces
 
 # Staff numbers that always get booking alerts (comma-separated, E.164) besides each property's own.
