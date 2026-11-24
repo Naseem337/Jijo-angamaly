@@ -476,15 +476,33 @@ class AgentTools:
         line_key, rooms_line = self._rooms_line(prop, parts, adults, children, wanted, lang)
         picked_now = bool(pref) and picked_before != pref
 
+        held_same = False  # is this the stay on the open link?
+        if held:
+            held_key = (f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{sum(b.adults for b in held)}|"
+                        f"{sum(b.rooms for b in held)}")  # the stay ON THE LINK, not the one the guest now asks for
+            held_same = (key.split("|")[:5] == held_key.split("|") and {b.room_type_id for b in held} == {rt.id for rt in offered}
+                         and ("Early check-in" in (held[0].notes or "")) == early
+                         and sum(_beds_on(b) for b in held) == beds)
+        closed_link = False
+        if held and changed and pending and not held_same:
+            # the layout changed after the link and a room will hold 3 adults: the old link is closed AT ONCE, before the
+            # extra-bed answer ('old link closed on any change'); the name and mobile are kept for the new link
+            stay = bot._held_stay(phone) or {}
+            guest = repo.get_guest(phone)
+            enq.contact = {"name": stay.get("guest_name") or (guest.name if guest else ""),
+                           "mobile": stay.get("mobile") or "same"}
+            bot.close_old_holds(phone, set())
+            held, closed_link = [], True
+            enq.booking_id, enq.link_open = None, False
         if held and changed and not pending:  # a change after the payment link: the old link is closed, a new link goes
-            held_key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults}|{sum(b.rooms for b in held)}"
-            held_types = {b.room_type_id for b in held}
-            held_early = "Early check-in" in (held[0].notes or "")
-            if key.split("|")[:5] == held_key.split("|") and held_types == {rt.id for rt in offered} \
-                    and held_early == early and sum(_beds_on(b) for b in held) == beds:
+            if held_same:
                 return done(True, facts, UNCHANGED_NOTE)  # the same stay as the open link
             return self._relink(enq, prop, bk, parts, mix, held, lang, (line_key, rooms_line), same_dates, picked_now,
                                 facts, start)
+        if enq.contact and changed and not pending and not held:
+            # the answer came after the link was closed: the new summary and link go at once (name and mobile are known)
+            return self._relink(enq, prop, bk, parts, mix, [], lang, (line_key, rooms_line), same_dates, picked_now,
+                                facts, start, contact=enq.contact)
         if not changed:
             return done(True, facts, UNCHANGED_NOTE)
         if answered_only:  # the answer to the extra-bed question: the new rooms sentence if a bed was added, then the ask
@@ -507,7 +525,8 @@ class AgentTools:
                 self._send("ask_extra_bed", lang)
         else:
             self._send("ask_contact", lang)
-        return done(True, facts, SENT_NOTE)
+        return done(True, facts, SENT_NOTE + (" The old payment link is closed: a new summary and link follow the guest's "
+                                              "answer to the extra-bed question." if closed_link else ""))
 
     def _stay_photos(self, enq: Enquiry, prop: Property, parts: list[dict[str, Any]], mixed: bool,
                      price: dict[str, Any], first_time: bool) -> None:
@@ -579,11 +598,12 @@ class AgentTools:
 
     def _relink(self, enq: Enquiry, prop: Property, bk: dict[str, Any], parts: list[dict[str, Any]], mix: Any,
                 held: list[Any], lang: str, rooms_line: tuple[str, str], same_dates: bool, picked_now: bool,
-                facts: dict[str, Any], start: int) -> dict[str, Any]:
+                facts: dict[str, Any], start: int, contact: dict[str, Any] | None = None) -> dict[str, Any]:
         """The stay changed after the payment link went out: a new booking and link are made and the old one is closed
-        (close_old_holds); the name and mobile come from the held booking."""
+        (close_old_holds); the name and mobile come from the held booking, or from `contact` when the old link was already
+        closed (a layout change that waited for the extra-bed answer)."""
         bot = self.bot
-        stay = bot._held_stay(self.phone) or {}
+        stay = {"guest_name": contact["name"], "mobile": contact["mobile"]} if contact else (bot._held_stay(self.phone) or {})
         guest = bot.repo.get_guest(self.phone)
         name = stay.get("guest_name") or (guest.name if guest else "")
         ctx, made, failure = self._make_booking(enq, prop, bk, parts, mix, lang, name, stay.get("mobile") or "same", start,
@@ -597,7 +617,7 @@ class AgentTools:
         self.out.text(*rooms_line)
         self.out.text("summary", ctx.summary_message)
         self.out.text("pay", ctx.pay_message)
-        enq.booking_id, enq.link_open = made["booking_id"], True
+        enq.booking_id, enq.link_open, enq.contact = made["booking_id"], True, None
         enq.save(bot.repo, self.phone)
         return self._result(True, facts, start, enq, SENT_NOTE + " The old payment link is closed.")
 
@@ -776,7 +796,7 @@ class AgentTools:
             return failure
         self.out.text("summary", ctx.summary_message)
         self.out.text("pay", ctx.pay_message)
-        enq.booking_id, enq.link_open, enq.photo_wish = made["booking_id"], True, None
+        enq.booking_id, enq.link_open, enq.photo_wish, enq.contact = made["booking_id"], True, None, None
         enq.save(repo, phone)
         return self._result(True, {"booked": True, "hold_minutes": bot.config.hold_minutes}, start, enq,
                             SENT_NOTE + " Never say it is booked or confirmed: it is confirmed only when the payment is "

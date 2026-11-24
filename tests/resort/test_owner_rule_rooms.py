@@ -174,17 +174,60 @@ def test_agent_the_question_is_in_every_language(world):
     assert texts["ask_extra_bed"] == "Extra bed venamo?"
 
 
-def test_agent_a_change_after_the_link_waits_for_the_answer_before_a_new_link(world):
+def test_agent_a_layout_change_after_the_link_closes_the_old_link_at_once_then_a_new_link_after_the_answer(world):
     from test_bot import hold
     w = world
-    hold(w)  # Deluxe x 1, 2 adults, link open
+    hold(w)  # Deluxe x 1, 2 adults, link open, Asha Menon
     old = w.repo.list_bookings(phone=GUEST)[0]
-    result, texts = update(w, adults=3, rooms=1)  # 3 adults in the one room: the question first
+    assert old.status == "hold" and old.payment_link_id
+    result, texts = update(w, adults=3, rooms=1)  # 3 adults in the one room: the question
     assert result["sent"][-1] == "ask_extra_bed" and "pay" not in texts and "summary" not in texts
-    assert w.repo.get_booking(old.id).status == "hold"  # the old link stays open until they answer
+    # the old link is closed AT ONCE, before the answer ('old link closed on any change'): it can no longer be paid
+    assert w.repo.get_booking(old.id).status == "expired" and old.payment_link_id in w.pay.cancelled
+    assert not [b for b in w.repo.list_bookings(phone=GUEST) if b.status == "hold"]
+    assert "closed" in result["note"] and result["next_step"] == "ask_extra_bed"
+    enq = Enquiry.load(w.repo, GUEST)
+    assert enq.booking_id is None and not enq.link_open and enq.contact["name"] == "Asha Menon"
+    again, texts = update(w, adults=3, rooms=1)  # asking again changes nothing, nothing is made
+    assert again["sent"] == [] and len(w.pay.cancelled) == 1
+    # the answer: a new summary and link go at once, with the name and mobile already known
     done, texts = update(w, adults=3, rooms=1, extra_beds=1)
-    assert done["sent"][-2:] == ["summary", "pay"] and "Extra Bed - 1,000" in texts["summary"]
+    assert done["sent"][-2:] == ["summary", "pay"] and "Guest - Asha Menon" in texts["summary"]
+    assert "Extra Bed - 1,000" in texts["summary"] and "ask_contact" not in texts
+    live = [b for b in w.repo.list_bookings(phone=GUEST) if b.status == "hold"]
+    assert len(live) == 1 and live[0].id != old.id and live[0].total == 9000 and "Extra beds: 1" in live[0].notes
+    after = Enquiry.load(w.repo, GUEST)
+    assert after.booking_id == live[0].id and after.link_open and after.contact is None and done["next_step"] == "pay"
+
+
+def test_agent_a_layout_change_after_the_link_and_the_answer_no_makes_a_new_link_without_a_bed(world):
+    from test_bot import hold
+    w = world
+    hold(w)
+    old = w.repo.list_bookings(phone=GUEST)[0]
+    update(w, adults=3, rooms=1)
+    done, texts = update(w, adults=3, rooms=1, extra_beds=0)
+    assert done["sent"][-2:] == ["summary", "pay"] and "Extra Bed" not in texts["summary"]
+    assert [b for b in w.repo.list_bookings(phone=GUEST) if b.status == "hold"][0].total == 8000
     assert w.repo.get_booking(old.id).status == "expired"
+
+
+def test_agent_a_change_that_needs_no_question_still_relinks_at_once(world):
+    from test_bot import hold
+    w = world
+    hold(w)
+    old = w.repo.list_bookings(phone=GUEST)[0]
+    result, texts = update(w, adults=4)  # 2 + 2: no room holds 3, no question
+    assert result["sent"][-2:] == ["summary", "pay"] and w.repo.get_booking(old.id).status == "expired"
+
+
+def test_agent_the_same_stay_as_the_open_link_closes_nothing(world):
+    from test_bot import hold
+    w = world
+    hold(w)
+    old = w.repo.list_bookings(phone=GUEST)[0]
+    result, texts = update(w, adults=2)
+    assert result["sent"] == [] and w.repo.get_booking(old.id).status == "hold" and not getattr(w.pay, "cancelled", [])
 
 
 # --------------------------------------------------------------------------- the form: adults only, no children anywhere

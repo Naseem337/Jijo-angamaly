@@ -52,6 +52,7 @@ class Enquiry:
     language: str = "en"  # en | manglish | tanglish | hinglish
     photo_wish: dict[str, Any] | None = None  # photos asked for before any resort: {"kind", "room_type"}; sent once the place is known
     intro_sent: str | None = None  # the resort whose glimpse (Property.intro) was already sent in this enquiry
+    contact: dict[str, Any] | None = None  # {"name", "mobile"} of a payment link closed by a layout change, kept for the new link
     bed_asked_for: str | None = None  # "adults|rooms": the layout the extra-bed question was asked for (asked once)
     bed_answered_for: str | None = None  # the layout the guest answered it for (or asked for a bed on their own)
 
@@ -146,7 +147,8 @@ class Enquiry:
                 "extra_beds": self.extra_beds, "early_checkin": self.early_checkin, "checked": self.checked, "booking_id": self.booking_id,
                 "link_open": self.link_open, "paid": self.paid, "language": self.language,
                 "photo_wish": self.photo_wish, "intro_sent": self.intro_sent,
-                "bed_asked_for": self.bed_asked_for, "bed_answered_for": self.bed_answered_for}
+                "bed_asked_for": self.bed_asked_for, "bed_answered_for": self.bed_answered_for,
+                "contact": self.contact}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> Enquiry:
@@ -165,7 +167,8 @@ class Enquiry:
                    checked=d.get("checked"), booking_id=d.get("booking_id"),
                    link_open=bool(d.get("link_open")), paid=bool(d.get("paid")), language=lang,
                    photo_wish=d.get("photo_wish") or None, intro_sent=d.get("intro_sent") or None,
-                   bed_asked_for=d.get("bed_asked_for") or None, bed_answered_for=d.get("bed_answered_for") or None)
+                   bed_asked_for=d.get("bed_asked_for") or None, bed_answered_for=d.get("bed_answered_for") or None,
+                   contact=d.get("contact") or None)
 
     @classmethod
     def load(cls, repo: Any, phone: str) -> Enquiry:

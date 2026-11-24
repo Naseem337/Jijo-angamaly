@@ -10,8 +10,9 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
 - AI-2c remaining tools + TOOL_SCHEMAS (11 tools), staff alerts through the outbox, dry run never calls WhatsApp: 916b5d7
 - early_checkin flag on update_enquiry: 7b07d82
 - AI-3 prompt + loop: e6c2042 (`agent/prompt.py`, `agent/turn.py`, optional `temperature` on the LLM providers)
-- Owner rule 2026-11-24 (old bot AND agent), own commit: 3 adults per room at most, extra bed asked once and never automatic,
-  adults above 6 years only, new form text (see below)
+- Owner rule 2026-11-24 (old bot AND agent): 45bf370 (3 adults per room at most, extra bed asked once and never automatic,
+  adults above 6 years only, new form text, see below)
+- Owner rule follow-up: a layout change after the link closes the old link AT ONCE (before the extra-bed answer); see below
 
 ## Next
 - AI-4 gate (dedupe, voice, STOP/START, restart, pause, lock) + guard (design section 6, retry with feedback) + outbox rules
@@ -36,6 +37,17 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
   Agent: `update_enquiry` returns next_step `ask_extra_bed`, the answer comes back as `extra_beds` (0 = no), `create_booking`
   waits. Old bot: the question replaces the name ask once; the AI answers through `prepare_booking(extra_beds=N)` (it does not
   block the booking). Form line: "Number of adults (above 6 years) :". Old-bot parsing still reads a reply to the old wording.
+- LAYOUT CHANGE AFTER A LINK (agent): when the new stay needs the extra-bed question, `update_enquiry` closes the old link at once
+  (`close_old_holds`: the old booking is expired and its Razorpay link cancelled), keeps the guest's name and mobile in
+  `Enquiry.contact`, sends the question, and when the answer (`extra_beds`, 0 = no) arrives it makes the new summary and link
+  straight away (no name ask). A change that needs no question still relinks at once; the same stay as the link changes nothing.
+  The old bot already closed the old link at once (its `_relink` runs in the same turn as the question).
+- EXTRA-BED YES, HOW MANY (reported 2026-11-25, not changed): the agent adds exactly the number `extra_beds=N` the AI passes
+  (0..rooms, at most one per room; more is refused). It is NOT tied to the number of 3-adult rooms: 6 adults in 2 rooms (3 + 3)
+  with extra_beds=1 adds one bed (+500 per night), with 2 adds two. The agent prompt and tool text only say "a number for yes", so
+  the AI chooses N. The old bot's prompt tells the AI to pass the number of rooms that hold 3 adults.
+- Fixed on the way: the "same stay as the open link" check in `update_enquiry` compared the NEW number of adults with itself, so
+  a change of persons alone (2 -> 3 adults, same rooms) looked like "unchanged"; it now uses the adults on the link.
 - `temperature` is an optional argument of `complete()` (None = the provider's own); only the agent passes 0.3.
 - The swipe-reply note is on the guest's message, not in the system prompt (keeps the prompt cacheable).
 - Tools never read guest text; `_Turn.quiet` makes the reused prepare/create code read nothing from the old chat log and send
