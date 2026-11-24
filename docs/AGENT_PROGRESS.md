@@ -42,10 +42,13 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
   `Enquiry.contact`, sends the question, and when the answer (`extra_beds`, 0 = no) arrives it makes the new summary and link
   straight away (no name ask). A change that needs no question still relinks at once; the same stay as the link changes nothing.
   The old bot already closed the old link at once (its `_relink` runs in the same turn as the question).
-- EXTRA-BED YES, HOW MANY (reported 2026-11-25, not changed): the agent adds exactly the number `extra_beds=N` the AI passes
-  (0..rooms, at most one per room; more is refused). It is NOT tied to the number of 3-adult rooms: 6 adults in 2 rooms (3 + 3)
-  with extra_beds=1 adds one bed (+500 per night), with 2 adds two. The agent prompt and tool text only say "a number for yes", so
-  the AI chooses N. The old bot's prompt tells the AI to pass the number of rooms that hold 3 adults.
+- EXTRA BEDS, HOW MANY (owner, 2026-11-25, `Extra beds: how-many question`): exactly 1 room holds 3 adults -> `ask_extra_bed`
+  (yes/no, yes = 1). 2 or more -> the new fixed text `ask_extra_beds` ("How many extra beds do you need?", all 4 language
+  variants in i18n.py; `Enquiry.checked["extra_bed_max"]` picks the text in `photos_plan.open_step` too). next_step stays
+  `ask_extra_bed`; the answer is `update_enquiry(extra_beds=N)`, N from 0 up to the 3-adult rooms (`rooms_with_three`). More is
+  capped there and the fixed text `extra_beds_max` says the maximum; facts carry `extra_beds_max`. Not tied to one-per-room any
+  more in that case (the old "at most one per room" refusal stays only for a bed asked for where no room holds 3 adults).
+  Old bot (chat.py) is not changed.
 - Fixed on the way: the "same stay as the open link" check in `update_enquiry` compared the NEW number of adults with itself, so
   a change of persons alone (2 -> 3 adults, same rooms) looked like "unchanged"; it now uses the adults on the link.
 - `temperature` is an optional argument of `complete()` (None = the provider's own); only the agent passes 0.3.

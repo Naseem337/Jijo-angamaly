@@ -63,9 +63,10 @@ TOOL_SCHEMAS = [
                                "count": {"type": "integer"}}}},
             "exclude_room_types": {"type": "array", "items": {"type": "string"},
                                    "description": "room types the guest does not want"},
-            "extra_beds": {"type": "integer", "description": "pass it ONLY when the guest answers 'Do you need an extra "
-                                                                "bed?' (a number for yes, 0 for no) or asks for an extra bed "
-                                                                "on their own; at most one per room"},
+            "extra_beds": {"type": "integer", "description": "pass it ONLY when the guest answers the extra-bed question "
+                                                                "('Do you need an extra bed?' or 'How many extra beds do you "
+                                                                "need?': the number, 0 for no) or asks for an extra bed on "
+                                                                "their own; the code caps it"},
             "early_checkin": {"type": "boolean", "description": "true only if the guest asked for early check-in (it adds "
                                                                 "a charge); false removes it"},
             "language": LANGUAGE_FIELD}}),
@@ -444,13 +445,17 @@ class AgentTools:
             enq.extra_beds = 0
             return done(False, {"problem": "extra beds are not offered at this resort"},
                         "Give the owner's numbers with talk_to_owner; never promise one.")
-        if beds > quoted:
+        threes = av.rooms_with_three(adults, quoted) if prop.extra_bed_rate else 0
+        capped = 0  # the answer was more than the rooms that hold 3 adults: capped, and the guest is told the maximum
+        if threes and beds > threes:
+            beds, capped = threes, threes
+        elif beds > quoted:
             enq.extra_beds = 0
             return done(False, {"problem": f"at most one extra bed per room ({quoted} room(s))"},
                         "Call again with a smaller extra_beds.")
         self._apply_beds(parts, beds)
         enq.extra_beds = beds
-        asking = bool(prop.extra_bed_rate and av.rooms_with_three(adults, quoted))
+        asking = bool(threes)
         enq.bed_answered_for = shape if beds_given else (shape if cur.bed_answered_for == shape else None)
         pending = asking and enq.bed_answered_for != shape
         ask_now = pending and cur.bed_asked_for != shape
@@ -463,11 +468,13 @@ class AgentTools:
         offered = [p["rt"] for p in parts]
         summary = " + ".join(_count_name(p["rooms"], p["rt"].name) for p in parts)
         enq.checked = {"available": True, "summary": summary, "rooms": quoted, "key": key, "pref": pref,
-                       "base": base, "extra_bed_pending": pending}
+                       "base": base, "extra_bed_pending": pending, "extra_bed_max": threes}
         facts = {"available": True, "place": bot._place_label(prop), "check_in": ci.isoformat(),
                  "check_out": co.isoformat(), "nights": (co - ci).days, "adults": adults,
                  "rooms": quoted, "rooms_offered": summary, "extra_beds": sum(p["beds"] for p in parts),
                  "extra_bed_question": pending, "early_checkin": early, "price": price}
+        if threes:
+            facts["extra_beds_max"] = threes
         last = (cur.checked or {}).get("key", "").split("|")
         changed = (cur.checked or {}).get("key") != key
         same_dates = last[:3] == key.split("|")[:3] or (
@@ -505,6 +512,8 @@ class AgentTools:
                                 facts, start, contact=enq.contact)
         if not changed:
             return done(True, facts, UNCHANGED_NOTE)
+        if capped:  # more beds than rooms that hold 3 adults: the fixed text names the maximum
+            self._send("extra_beds_max", lang, max=capped)
         if answered_only:  # the answer to the extra-bed question: the new rooms sentence if a bed was added, then the ask
             if beds:
                 self.out.text(line_key, rooms_line)
@@ -521,8 +530,8 @@ class AgentTools:
             self.out.text(line_key, rooms_line)
             self._stay_photos(enq, prop, parts, bool(mix), price, False)
         if pending:  # a room will hold 3 adults: the extra-bed question, once; the booking waits for the answer
-            if ask_now:
-                self._send("ask_extra_bed", lang)
+            if ask_now:  # one room holds 3 adults: yes/no; two or more: how many
+                self._send("ask_extra_bed" if threes == 1 else "ask_extra_beds", lang)
         else:
             self._send("ask_contact", lang)
         return done(True, facts, SENT_NOTE + (" The old payment link is closed: a new summary and link follow the guest's "

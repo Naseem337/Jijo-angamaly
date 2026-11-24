@@ -71,6 +71,11 @@ Checks: `.venv\Scripts\python.exe -m pytest -q tests/resort` and `scripts/resort
   (2 rooms, "Max 3 persons per room, so 4 persons need at least 2 rooms."); 5 adults in 2 rooms (3 + 2) = the question once.
   The question is asked once per layout (adults and rooms); a new layout asks again. The agent waits for the answer before
   the summary and the payment link (next_step ask_extra_bed); the answer comes back as extra_beds (a number, 0 = no).
+  HOW MANY (owner, 2026-11-25): exactly 1 room holds 3 adults -> the yes/no question above (yes = 1 bed, no = 0). 2 or more
+  rooms hold 3 adults -> a different fixed text, "How many extra beds do you need?" (Manglish "Ethra extra bed venam?",
+  Tanglish "Evvalavu extra bed venum?", Hinglish "Aapko kitne extra bed chahiye?"). The answer is a number from 0 up to the
+  number of 3-adult rooms (10 adults in 4 rooms = 3+3+2+2 = 2); "no" = 0; more than the maximum is capped and a fixed text
+  says the maximum.
 - Too few rooms asked: the minimum is said and checked ("Max 3 persons per room, so N persons need at least M rooms"), no
   dead end.
 - Everything the guest changes is re-checked in code, and the new rooms sentence goes:

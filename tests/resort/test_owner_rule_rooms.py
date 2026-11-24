@@ -136,6 +136,49 @@ def test_agent_5_adults_2_rooms_asks_the_question_once(world):
     assert answered["facts"]["price"]["total"] == 16000 + 1000 and answered["sent"] == ["rooms_beds", "ask_contact"]
 
 
+HOW_MANY = "How many extra beds do you need?"
+
+
+def test_agent_3_adults_in_1_room_asks_yes_no_not_how_many(world):
+    result, texts = update(world, adults=3, rooms=1)
+    assert texts["ask_extra_bed"] == QUESTION and "ask_extra_beds" not in texts and result["facts"]["extra_beds_max"] == 1
+
+
+def test_agent_10_adults_in_4_rooms_asks_how_many(world):
+    result, texts = update(world, adults=10, rooms=4)  # 3 + 3 + 2 + 2: two rooms hold 3 adults
+    assert result["facts"]["rooms"] == 4 and result["facts"]["extra_beds_max"] == 2
+    assert texts["ask_extra_beds"] == HOW_MANY and "ask_extra_bed" not in texts and "ask_contact" not in texts
+    assert result["next_step"] == "ask_extra_bed"
+    again, _ = update(world, adults=10, rooms=4)
+    assert again["sent"] == []  # asked once
+    assert Enquiry.load(world.repo, GUEST).checked["extra_bed_max"] == 2
+
+
+@pytest.mark.parametrize("answer, beds, capped", [(2, 2, False), (1, 1, False), (0, 0, False), (5, 2, True)])
+def test_agent_how_many_answer(world, answer, beds, capped):
+    base = update(world, adults=10, rooms=4)[0]["facts"]["price"]["total"]
+    result, texts = update(world, adults=10, rooms=4, extra_beds=answer)
+    assert result["ok"] and result["facts"]["extra_beds"] == beds
+    assert result["facts"]["price"]["total"] == base + 500 * 2 * beds  # 500 per bed per night, 2 nights
+    assert result["next_step"] == "ask_contact" and ("extra_beds_max" in texts) is capped
+    if capped:
+        assert texts["extra_beds_max"] == "The maximum is 2 extra bed(s) for your rooms, so 2 added."
+
+
+def test_agent_how_many_no_means_none(world):
+    update(world, adults=10, rooms=4)
+    result, _ = update(world, adults=10, rooms=4, extra_beds=0)  # the AI passes 0 for "no"
+    assert result["facts"]["extra_beds"] == 0 and result["next_step"] == "ask_contact"
+
+
+def test_how_many_question_is_in_every_language(world):
+    assert t("ask_extra_beds", "en") == HOW_MANY
+    assert MN["ask_extra_beds"] == "Ethra extra bed venam?" and TN["ask_extra_beds"] == "Evvalavu extra bed venum?"
+    assert HN["ask_extra_beds"] == "Aapko kitne extra bed chahiye?"
+    result, texts = update(world, adults=10, rooms=4, language="manglish")
+    assert texts["ask_extra_beds"] == "Ethra extra bed venam?"
+
+
 def test_agent_a_bed_the_guest_asks_for_is_added_and_charged_without_a_question(world):
     w = world
     result, texts = update(w, adults=2, extra_beds=1)  # 2 adults, 1 room, they want a bed

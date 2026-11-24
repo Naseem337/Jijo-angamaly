@@ -228,7 +228,8 @@ def open_step(bot: Any, enq: Enquiry, lang: str) -> tuple[str, str] | None:
                "rooms": enq.rooms or 0}
         return "form", bot._missing_form(lang, got)
     if step == "ask_extra_bed":
-        return "ask_extra_bed", t("ask_extra_bed", lang)
+        key = "ask_extra_beds" if int((enq.checked or {}).get("extra_bed_max") or 1) > 1 else "ask_extra_bed"
+        return key, t(key, lang)
     if step == "ask_contact":
         return "ask_contact", t("ask_contact", lang)
     return None

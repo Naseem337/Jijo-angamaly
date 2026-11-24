@@ -138,6 +138,9 @@ What code does, in order:
      once instead of `ask_contact` and returns `next_step: ask_extra_bed`. `create_booking` waits (summary and link only
      after the answer). The answer comes back as `update_enquiry(extra_beds=N)` (0 = no): yes → the bed is added and charged
      per bed per night, no → nothing is added. Never asked when every room has 2 adults or fewer.
+   - Owner, 2026-11-25: exactly 1 room holds 3 adults → the yes/no question; 2 or more (`rooms_with_three`) → the fixed text
+     `ask_extra_beds` ("How many extra beds do you need?", all language variants in i18n.py) and the answer is a number from 0 up
+     to that count. More is capped and `extra_beds_max` says the maximum. `next_step` stays `ask_extra_bed`.
    - Available and stay is new/changed → sends `rooms_ok` → rooms sentence → **photo flow step 2** → `ask_contact`.
    - Changed after a link was sent → closes old link, new summary + new link.
    - Not available → `rooms_none` + nearest free dates.
@@ -217,7 +220,8 @@ TRUTH
 BOOKING
 - Persons are ADULTS above 6 years only: never ask about or count children.
 - Extra bed: never offer it yourself. When a tool's next_step is ask_extra_bed, the question "Do you need an extra bed?"
-  was already sent: pass the guest's answer to update_enquiry as extra_beds (a number for yes, 0 for no). An extra bed the
+  was already sent ("How many extra beds do you need?" when two or more rooms hold 3 adults): pass the guest's answer to
+  update_enquiry as extra_beds (a number; 0 for no). An extra bed the
   guest asks for on their own: update_enquiry with extra_beds.
 - When the guest says anything about their stay (place, dates, nights, persons, rooms, a room type or number, "one
   more room", "make it 5", "change to jan 2-5", "no cottage"): call update_enquiry with the FULL stay as you now

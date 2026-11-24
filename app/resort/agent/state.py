@@ -22,8 +22,9 @@ _NEXT_TEXT = {
     "ask_location": "the resort is not known: ask the location",
     "ask_details": "dates or persons are missing: send the booking form",
     "check": "everything is known: check the rooms",
-    "ask_extra_bed": "a room will hold 3 adults and 'Do you need an extra bed?' was asked: wait for the answer, then "
-                     "call update_enquiry with extra_beds (a number for yes, 0 for no)",
+    "ask_extra_bed": "a room will hold 3 adults and the extra-bed question was asked ('Do you need an extra bed?' for one "
+                     "such room, 'How many extra beds do you need?' for two or more): wait for the answer, then call "
+                     "update_enquiry with extra_beds (the number, 0 for no; more than the 3-adult rooms is capped)",
     "ask_contact": "rooms are available: ask for the guest's name and mobile number",
     "pay": "guest should pay the advance",
     "done": "booking paid and confirmed",

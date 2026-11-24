@@ -45,6 +45,9 @@ S: dict[str, dict[str, str]] = {
     "form": _t(*["Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"] * 4),
     # asked once, only when a room will hold 3 adults (owner, 2026-11-24); the extra bed is never added by itself
     "ask_extra_bed": _t(*["Do you need an extra bed?"] * 4),
+    # 2 or more rooms will hold 3 adults (owner, 2026-11-25): how many beds, 0 up to that number
+    "ask_extra_beds": _t(*["How many extra beds do you need?"] * 4),
+    "extra_beds_max": _t(*["The maximum is {max} extra bed(s) for your rooms, so {max} added."] * 4),
     "ask_contact": _t(*["Please share your name and mobile number to proceed."] * 4),
     "ask_name": _t(*["Please share your name."] * 4),
     "closed_place": _t(*["Sorry, {place} is currently not available."] * 4),
@@ -213,6 +216,8 @@ MN = {
     "dates_for_availability": "Rooms available aano ennu nokkan check-in, check-out dates venam.",
     "rooms_plain": "{persons} perkku {rooms} room.",
     "ask_extra_bed": "Extra bed venamo?",
+    "ask_extra_beds": "Ethra extra bed venam?",
+    "extra_beds_max": "Ningalude room-inu max {max} extra bed mathram, athinal {max} add cheythu.",
     "rooms_note": "{persons} perkku {rooms} rooms venam (oru room-il 2 per). Allenkil {fewer} room-il {persons} perkkum "
                   "nikkam (oru room-il max 3).",
     "extra_bed": "{beds} extra bed add cheyyum: oru bed-inu ₹{rate} per night.",
@@ -298,6 +303,8 @@ TN = {
     "dates_for_availability": "Rooms available-a nu paakka check-in, check-out dates venum.",
     "rooms_plain": "{persons} perukku {rooms} room.",
     "ask_extra_bed": "Extra bed venumaa?",
+    "ask_extra_beds": "Evvalavu extra bed venum?",
+    "extra_beds_max": "Ungal room-ku max {max} extra bed than, athanaala {max} add pannitom.",
     "rooms_note": "{persons} perukku {rooms} rooms venum (oru room-la 2 per). Illana {fewer} room-la {persons} perum "
                   "thangalam (oru room-la max 3).",
     "extra_bed": "{beds} extra bed add pannuvom: oru bed-ku ₹{rate} per night.",
@@ -357,6 +364,8 @@ HN = {
     "dates_for_availability": "Rooms available hain ya nahi dekhne ke liye check-in aur check-out dates chahiye.",
     "rooms_plain": "{persons} logon ke liye {rooms} room.",
     "ask_extra_bed": "Kya aapko extra bed chahiye?",
+    "ask_extra_beds": "Aapko kitne extra bed chahiye?",
+    "extra_beds_max": "Aapke rooms ke liye max {max} extra bed hi mil sakte hain, isliye {max} add kiye.",
     "rooms_note": "{persons} logon ke liye {rooms} rooms chahiye (ek room mein 2 log). Ya {fewer} room mein {persons} "
                   "log reh sakte hain (ek room mein max 3).",
     "extra_bed": "{beds} extra bed add karenge: ek bed ka ₹{rate} per night.",
