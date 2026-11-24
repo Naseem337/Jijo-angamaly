@@ -64,6 +64,8 @@ TOOL_SCHEMAS = [
             "exclude_room_types": {"type": "array", "items": {"type": "string"},
                                    "description": "room types the guest does not want"},
             "extra_beds": {"type": "integer"},
+            "early_checkin": {"type": "boolean", "description": "true only if the guest asked for early check-in (it adds "
+                                                                "a charge); false removes it"},
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "get_price",
@@ -232,17 +234,25 @@ class AgentTools:
         rooms = wanted if wanted in ok else ok[0]
         return [{"rt": rt, "rooms": rooms, "beds": bot._beds_for(prop, rt, bk["adults"], bk["children"], rooms)}], None
 
-    def _price_of(self, prop: Property, parts: list[dict[str, Any]], ci: date, co: date) -> dict[str, Any]:
-        """Totals from the dashboard rates now. These are the only amounts the AI may use."""
-        total = advance = 0
+    def _price_of(self, prop: Property, parts: list[dict[str, Any]], ci: date, co: date,
+                  early: bool = False) -> dict[str, Any]:
+        """Totals from the dashboard rates now (an early check-in adds its fee per room). These are the only amounts the
+        AI may use."""
+        total = advance = fee_total = 0
         rates: set[int] = set()
         for part in parts:
             q = av.quote(prop, part["rt"], self.bot.repo.list_rate_rules(part["rt"].id), ci, co, part["rooms"], part["beds"])
-            total += q.total
-            advance += q.advance
+            fee = prop.early_checkin_rate * part["rooms"] if early else 0
+            part_total = q.total + fee
+            part_advance = round(part_total * prop.advance_pct / 100) if fee else q.advance
+            total += part_total
+            advance += part_advance
+            fee_total += fee
             rates |= {rate for _, rate in q.per_night}
-            part["total"], part["advance"] = q.total, q.advance
+            part["total"], part["advance"] = part_total, part_advance
         price: dict[str, Any] = {"total": total, "advance_now": advance, "balance_at_property": total - advance}
+        if fee_total:
+            price["early_checkin_fee"] = fee_total
         if len(rates) == 1 and len(parts) == 1:
             price["per_room_per_night"] = rates.pop()
         return price
@@ -345,6 +355,12 @@ class AgentTools:
         enq.check_in, enq.check_out, enq.adults, enq.children = ci, co, adults, children
         enq.extra_beds = beds_arg
         enq.rooms = wanted or None
+        early = cur.early_checkin if args.get("early_checkin") is None else bool(args["early_checkin"])
+        if early and not (prop.early_checkin_time and prop.early_checkin_rate):
+            enq.early_checkin = False
+            return done(False, {"problem": "early check-in is not offered at this resort"},
+                        "Give the owner's numbers with talk_to_owner; never promise it.")
+        enq.early_checkin = early
 
         # 2. dates or persons missing: the owner's form with only the missing lines
         if not (ci and co and adults and adults >= 1):
@@ -387,7 +403,12 @@ class AgentTools:
         else:
             enq.room_picks = kept
         parts, mix = self._plan(prop, bk, wanted)
-        key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}|{sum(p['rooms'] for p in parts)}|{pref}"
+        if early and mix:
+            enq.early_checkin = False
+            return done(False, {"problem": "early check-in for a stay over two room types is arranged by the owner"},
+                        "Use talk_to_owner for this.")
+        key = (f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}|{sum(p['rooms'] for p in parts)}|{pref}"
+               f"|{int(early)}")
         if not parts:  # not available: never a dead end (extra-bed offer, or the nearest free dates)
             scratch: dict[str, Any] = {"lang": lang}
             text = bot._no_room_answer(scratch, prop, bk, ci, co, adults, children, wanted)
@@ -404,14 +425,14 @@ class AgentTools:
             return done(True, facts, UNCHANGED_NOTE)
 
         quoted = sum(p["rooms"] for p in parts)
-        price = self._price_of(prop, parts, ci, co)
+        price = self._price_of(prop, parts, ci, co, early)
         offered = [p["rt"] for p in parts]
         summary = " + ".join(_count_name(p["rooms"], p["rt"].name) for p in parts)
         enq.checked = {"available": True, "summary": summary, "rooms": quoted, "key": key, "pref": pref}
         facts = {"available": True, "place": bot._place_label(prop), "check_in": ci.isoformat(),
                  "check_out": co.isoformat(), "nights": (co - ci).days, "adults": adults, "children": children,
                  "rooms": quoted, "rooms_offered": summary, "extra_beds": sum(p["beds"] for p in parts),
-                 "price": price}
+                 "early_checkin": early, "price": price}
         last = (cur.checked or {}).get("key", "").split("|")
         changed = (cur.checked or {}).get("key") != key
         same_dates = last[:3] == key.split("|")[:3] or (
@@ -423,7 +444,9 @@ class AgentTools:
         if held and changed:  # a change after the payment link: the old link is closed, a new summary and link go
             held_key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults + children}|{sum(b.rooms for b in held)}"
             held_types = {b.room_type_id for b in held}
-            if key.rsplit("|", 1)[0] == held_key and held_types == {rt.id for rt in offered}:
+            held_early = "Early check-in" in (held[0].notes or "")
+            if key.split("|")[:5] == held_key.split("|") and held_types == {rt.id for rt in offered} \
+                    and held_early == early:
                 return done(True, facts, UNCHANGED_NOTE)  # the same stay as the open link
             return self._relink(enq, prop, bk, parts, mix, held, lang, (line_key, rooms_line), same_dates, picked_now,
                                 facts, start)
@@ -519,7 +542,8 @@ class AgentTools:
         stay = bot._held_stay(self.phone) or {}
         guest = bot.repo.get_guest(self.phone)
         name = stay.get("guest_name") or (guest.name if guest else "")
-        ctx, made, failure = self._make_booking(enq, prop, bk, parts, mix, lang, name, stay.get("mobile") or "same", start)
+        ctx, made, failure = self._make_booking(enq, prop, bk, parts, mix, lang, name, stay.get("mobile") or "same", start,
+                                                early=enq.early_checkin)
         if failure is not None:
             return failure
         if picked_now:
@@ -534,7 +558,7 @@ class AgentTools:
         return self._result(True, facts, start, enq, SENT_NOTE + " The old payment link is closed.")
 
     def _make_booking(self, enq: Enquiry, prop: Property, bk: dict[str, Any], parts: list[dict[str, Any]], mix: Any,
-                      lang: str, name: str, mobile: str, start: int
+                      lang: str, name: str, mobile: str, start: int, early: bool = False
                       ) -> tuple[_Turn, dict[str, Any], dict[str, Any] | None]:
         """The existing prepare / create code makes the booking and the payment link. The turn is quiet: nothing is read
         from the old chat log and nothing is sent past the outbox; the guest's texts and the staff alert come back through
@@ -545,7 +569,7 @@ class AgentTools:
                           "advance": p["advance"]} for p in parts]
         scratch = {"lang": lang, "style": enq.language, "turn": 1, "bk": bk, "property_id": prop.id}
         ctx = _Turn(self.phone, scratch, text="", quiet=True)
-        prep = bot._tool_prepare(ctx, {"rooms": sum(p["rooms"] for p in parts)})
+        prep = bot._tool_prepare(ctx, {"rooms": sum(p["rooms"] for p in parts), **({"early_checkin": True} if early else {})})
         if "error" in prep:
             self._queue_quiet(ctx, lang, prop)  # e.g. the last rooms were just taken: the owner's text
             enq.save(bot.repo, self.phone)
@@ -589,7 +613,7 @@ class AgentTools:
         if enq.place and enq.check_in and enq.check_out and enq.adults:
             prop = repo.get_property(enq.place)
             ci, co, adults, children = enq.check_in, enq.check_out, enq.adults, enq.children or 0
-            wanted, pref = enq.rooms or 0, ""
+            wanted, pref, early = enq.rooms or 0, "", enq.early_checkin
             if len({p.get("room_type") for p in enq.room_picks}) == 1:
                 rt0 = self._room(repo.list_room_types(prop.id), enq.room_picks[0]["room_type"]) if prop else None
                 pref = rt0.id if rt0 else ""
@@ -598,6 +622,7 @@ class AgentTools:
             ci, co = date.fromisoformat(held["check_in"]), date.fromisoformat(held["check_out"])
             adults, children, wanted = held["adults"], held["children"], int(held.get("rooms") or 0)
             pref = held["room_type_ids"][0] if len(set(held["room_type_ids"])) == 1 else ""
+            early = any("Early check-in" in (b.notes or "") for b in bot._open_hold(phone))
         else:
             return self._result(False, {"problem": "no stay is known yet"}, start, enq,
                                 "Ask for the missing details with update_enquiry (the owner's form is sent for you).")
@@ -625,7 +650,7 @@ class AgentTools:
             else:
                 self._send("rooms_none", lang)
             return self._result(True, {"available": False}, start, enq, SENT_NOTE)
-        price = self._price_of(prop, parts, ci, co)
+        price = self._price_of(prop, parts, ci, co, early and len(parts) == 1)
         beds = sum(p["beds"] for p in parts)
         room = " + ".join(_count_name(p["rooms"], p["rt"].name) for p in parts) if len(parts) > 1 else parts[0]["rt"].name
         rooms = sum(p["rooms"] for p in parts)
@@ -688,10 +713,10 @@ class AgentTools:
             enq.checked = None
             enq.save(repo, phone)
             return self._result(False, {"available": False}, start, enq, SENT_NOTE)
-        self._price_of(prop, parts, enq.check_in, enq.check_out)  # fills each part's total for a split stay
+        self._price_of(prop, parts, enq.check_in, enq.check_out, enq.early_checkin)  # fills each part's total
         name = str(args.get("guest_name") or "").strip()
         ctx, made, failure = self._make_booking(enq, prop, bk, parts, mix, lang, name, str(args.get("mobile") or "").strip(),
-                                                start)
+                                                start, early=enq.early_checkin)
         if failure is not None:
             return failure
         self.out.text("summary", ctx.summary_message)

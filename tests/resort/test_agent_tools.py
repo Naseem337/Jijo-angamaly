@@ -381,3 +381,57 @@ def test_get_price_after_the_link_uses_the_stay_on_the_link_and_changes_nothing(
     assert w.repo.get_booking(old.id).status == "hold" and len([b for b in w.repo.list_bookings(phone=GUEST)]) == 1
     plain, _ = price(w)
     assert plain["facts"]["room_type"] == "Deluxe" and plain["facts"]["price"]["total"] == 8000
+
+
+# --------------------------------------------------------------------------- early check-in (a flag of update_enquiry)
+
+
+def offer_early(w):
+    w.p1.early_checkin_time, w.p1.early_checkin_rate = "10:00", 1500
+    w.repo.save_property(w.p1)
+
+
+def test_early_checkin_changes_the_room_check_price_and_is_remembered(world):
+    w = world
+    offer_early(w)
+    plain, _, _ = update(w, {**STAY, "adults": 2})
+    assert plain["facts"]["price"]["total"] == 8000 and "early_checkin_fee" not in plain["facts"]["price"]
+    early, texts, _ = update(w, {**STAY, "adults": 2, "early_checkin": True})
+    assert early["ok"] and early["facts"]["early_checkin"] is True
+    assert early["facts"]["price"] == {"total": 9500, "advance_now": 4750, "balance_at_property": 4750,
+                                       "per_room_per_night": 4000, "early_checkin_fee": 1500}
+    assert Enquiry.load(w.repo, GUEST).early_checkin and "early check-in asked" in Enquiry.load(w.repo, GUEST).render()
+    later, _, _ = update(w, {"place": "Alleppey", "adults": 3})  # a later change keeps it: 3 persons = 2 rooms
+    assert later["facts"]["early_checkin"] is True and later["facts"]["price"]["early_checkin_fee"] == 3000  # per room
+    off, _, _ = update(w, {"place": "Alleppey", "early_checkin": False})
+    assert off["facts"]["early_checkin"] is False and off["facts"]["price"]["total"] == 16000  # 2 rooms, no fee
+
+
+def test_early_checkin_not_offered_is_a_problem_for_the_ai(world):
+    result, texts, _ = update(world, {**STAY, "adults": 2, "early_checkin": True})
+    assert not result["ok"] and "not offered" in result["facts"]["problem"] and texts == {}
+    assert not Enquiry.load(world.repo, GUEST).early_checkin
+
+
+def test_early_checkin_is_in_the_get_price_answer_and_the_booking(world):
+    w = world
+    offer_early(w)
+    update(w, {**STAY, "adults": 2, "early_checkin": True})
+    tools, box = agent(w)
+    assert tools.get_price({})["facts"]["price"]["total"] == 9500
+    made = tools.create_booking({"guest_name": "Asha", "mobile": "same"})
+    texts = {i.key: i.text for i in box.queue}
+    assert made["ok"] and "Early Check-in Charges - 1,500" in texts["summary"]
+    booking = w.repo.list_bookings(phone=GUEST)[0]
+    assert booking.total == 9500 and booking.advance == 4750 and "Early check-in" in booking.notes
+
+
+def test_changing_early_checkin_after_the_link_makes_a_new_link(world):
+    w = world
+    offer_early(w)
+    hold(w)
+    same, texts, _ = update(w, {**STAY, "adults": 2, "early_checkin": False})
+    assert same["sent"] == []  # the same stay as the open link
+    result, texts, _ = update(w, {**STAY, "adults": 2, "early_checkin": True})
+    assert result["ok"] and result["sent"][-2:] == ["summary", "pay"] and "Early Check-in Charges - 1,500" in texts["summary"]
+    assert len([b for b in w.repo.list_bookings(phone=GUEST) if b.status == "hold"]) == 1

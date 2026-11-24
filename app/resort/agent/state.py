@@ -42,6 +42,7 @@ class Enquiry:
     rooms: int | None = None  # None = the code picks the fewest
     room_picks: list[dict[str, Any]] = field(default_factory=list)  # [{"room_type": "cottage", "count": 1}, {"room_number": "103"}]
     extra_beds: int = 0
+    early_checkin: bool = False  # only when the guest asked: it changes the room check's price
     checked: dict[str, Any] | None = None  # last availability result written by code: {"available", "summary", "rooms"}
     booking_id: str | None = None  # internal only, never shown to the guest
     link_open: bool = False
@@ -108,6 +109,8 @@ class Enquiry:
             parts.append("picked: " + ", ".join(self._pick(p) for p in self.room_picks))
         if self.extra_beds:
             parts.append(f"extra beds: {self.extra_beds}")
+        if self.early_checkin:
+            parts.append("early check-in asked")
         lines = ["CURRENT ENQUIRY", " · ".join(parts)]
         if self.checked is not None:
             if self.checked.get("available") is False:
@@ -134,7 +137,7 @@ class Enquiry:
         return {"place": self.place, "check_in": self.check_in.isoformat() if self.check_in else None,
                 "check_out": self.check_out.isoformat() if self.check_out else None, "adults": self.adults,
                 "children": self.children, "rooms": self.rooms, "room_picks": self.room_picks,
-                "extra_beds": self.extra_beds, "checked": self.checked, "booking_id": self.booking_id,
+                "extra_beds": self.extra_beds, "early_checkin": self.early_checkin, "checked": self.checked, "booking_id": self.booking_id,
                 "link_open": self.link_open, "paid": self.paid, "language": self.language,
                 "photo_wish": self.photo_wish, "intro_sent": self.intro_sent}
 
@@ -151,7 +154,8 @@ class Enquiry:
         lang = d.get("language") if d.get("language") in LANGUAGES else "en"
         return cls(place=d.get("place"), check_in=day("check_in"), check_out=day("check_out"), adults=d.get("adults"),
                    children=d.get("children"), rooms=d.get("rooms"), room_picks=list(d.get("room_picks") or []),
-                   extra_beds=int(d.get("extra_beds") or 0), checked=d.get("checked"), booking_id=d.get("booking_id"),
+                   extra_beds=int(d.get("extra_beds") or 0), early_checkin=bool(d.get("early_checkin")),
+                   checked=d.get("checked"), booking_id=d.get("booking_id"),
                    link_open=bool(d.get("link_open")), paid=bool(d.get("paid")), language=lang,
                    photo_wish=d.get("photo_wish") or None, intro_sent=d.get("intro_sent") or None)
 
