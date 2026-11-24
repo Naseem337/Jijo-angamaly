@@ -210,3 +210,18 @@ def test_header_is_plain_and_always_light(env):
     page = client.get(f"{BASE}/").text  # dark theme removed (owner, 2026-11-18)
     assert 'id="theme-toggle"' not in page and "rd-theme" not in page and "Search anything..." in page and 'class="crumbs"' in page
     assert "Arriving today <b>" not in page and "Ctrl K" not in page
+
+
+def test_owner_changes_the_advance_before_payment_and_the_guest_gets_a_new_link(env, monkeypatch):
+    repo, app, (p1, _p2, rt1, _rt2) = env
+    b = make(repo, p1, rt1, status="hold", paid=0)
+    seen = {}
+
+    def fake(booking, discount=0, by="", advance=0):
+        seen.update(advance=advance, by=by)
+        return None
+    monkeypatch.setattr(integrations, "resend_payment_link", fake)
+    client, token = login(app)
+    assert "Change advance" in client.get(f"{BASE}/bookings/{b.id}").text
+    post(client, token, f"/bookings/{b.id}/action", action="set_advance", advance="1000")
+    assert seen == {"advance": 1000, "by": "owner@x.com"}

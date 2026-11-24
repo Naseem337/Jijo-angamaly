@@ -71,6 +71,7 @@
     <button type="button" class="btn primary" data-open="pay-dialog">{{ icon('cash') }} {{ 'Record balance payment' if b.paid_amount else 'Record payment' }}</button>
   {% endif %}
   {% if b.status == 'hold' and not b.paid_amount %}<button type="button" class="btn" data-open="discount-dialog">{{ icon('tag') }} Give discount</button>{% endif %}
+  {% if b.status == 'hold' and not b.paid_amount %}<button type="button" class="btn" data-open="advance-dialog">{{ icon('cash') }} Change advance</button>{% endif %}
   {% if b.status in ('hold', 'expired', 'failed') %}{{ act('resend_link', 'Resend payment link') }}{% endif %}
   {% if left_to_refund > 0 and b.status in ('cancelled', 'checked_in', 'checked_out') %}
     <button type="button" class="btn" data-open="refund-dialog">Record refund</button>
@@ -154,6 +155,18 @@
     <div class="modal-actions"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save payment</button></div>
   </form>
 </dialog>
+
+{% if b.status == 'hold' and not b.paid_amount %}
+<dialog id="advance-dialog" class="modal">
+  <form method="post" action="{{ BASE }}/bookings/{{ b.id }}/action" class="modal-body">{{ csrf_field(csrf) }}<input type="hidden" name="action" value="set_advance">
+    <div class="modal-head"><h3>Change the advance</h3><button type="button" class="btn ghost sm" data-close aria-label="Close">{{ icon('x') }}</button></div>
+    <label class="field"><span>Advance to pay online now (₹), now {{ b.advance|rupees }} of a total of {{ b.total|rupees }}</span>
+      <input type="number" name="advance" min="1" max="{{ b.total }}" value="{{ b.advance }}" required></label>
+    <p class="muted small-note">The total stays the same. The old payment link stops working and the guest gets a new link for this amount on WhatsApp.</p>
+    <div class="modal-actions"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Change advance and send link</button></div>
+  </form>
+</dialog>
+{% endif %}
 
 {% if b.status == 'hold' and not b.paid_amount %}
 <dialog id="discount-dialog" class="modal">

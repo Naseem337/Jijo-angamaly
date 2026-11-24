@@ -23,7 +23,7 @@ from app.core.clock import ist_today, to_ist
 from app.core.language import is_language_neutral, is_opt_in, is_opt_out
 from app.core.phone import mask_phone
 from app.providers.llm import LLMProvider
-from app.resort.chat import _more_rooms_in, PAY_LATER, BOOKING_WISH, CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, ROOMS_OFFER_ASK, YES_REPLY, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
+from app.resort.chat import WHAT_IF_ANSWER, _more_rooms_in, PAY_LATER, BOOKING_WISH, CHANGE_ASK, GREETING, PHOTO_ASK, ROOM_OPTIONS_ASK, ROOMS_OFFER_ASK, YES_REPLY, RESTART, RESTART_MARK, ChatMixin, english_letters_only, is_ack
 from app.resort.config import ResortConfig
 from app.resort.db import ResortRepo
 from app.resort.i18n import FIXED_LANGS, LANGS, detect_script, t
@@ -310,6 +310,8 @@ class BookingBot(IdProofMixin, ChatMixin):
         if held is None:
             return None
         lang = st.get("lang", "en")
+        if is_ack(text) and not (paying or not_paid) and "contact the owner" in (self.repo.last_outbound_text(phone) or ""):
+            return "hold"  # 'Ok' to the owner's numbers: nothing more to say (live chat 2026-11-23: it got 'pay now')
         if paying or not_paid:
             # the guest's own link is asked at the provider (never the guest's word): paid -> the confirmation goes
             # (mark_paid); not paid -> say so truthfully
@@ -327,7 +329,7 @@ class BookingBot(IdProofMixin, ChatMixin):
                   guest_name: str, in_id: int = 0) -> str:
         typed = rid is None
         if typed:
-            if st.get("opted_out") and is_opt_in(text):
+            if st.get("opted_out") and is_opt_in(text) and not RESTART.match(text):  # 'Restart' is a restart, not a START (live chat 2026-11-23)
                 st["opted_out"] = False
                 self._save(phone, st)
                 guest = self.repo.touch_guest(phone, self.clock.now())
@@ -381,6 +383,11 @@ class BookingBot(IdProofMixin, ChatMixin):
         if st.get("suggest_rooms") and (is_ack(text) or YES_REPLY.match(text)):
             return self._converse(phone, st, text, in_id)  # 'ok' to 'Shall I go ahead with 5 rooms?': checked in code
         last_out = self.repo.last_outbound_text(phone) or ""
+        if (is_ack(text) or YES_REPLY.match(text)) and "?" not in text and WHAT_IF_ANSWER.search(last_out):
+            # 'What if one more person comes?' -> 'If 1 more person comes ... you need 2 rooms.' -> 'Ok': the guest
+            # accepts it, so it is APPLIED (live chat 2026-11-23: the bill stayed at 1 room, 3 persons)
+            st["ok_for"] = last_out
+            return self._converse(phone, st, text, in_id)
         steps = {t(k, lg) for k in ("contact_again", "fill_form", "ask_contact", "form") for lg in ("en", "mn", "tn", "hn")}
         if (is_ack(text) or YES_REPLY.match(text)) and "?" in last_out and last_out != self.next_step(phone, st) \
                 and last_out not in ANYTHING_ELSE and last_out not in steps:
@@ -417,6 +424,10 @@ class BookingBot(IdProofMixin, ChatMixin):
                 return self._final_ok(phone, st, in_id)
         if outcome := self._room_choice_now(phone, st, text, in_id):
             return outcome  # 'I only need cottage' / 'room 103 venam': that room, with the dates already known
+        if outcome := self._pay_terms_now(phone, st, text):
+            return outcome  # a smaller advance / cash / pay at the property: fixed advance, then the owner's numbers
+        if outcome := self._call_now(phone, st, text):
+            return outcome  # 'can I call' / 'I just called you': the owner's numbers
         if outcome := self._hold_now(phone, st, text, in_id):
             return outcome  # 'hold the room' / 'pay tomorrow': pay the advance now, one line and the link
         if outcome := self._price_now(phone, st, text):
@@ -596,7 +607,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         self.announce_paid(self.repo.get_booking(b.id) or b)
         return "paid"
 
-    def reissue_link(self, b: Booking, *, discount: int = 0, by: str = "") -> str | None:
+    def reissue_link(self, b: Booking, *, discount: int = 0, advance: int = 0, by: str = "") -> str | None:
         """Give an unpaid booking a fresh payment link (optionally after the owner took `discount` rupees off the total)
         and send it to the guest. The old link is closed so it can never be paid at the old amount. Returns an error
         text for staff, or None."""
@@ -606,16 +617,20 @@ class BookingBot(IdProofMixin, ChatMixin):
             return "This stay is split over two room types; please send the guest a link yourself"
         prop, rt = self.repo.get_property(b.property_id), self.repo.get_room_type(b.room_type_id)
         now = self.clock.now()
-        total, advance = b.total, b.advance
+        total, new_advance = b.total, b.advance
+        if advance:  # the owner sets the advance for this booking (e.g. a guest who can only pay Rs 1000 now)
+            if not 0 < advance <= b.total:
+                return "The advance must be more than 0 and not more than the total"
+            new_advance = advance
         if discount:
             if not 0 < discount < b.total:
                 return "The discount must be more than 0 and less than the total"
             total = b.total - discount
-            advance = round(total * (prop.advance_pct if prop else 50) / 100)
+            new_advance = round(total * (prop.advance_pct if prop else 50) / 100)
         hold = timedelta(minutes=self.config.hold_minutes)
         try:
             link = self.payments.create_payment_link(
-                advance, b.id, b.guest_name, b.guest_phone,
+                new_advance, b.id, b.guest_name, b.guest_phone,
                 f"{prop.name if prop else ''}: {rt.name if rt else ''} x {b.rooms}, {fmt_date(b.check_in)} to {fmt_date(b.check_out)}",
                 int((now + max(hold, timedelta(minutes=16))).timestamp()))
         except PaymentError as exc:
@@ -628,7 +643,11 @@ class BookingBot(IdProofMixin, ChatMixin):
         if discount:
             stamp = to_ist(now).strftime("%d %b %H:%M")
             b.notes = (b.notes + f"\n[{stamp} {by}] Discount Rs {discount}: total Rs {b.total} -> Rs {total}").strip()
-            b.total, b.advance = total, advance
+            b.total = total
+        if advance:
+            stamp = to_ist(now).strftime("%d %b %H:%M")
+            b.notes = (b.notes + f"\n[{stamp} {by}] Advance set by the owner: Rs {b.advance} -> Rs {new_advance}").strip()
+        b.advance = new_advance
         b.payment_link_id, b.payment_link_url = link.id, link.url
         b.hold_expires_at = now + hold
         self.repo.save_booking(b)
@@ -793,6 +812,8 @@ class BookingBot(IdProofMixin, ChatMixin):
                     self.close_old_holds(b.guest_phone, {o.id for o in self.repo.list_bookings(
                         phone=b.guest_phone, limit=20) if o.created_at > b.created_at})
                     continue  # the guest booked again since: this old enquiry is closed, never reminded
+                if self.st_of(b.guest_phone).get("opted_out"):
+                    continue  # the guest said STOP: no reminder after it (live chat 2026-11-23)
                 b.notes = (b.notes + " [reminded]").strip()
                 self.repo.save_booking(b)
                 mins = max(1, int((b.hold_expires_at - now).total_seconds() // 60))

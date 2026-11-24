@@ -461,6 +461,9 @@ async def booking_action(booking_id: str, request: Request, auth: Auth = Depends
     if action == "discount":  # before the guest pays: new total, new advance, new link sent on WhatsApp
         error = integrations.resend_payment_link(b, discount=_int(f, "discount", 0), by=auth.user.email)
         raise redirect(toast_url(url, f"!{error}" if error else "Discount given. The guest has the new payment link"))
+    if action == "set_advance":  # before the guest pays: the owner's own advance, a new link sent on WhatsApp
+        error = integrations.resend_payment_link(b, advance=_int(f, "advance", 0), by=auth.user.email)
+        raise redirect(toast_url(url, f"!{error}" if error else "Advance changed. The guest has the new payment link"))
     if action == "note":
         if text := f.get("note", "").strip():
             stamp = datetime.now(IST).strftime("%d %b %H:%M")

@@ -287,6 +287,8 @@ _WORD_NIGHTS = re.compile(r"\b(a|one|oru|ek|single|two|randu|rendu|do|three|moon
                           r"(?:nights?|days?|d?h?ivas\w*|disam|dhisam|raat\w*|din|naal\w*|ra+thri\w*)\b|\b(overnight)\b",
                           re.IGNORECASE)
 FORM_START = "Please share these details"
+# the bot's own answer to a 'what if' ('If 1 more person comes, that is 4 persons. Then you need 2 rooms.')
+WHAT_IF_ANSWER = re.compile(r"^\s*if\b.*\b(?:persons?|guests?|people|rooms?|beds?)\b", re.I | re.S)
 ROOMS_OFFER_ASK = re.compile(r"\b(\d{1,2})\s*rooms?\b[^.?!\n]*\?", re.IGNORECASE)
 ROOMS_MATH = re.compile(r"\b\d+\s*(?:rooms?|room\(s\)|extra beds?|beds?)\b|\bextra beds?\b|"
                         r"\b(?:rooms?|beds?)\s*(?:needed|venam|venum|chahiye)\b", re.IGNORECASE)
@@ -451,6 +453,40 @@ def _nights_in(text: str) -> int:
     return 0
 
 
+# '28th check in / 29th check out' or 'check in : 28 / check out : 29': day numbers with no month (live chat 2026-11-23:
+# the form was asked again). The month is the next one that has that day.
+_LABEL_DAY_IN = re.compile(
+    r"(?:\bcheck[ \t-]?in\b[ \t]*[:=-]?[ \t]*(?P<a>\d{1,2})(?:st|nd|rd|th)?\b(?![ \t]*[/-]?[ \t]*\d)"
+    r"|\b(?P<b>\d{1,2})(?:st|nd|rd|th)?[ \t]*(?:[:=-][ \t]*)?check[ \t-]?in\b)", re.IGNORECASE)
+_LABEL_DAY_OUT = re.compile(
+    r"(?:\bcheck[ \t-]?out\b[ \t]*[:=-]?[ \t]*(?P<a>\d{1,2})(?:st|nd|rd|th)?\b(?![ \t]*[/-]?[ \t]*\d)"
+    r"|\b(?P<b>\d{1,2})(?:st|nd|rd|th)?[ \t]*(?:[:=-][ \t]*)?check[ \t-]?out\b)", re.IGNORECASE)
+
+
+def _label_days(text: str, today: date) -> dict[str, date]:
+    """check_in / check_out from labelled day numbers without a month; {} when not both-or-clearly there."""
+    mi, mo = _LABEL_DAY_IN.search(text), _LABEL_DAY_OUT.search(text)
+    if not mi:
+        return {}
+    ci_day = int(mi.group("a") or mi.group("b"))
+    year, month = today.year, today.month
+    if ci_day < today.day:
+        month, year = (month % 12) + 1, year + (month == 12)
+    try:
+        ci = date(year, month, ci_day)
+    except ValueError:
+        return {}
+    out = {"check_in": ci}
+    if mo:
+        co_day = int(mo.group("a") or mo.group("b"))
+        cm, cy = (ci.month, ci.year) if co_day > ci.day else ((ci.month % 12) + 1, ci.year + (ci.month == 12))
+        try:
+            out["check_out"] = date(cy, cm, co_day)
+        except ValueError:
+            pass
+    return out
+
+
 def _parse_one(text: str, today: date) -> dict[str, Any]:
     """Check-in, check-out and persons from what the guest typed, in any order or spread over messages:
     'Check in :dec 12 / Check out :dec 15 / Number of persons :3', '12 dec to 14 dec, 2 people', 'dec 12 ... 3 persons,
@@ -480,7 +516,13 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
         if not dates or d != dates[-1]:
             dates.append(d)
     out: dict[str, Any] = {}
-    if dates:
+    if not dates and (labelled := _label_days(text, today)):
+        out.update(labelled)
+        dates = [labelled["check_in"]]
+        if "check_out" in labelled:
+            dates.append(labelled["check_out"])
+        found = [(0, d) for d in dates]
+    elif dates:
         out["check_in"] = dates[0]
         later = [d for d in dates[1:] if d > dates[0]]
         if later:
@@ -504,6 +546,10 @@ def _parse_one(text: str, today: date) -> dict[str, Any]:
     persons = [int(next(g for g in m.groups() if g)) for m in _PERSONS.finditer(text)]
     if not persons and (bare := re.fullmatch(r"\s*(\d{1,2})\s*[.!]?\s*", text)):
         persons = [int(bare.group(1))]  # '3' on its own, answering 'Number of persons :'
+    if not persons and dates:
+        lines = [x for x in text.splitlines() if re.fullmatch(r"\s*(\d{1,2})\s*[.!]?\s*", x)]
+        if len(lines) == 1:
+            persons = [int(lines[0].strip(" .!"))]  # a line with only a number next to the dates is the persons (live chat 2026-11-23)
     if persons and 0 < persons[-1] <= 500:  # no 40 cap (owner, 2026-11-20); 500 only keeps a year out
         out["persons"] = persons[-1]  # the latest number they gave
     if kids := _kids_in(text):
@@ -596,6 +642,16 @@ HOLD_INFO = re.compile(r"\b(?:how long|how many (?:hours|minutes|days)|ethra|unt
 PAY_LATER = re.compile(r"\b(?:pay\w*|advance)\b[^.?!]{0,30}\b(?:later|tomorrow|tmrw|naale|nale|pinne|evening|morning)\b"
                        r"|\b(?:later|tomorrow|tmrw|naale|nale|pinne)\b[^.?!]{0,30}\b(?:pay\w*|advance)\b",
                        re.IGNORECASE)
+# a guest with a payment link open who wants OTHER terms: a smaller advance ('I'll pay 1000 now'), cash, paying at the
+# property, no bank balance (owner, 2026-11-23, live chat). The advance is fixed; only the owner agrees anything else.
+PAY_TERMS = re.compile(
+    r"\bcash\b|\b(?:don'?t|do not|dont) have\b[^.?!]{0,20}\b(?:balance|money|bank)\b|\bno (?:balance|money)\b"
+    r"|\bpay\w*\b[^.?!]{0,30}\b(?:directly|at|when|wen|once|after)\b[^.?!]{0,20}\b(?:property|resort|reach\w*|arriv\w*|check ?-?in)\b"
+    r"|\b(?:pay\w*|advance)\b[^.?!]{0,15}\b(\d[\d,]*)\b|\b(?:less|lower|smaller|partial|half)\s+advance\b", re.IGNORECASE)
+# a guest who wants to phone, or says they phoned: this is a WhatsApp bot, so they get the owner's numbers (owner,
+# 2026-11-23, live chat: 'I just called you' got 'I did not catch that' and then 'I have no record of a call')
+CALL_ASK = re.compile(r"\b(?:(?:can|may|could) i|let me|i (?:want to|will|'ll|shall)|i (?:just |already )?)(?:call|phone|ring)(?:ed)?(?: you| the owner| u)?\b"
+                      r"|\b(?:call|phone)(?:ed)? (?:you|u|the owner|the resort)\b|\b(?:phone|whatsapp) call\b|\bover (?:the )?phone\b", re.IGNORECASE)
 STALE_PAY = re.compile(r"\b(?:payment|pay|paid|link|advance)\b|confirm aak", re.IGNORECASE)
 FORM_LABELS = re.compile(r"check[\s-]?in\s*:|check[\s-]?out\s*:|(?:number of )?persons\s*:|(?:number of )?rooms\s*:",
                          re.IGNORECASE)
@@ -1374,6 +1430,41 @@ class ChatMixin:
             return self._converse(phone, st, text, in_id)  # _stay_in_code checks the stay it already knows
         return None
 
+    def _pay_terms_now(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """A payment link is open and the guest asks for other terms (a smaller advance, cash, pay at the property):
+        the advance is fixed, so the guest is told that and sent to the owner with the numbers, and staff are alerted
+        (live chat 2026-11-23: 'I'll pay 1000 advance' got the same 'link still open' line five times)."""
+        m = PAY_TERMS.search(text)
+        if not m:
+            return None
+        now = self.clock.now()
+        held = next((b for b in self.repo.list_bookings(phone=phone, limit=3) if b.status == "hold"
+                     and b.hold_expires_at and b.hold_expires_at > now and b.payment_link_url), None)
+        if held is None:
+            return None
+        if m.group(1) and not re.search(r"(?:cash|directly|property|reach)", text, re.I):
+            if int(m.group(1).replace(",", "")) == held.advance:
+                return None  # 'I will pay 3000 now': exactly the advance
+        lang = st.get("lang", "en")
+        self._text(phone, t("pay_terms", lang, advance=f"{held.advance:,}", url=held.payment_link_url, numbers=self._owner_numbers(st)),
+                   repeat_ok=True)
+        self.alert_staff(f"Guest wants other payment terms than the advance ({held.advance:,}): {text[:120]} ({phone})",
+                         st.get("property_id"))
+        return "pay_terms"
+
+    def _call_now(self, phone: str, st: dict[str, Any], text: str) -> str | None:
+        """'Can I call you' / 'I just called you': the owner's numbers, and staff are told. None for other messages."""
+        if not CALL_ASK.search(text) or len(text.split()) > 12:
+            return None
+        self._text(phone, self._owner_msg("owner_will_help", st), repeat_ok=True)
+        self.alert_staff(f"Guest wants to call or says they called: {text[:120]} ({phone})", st.get("property_id"))
+        return "owner_call"
+
+    def _owner_numbers(self, st: dict[str, Any]) -> str:
+        prop = self._known_place(st)
+        return " / ".join(display_phone(n) for n in
+                          (prop.contact_numbers if prop and prop.contact_numbers else self._all_contact_numbers())[:2])
+
     def _night_line(self, prop: Property, rt: RoomType, ci: date, co: date, lang: str) -> str:
         """'Beach View Standard Room: ₹4,000 per room per night.' (owner, 2026-11-22: a rate question gets the price
         per night). Only when every night costs the same (rates that change are never shown): else '' (total only)."""
@@ -1638,6 +1729,11 @@ class ChatMixin:
         if held is not None and not BOOKING_WISH.search(text):
             # a payment link is out and nothing else answered ('Already sent'): point to that link, never the dates
             # form again (live chat 2026-11-21)
+            # the link goes out once and is reminded once; after that the guest is left alone unless they ask for
+            # the link or about paying (owner, 2026-11-24: "dont disturb in between chats")
+            sent = sum(1 for m in self._session_rows(phone) if m.direction == "out" and held.payment_link_url in m.text)
+            if sent >= 2 and not LINK_ASK.search(text):
+                return None
             mins = max(1, int((held.hold_expires_at - now).total_seconds() // 60))
             self._text(phone, t("pending", lang, id=held.id, minutes=mins, url=held.payment_link_url), repeat_ok=True)
             return "answered"
@@ -2142,11 +2238,14 @@ class ChatMixin:
             "- Never talk about how you work: no 'automatically', 'the system', 'tools', 'steps' or 'messages are "
             "sent'. Never explain the booking process unless asked.\n"
             "- Only say what you are sure of from the FACTS, the tool results and this chat. Never invent charges, "
-            "bills, rules or facts. If a message makes no sense to you, ask the guest to say it again in a few words.\n"
+            "bills, rules or facts. If you do not understand a message, or it asks for something you do not know or cannot do, "
+            "never answer with 'I did not catch that', a guess or a made-up line: call talk_to_owner and say only 'Please "
+            "contact the owner directly: <the owner's numbers>'.\n"
             "- Every reply must make sense on its own to a guest reading it on WhatsApp.\n\n"
             f"Today is {today.isoformat()} ({today.strftime('%A')}), India time.\n\n"
             + (f"THE GUEST'S LATEST MESSAGE IS A YES/OK TO YOUR OWN LAST MESSAGE: \"{ok_for[:300]}\". Work out what "
-               "you offered or asked there and DO it now (call the matching tool: change_enquiry, check_availability, "
+               "you offered or asked there (an 'If 1 more person comes ... you need 2 rooms' answer means they accept it: "
+               "change_enquiry with the new persons) and DO it now (call the matching tool: change_enquiry, check_availability, "
                "etc.) or answer what follows logically. Never reply with just 'Great.'/'Sure.' and stop. Do not ask "
                "for the name and mobile again if they were already asked.\n\n"
                if (ok_for := st.pop("ok_for", "")) else "") +
@@ -2282,8 +2381,10 @@ class ChatMixin:
             "FACTS below. Never calculate your own totals. Never invent the resort's amenities or policies; a resort "
             "fact you do not have: tell them to contact the owner directly (give the owner's numbers).\n"
             "- Never invent charges, bills (electricity, water, utility), deposits, fees or rules that are not in the "
-            "FACTS. If a message makes no sense (often a voice note heard wrongly), ask the guest to say it again in a "
-            "few words; never guess what they meant.\n"
+            "FACTS. If a TYPED message makes no sense or asks for something you do not know or cannot do (a call you cannot "
+            "see, a special request, a discount, an exception), never guess or say you did not catch it: call talk_to_owner "
+            "and say only 'Please contact the owner directly: <the owner's numbers>'. Only a VOICE note that was clearly "
+            "heard wrongly may be answered by asking the guest to say it again in a few words.\n"
             "- Rooms and extra beds (the owner's rule): 2 persons per room. Fewer rooms only when the guest asks for "
             "fewer: then up to 3 per room, the 3rd on an extra bed at the FACTS price. When the guest asks for a "
             "number of rooms, call check_availability with that rooms number; the code adds the beds and the cost.\n\n"

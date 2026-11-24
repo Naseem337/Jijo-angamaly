@@ -28,6 +28,15 @@ def test_stay_details_in_any_language(text, ci, co, persons):
     assert parse_stay(text, TODAY) == {"check_in": ci, "check_out": co, "persons": persons}
 
 
+def test_days_without_a_month_and_a_bare_persons_line():
+    # live chat 2026-11-23: the form was asked again for this
+    got = parse_stay("28th check in\n29th Check out \n3\n1 room", TODAY)
+    assert got == {"check_in": date(2026, 11, 28), "check_out": date(2026, 11, 29), "persons": 3, "rooms": 1}
+    assert parse_stay("Check in : 28\nCheck out : 29\nNumber of persons : 3", TODAY) == {
+        "check_in": date(2026, 11, 28), "check_out": date(2026, 11, 29), "persons": 3}
+    assert parse_stay("check out 29th", TODAY) == {}  # nothing is guessed
+
+
 def test_a_date_already_past_this_year_means_next_year():
     got = parse_stay("10 oct to 12 oct", TODAY)
     assert got["check_in"] == date(2027, 10, 10) and got["check_out"] == date(2027, 10, 12)

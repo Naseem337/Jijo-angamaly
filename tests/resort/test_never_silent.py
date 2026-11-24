@@ -32,6 +32,8 @@ COMPLETE = [
     "from 12 dec till 15, 2 people",
     "12-12-2026 to 14-12-2026, 3 persons",
     "2 people, 12 dec, 2 nights",
+    "28th check in\n29th Check out \n3\n1 room",  # live chat 2026-11-23: days without a month, persons on its own line
+    "Check in : 28\nCheck out : 29\nNumber of persons : 3",
 ]
 
 # partial or odd answers: no dates check yet, but never silence
@@ -134,3 +136,56 @@ def test_a_remark_the_ai_leaves_quiet_stays_quiet(world, remark):
     before = len(w.wa.to(GUEST))
     say(w, remark, GUEST, reply("[no reply]"))
     assert len(w.wa.to(GUEST)) == before  # no 'please type that once more' for a compliment or a goodbye
+
+
+# ---------------------------------------------------------------- other payment terms while a link is open
+@pytest.mark.parametrize("text", [
+    "I'll pay 1000 now as advance. Is that ok", "Can I pay 1000", "No, I'll pay 1000 advance and balance wen I reach at property.",
+    "I don't have balance in bank, I have cash in hand.", "I'll pay you directly wen I reach property.",
+])
+def test_other_payment_terms_get_the_fixed_advance_and_the_owner_numbers(world, text):
+    w = world
+    hold(w)
+    say(w, text, GUEST, reply("[no reply]"), reply("[no reply]"))
+    last = w.wa.texts(GUEST)[-1]
+    assert "contact the owner directly" in last and "9497861924" in last and "pay the advance" not in last.lower()[:0]
+    assert "rzp" in last or "payment" in last.lower() or "advance" in last.lower()
+
+
+@pytest.mark.parametrize("text", ["Can I call you?", "I just called you", "I just called you over phone.", "can i call the owner"])
+def test_a_call_gets_the_owner_numbers(world, text):
+    w = world
+    hold(w)
+    say(w, text, GUEST, reply("Sorry, I did not catch that."), reply("[no reply]"))
+    last = w.wa.texts(GUEST)[-1]
+    assert "contact the owner directly" in last and "9497861924" in last
+
+
+def test_ok_to_the_owner_numbers_is_not_answered_with_a_pay_now_line(world):
+    w = world
+    hold(w)
+    say(w, "Can I call you?", GUEST, reply("[no reply]"))
+    n = len(w.wa.to(GUEST))
+    say(w, "Ok", GUEST, reply("[no reply]"))
+    assert len(w.wa.to(GUEST)) == n
+
+
+def test_no_payment_reminder_after_stop(world):
+    from datetime import timedelta
+    w = world
+    hold(w)
+    say(w, "Stop", GUEST, reply("[no reply]"))
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    n = len(w.wa.to(GUEST))
+    w.bot.sweep(b.hold_expires_at - timedelta(minutes=3))
+    assert len(w.wa.to(GUEST)) == n
+
+
+def test_restart_after_stop_is_a_restart_not_an_opt_in(world):
+    w = world
+    say(w, "Hi")
+    say(w, "Stop")
+    say(w, "Restart")
+    texts = w.wa.texts(GUEST)
+    assert not any("Welcome back" in x for x in texts)
+    assert w.repo.get_state(GUEST).get("opted_out") is True

@@ -1994,3 +1994,17 @@ def test_the_ai_is_told_to_hand_over_to_the_owner_when_too_many_things_are_asked
     assert "TOO MANY QUESTIONS" in system and "contact the owner directly" in system
     assert "the owner will contact" not in system and "owner will confirm" not in system
     assert "NEVER GUESS, NEVER PROMISE A CALLBACK" in system and "Never say the owner or the team" in system
+
+
+def test_owner_sets_the_advance_before_payment_a_new_link_for_that_amount_and_the_old_one_closed(world):
+    w = world
+    hold(w, rooms=1)
+    b = w.repo.list_bookings(phone=GUEST)[0]
+    old_link, old_total = b.payment_link_id, b.total
+    assert w.bot.reissue_link(b, advance=1000, by="owner@x.com") is None
+    b = w.repo.get_booking(b.id)
+    assert b.advance == 1000 and b.total == old_total  # the total is unchanged
+    assert b.payment_link_id != old_link and old_link in w.pay.cancelled
+    assert w.pay.created[-1]["amount"] == 1000 and "Advance set by the owner" in b.notes
+    assert b.payment_link_url in w.wa.texts()[-1]  # the owner's fixed wording; the amount is on the link itself
+    assert w.bot.reissue_link(b, advance=b.total + 1)
