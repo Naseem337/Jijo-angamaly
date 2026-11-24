@@ -18,8 +18,33 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
   tests `test_agent_gate.py`, `test_agent_guard.py`). The old bot is NOT live (CLAUDE.md): never edit flow.py / chat.py
   except the one routing line in `BookingBot.handle()`.
 
+- Owner rules 2026-11-25: `guest_called` (4d11ea5) and `pay_terms` (8330e2b): talk_to_owner(reason=...) sends the owner's
+  fixed text; guest_called alerts no one, pay_terms alerts the team. "Pay the link a bit later" = hold link; "pay later
+  without the online advance" = pay_terms.
+- AI-5 evals + chat tester: see the commit `Step AI-5: agent evals + chat tester`.
+
+## Evals (AI-5)
+- `tests/eval/agent_scenarios.yaml` (34 scenarios, format at the top of the file; N07 moved here as `guest_called`).
+- `.venv\Scripts\python.exe scripts\eval_agent.py [--only id ...] [--runs N] [--no-judge]`: the REAL LLM_CHAIN, 3 runs each,
+  a fresh scratch DB per run (seed + Kanthalloor switched ON + fake photos), fake payments, a recording fake WhatsApp,
+  clock fixed at 2026-11-25 10:00 IST. `[paid]` marks the open link paid at the fake provider; `[image]`; `[wait Nh]`.
+  Not a pure dry-run outbox: a dry run never logs the bot's messages, so later turns would not see them.
+- Hard checks per turn: tools, args (last call), sent keys, not_sent, must_not, expect_text, gate outcome. Tone: one AI
+  judge call per run, scores only the AI's own words 1-5, below 4 fails (a judge error is reported, never a fail).
+- Failed runs: full transcripts in `tests/eval/out/` (git-ignored, wiped at the start of each run).
+- `scripts\chat_resort.py --agent`: chat with the agent in the terminal (gate + agent + guard + outbox as live, printing
+  fake WhatsApp, fake payment links, scratch DB with the seed).
+
+- First full run (2026-11-25, chain sarvam_chat -> groq, no pause): 3/34 scenarios pass 3/3, 26/102 runs pass, 5.7 min.
+  Main failures: no ask_location for "I need a room" (the AI asks in its own words); talk_to_owner reason is free text, never
+  the exact `pay_terms` / `guest_called`; mid-chat "hi" gets no open step; changes after a link (dates) not sent to
+  update_enquiry; Manglish "12 muthal 14" read as November; 10 adults in 4 rooms gives no how-many question; photos
+  asked without a place: no send_photos; the AI's own line too long and repeating the fixed messages (judge).
+  Judge quirk: it sometimes asks an English guest for Manglish style (the language hint in JUDGE lists all styles).
+- `--pause N` adds N seconds between AI turns (default 0); a run where the AI was down is repeated once after 30 s.
+
 ## Next
-- AI-5 evals (`tests/eval/agent_scenarios.yaml` + `scripts/eval_agent.py`).
+- Fix the AI-5 eval failures with general rules (prompt / tool description / tool result), one at a time.
 - AI-6 is now the OWNER TESTING on a test WhatsApp number with `AGENT_MODE=agent` (shadow mode dropped: no live traffic).
 - Then AI-7 switch, AI-8 cleanup.
 

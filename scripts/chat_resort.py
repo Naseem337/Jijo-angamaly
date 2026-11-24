@@ -1,6 +1,7 @@
 """Chat with the resort bot in the terminal, using the real AI from .env (nothing is sent on WhatsApp).
 
-    .venv\\Scripts\\python.exe scripts\\chat_resort.py
+    .venv\\Scripts\\python.exe scripts\\chat_resort.py            the old bot
+    .venv\\Scripts\\python.exe scripts\\chat_resort.py --agent    the new AI-first agent (app/resort/agent/)
 
 Type like a guest. Commands:  /paid  = pretend the payment came in,  /reset = new guest and empty database,  /quit.
 Uses a fresh temporary database with the seed data, so it never touches real bookings.
@@ -32,9 +33,22 @@ from app.whatsapp.parse import InboundMessage  # noqa: E402
 
 
 class PrintWA:
+    """Sends nothing: prints what the guest (or staff) would get."""
+
+    def __init__(self, guest: str = "") -> None:
+        self.guest = guest
+
     def send_text(self, to, text):
-        print("\nBOT:\n" + "\n".join("    " + ln for ln in text.split("\n")))
+        who = "BOT" if not self.guest or to == self.guest else f"STAFF ALERT to {to}"
+        print(f"\n{who}:\n" + "\n".join("    " + ln for ln in text.split("\n")))
         return "wamid.x"
+
+    def send_image(self, to, media_id, caption=""):
+        print(f"BOT: [photo {media_id}]")
+        return "wamid.img"
+
+    def upload_media(self, data, mime_type="image/jpeg", filename="x"):
+        return f"media:{filename}"
 
     def mark_read(self, *a, **k):
         return True
@@ -46,20 +60,29 @@ class PrintWA:
         raise RuntimeError("voice notes are not supported in this terminal chat")
 
 
-def new_session():
+PHONE = "+919847000123"
+
+
+def new_session(agent: bool = False):
+    """A fresh scratch database with the seed data. agent=True: AGENT_MODE=agent (the gate, the AI agent, the guard
+    and the outbox, exactly as live), but WhatsApp is the printing fake and payments are fake links."""
     repo = ResortRepo(Path(tempfile.mkdtemp()) / "r.sqlite3")
     seed.seed(repo)
     cfg = load_resort_config()
+    if agent:
+        cfg = cfg.model_copy(update={"agent_mode": "agent"})
     llm = build_llm(cfg, EnvSecretResolver())
-    bot = BookingBot(cfg, repo, PrintWA(), MockPayments(), SystemClock(), llm=lambda: llm)
+    bot = BookingBot(cfg, repo, PrintWA(PHONE), MockPayments(), SystemClock(), llm=lambda: llm)
     return repo, bot
 
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
-    repo, bot = new_session()
-    phone, ids = "+919847000123", itertools.count(1)
-    print("Resort bot chat. /paid = payment received, /reset = start over, /quit = exit.")
+    agent = "--agent" in sys.argv[1:]
+    repo, bot = new_session(agent)
+    phone, ids = PHONE, itertools.count(1)
+    print(f"Resort bot chat ({'NEW AGENT' if agent else 'old bot'}). /paid = payment received, /reset = start over, "
+          "/quit = exit. Nothing is sent on WhatsApp; payment links are fake.")
     while True:
         try:
             text = input("\nYOU: ").strip()
@@ -70,7 +93,7 @@ def main() -> None:
         if text == "/quit":
             break
         if text == "/reset":
-            repo, bot = new_session()
+            repo, bot = new_session(agent)
             print("(new empty database)")
             continue
         if text == "/paid":

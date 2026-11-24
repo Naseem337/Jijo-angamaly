@@ -1,0 +1,340 @@
+# Agent evals (docs/AI_AGENT_DESIGN.md section 7). Run: .venv\Scripts\python.exe scripts\eval_agent.py
+#
+# Each scenario starts from a FRESH scratch database: the seed resorts (Pozhiyoram, Alleppey: 9 Beach View AC Rooms,
+# up to 3 adults, Dec season rates, extra bed 500) plus Vibes Kanthalloor (Munnar) switched ON with its 3 room types,
+# fake photos, fake payments and a fake WhatsApp that only records. Today is fixed: 2026-11-25 10:00 IST (Wednesday).
+#
+# A turn:
+#   guest:        the guest's message. Special: "[image]" / "[image] caption" = a photo; "[paid]" = the open payment
+#                 link is paid at the provider (no message, no AI); "[wait 25h]" = the clock jumps.
+#   expect_tools: tools that MUST be called in this turn (any order). [] = no check. Use none: true for "no tool at all".
+#   expect_args:  {tool: {arg: value}}: the LAST call of that tool has these arguments (strings: case-insensitive
+#                 contains; numbers: equal; dates: ISO).
+#   expect_sent:  outbox keys that MUST go out this turn ("photos" matches "photos:3"; "staff" any staff alert).
+#   not_sent:     outbox keys that must NOT go out ("staff" = no staff alert).
+#   must_not:     words that must not appear in anything the guest got this turn (case-insensitive).
+#   expect_text:  text that must appear (exactly, case-sensitive) in what the guest got.
+#   outcome:      the gate's outcome (opt_out, opt_in, restart, silent, ...).
+# Tone (AI judge, 1-5, fail below 4): short, polite, the guest's language, answers what was asked.
+
+# ───────────────────────── happy paths ─────────────────────────
+- id: happy_en
+  lang: en
+  turns:
+    - guest: "hi"
+      none: true
+      expect_text: "Hi, How may I assist you?"
+    - guest: "I need a room"
+      expect_sent: [ask_location]
+    - guest: "Alleppey"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {place: alleppey}}
+      expect_sent: [form]
+    - guest: "Dec 12 to Dec 14, 2 adults"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {check_in: "2026-12-12", check_out: "2026-12-14", adults: 2}}
+      expect_sent: [rooms_ok, ask_contact]
+      must_not: ["confirmed", "booked"]
+    - guest: "Rahul 9847011111"
+      expect_tools: [create_booking]
+      expect_args: {create_booking: {mobile: "9847011111"}}
+      expect_sent: [summary, pay]
+      must_not: ["RB-"]  # the name is in the owner's summary ("Guest - Rahul"): that is right
+
+- id: happy_manglish
+  lang: manglish
+  turns:
+    - guest: "hai"
+    - guest: "room venam"
+      expect_sent: [ask_location]
+    - guest: "alleppey"
+      expect_tools: [update_enquiry]
+      expect_sent: [form]
+    - guest: "dec 12 muthal 14 vare, 2 per"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {check_in: "2026-12-12", check_out: "2026-12-14", adults: 2, language: manglish}}
+      expect_sent: [rooms_ok, ask_contact]
+    - guest: "Anu 9847022222"
+      expect_tools: [create_booking]
+      expect_sent: [summary, pay]
+
+- id: happy_tanglish
+  lang: tanglish
+  turns:
+    - guest: "vanakkam, room venum"
+      expect_sent: [ask_location]
+    - guest: "Alleppey la dec 20 to 22, 2 per irukkom"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {place: alleppey, check_in: "2026-12-20", check_out: "2026-12-22", adults: 2, language: tanglish}}
+      expect_sent: [rooms_ok, ask_contact]
+    - guest: "Karthik 9840033333"
+      expect_tools: [create_booking]
+      expect_sent: [summary, pay]
+
+- id: free_text_one_message
+  lang: manglish
+  turns:
+    - guest: "kanthaloor 12 muthal 14 vare 4 per"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {place: kanthalloor, check_in: "2026-12-12", check_out: "2026-12-14", adults: 4}}
+      expect_sent: [rooms_ok, ask_contact]
+      must_not: ["confirmed", "₹"]
+
+# ───────────────────────── stay details in odd forms ─────────────────────────
+- id: misspelt_place
+  turns:
+    - guest: "rooms in aleppy for 2 on dec 5 for 1 night"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {place: alleppey, check_in: "2026-12-05", check_out: "2026-12-06", adults: 2}}
+      expect_sent: [rooms_ok]
+
+- id: date_without_year
+  turns:
+    - guest: "Alleppey, 3 Jan to 5 Jan, 2 adults"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {check_in: "2027-01-03", check_out: "2027-01-05"}}
+      expect_sent: [rooms_ok]
+
+- id: past_date
+  turns:
+    - guest: "Alleppey room for 2 on 20 Nov 2026, one night"
+      expect_tools: [update_enquiry]
+      expect_sent: [past_date]
+      not_sent: [rooms_ok]
+
+- id: nights_not_checkout
+  turns:
+    - guest: "Alleppey from Dec 18, 3 nights, 2 adults"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {check_in: "2026-12-18", check_out: "2026-12-21"}}
+      expect_sent: [rooms_ok]
+
+# ───────────────────────── extra beds ─────────────────────────
+- id: three_adults_one_room_extra_bed
+  turns:
+    - guest: "Alleppey dec 10 to 12, 3 adults, only 1 room"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {adults: 3, rooms: 1}}
+      expect_sent: [ask_extra_bed]
+      expect_text: "Do you need an extra bed?"
+    - guest: "yes"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {extra_beds: 1}}
+
+- id: ten_adults_four_rooms_how_many
+  turns:
+    - guest: "Alleppey dec 10 to 12, 10 adults in 4 rooms"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {adults: 10, rooms: 4}}
+      expect_sent: [ask_extra_bed]
+      expect_text: "How many extra beds do you need?"
+    - guest: "2"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {extra_beds: 2}}
+
+# ───────────────────────── changes after the link ─────────────────────────
+- id: change_dates_after_link
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+      expect_sent: [pay]
+    - guest: "sorry, make it dec 15 to 17"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {check_in: "2026-12-15", check_out: "2026-12-17"}}
+      expect_sent: [summary, pay]
+
+- id: change_persons_after_link
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+      expect_sent: [pay]
+    - guest: "2 more friends are coming, 4 adults now"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {adults: 4}}
+      expect_sent: [summary, pay]
+
+- id: change_room_type_after_link
+  turns:
+    - guest: "Kanthalloor dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+      expect_sent: [pay]
+    - guest: "can I take the Family Suite instead?"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {room_picks: "family"}}
+      expect_sent: [pay]
+
+# ───────────────────────── price, discount, many questions ─────────────────────────
+- id: price_asked
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "what is the price?"
+      expect_tools: [get_price]
+      expect_sent: [price_answer]
+
+- id: discount_once_then_twice
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "can you give some discount?"
+      not_sent: [handoff, staff]
+      must_not: ["no discount"]
+    - guest: "please, give a lower rate"
+      expect_tools: [talk_to_owner]
+      expect_sent: [handoff]
+
+- id: three_questions_one_message
+  turns:
+    - guest: "Is there a pool? Do you allow pets? Is breakfast included? Can we have a campfire?"
+      expect_tools: [talk_to_owner]
+      expect_sent: [handoff]
+
+# ───────────────────────── photos ─────────────────────────
+- id: photos_resort
+  turns:
+    - guest: "Alleppey"
+    - guest: "send resort photos"
+      expect_tools: [send_photos]
+      expect_sent: [photos]
+
+- id: photos_room_type
+  turns:
+    - guest: "Kanthalloor"
+    - guest: "photos of the deluxe room please"
+      expect_tools: [send_photos]
+      expect_args: {send_photos: {room_type: deluxe}}
+      expect_sent: [photos]
+
+- id: photos_other_room
+  turns:
+    - guest: "Kanthalloor dec 10 to 12, 2 adults"
+    - guest: "do you have any other room? show me"
+      expect_tools: [send_photos]
+
+- id: photos_before_dates
+  turns:
+    - guest: "can I see some photos first?"
+      expect_tools: [send_photos]
+      expect_sent: [ask_location]
+
+# ───────────────────────── payment ─────────────────────────
+- id: paid_and_confirmed
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+      expect_sent: [pay]
+    - guest: "[paid]"
+    - guest: "I have paid"
+      expect_tools: [check_payment]
+      expect_sent: [confirmed]
+
+- id: screenshot_not_paid
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "[image]"
+      expect_tools: [check_payment]
+      not_sent: [confirmed]
+      must_not: ["confirmed", "booked"]
+
+- id: says_paid_but_not
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "done, paid"
+      expect_tools: [check_payment]
+      not_sent: [confirmed]
+      must_not: ["confirmed", "booked"]
+
+- id: hold_pay_tonight
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "can you hold the room? I will pay tonight"
+      expect_tools: [send_payment_link]
+      expect_args: {send_payment_link: {reason: hold}}
+
+- id: link_lost
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "[wait 1h]"
+    - guest: "I lost the payment link, send again"
+      expect_tools: [send_payment_link]
+
+- id: pay_terms_small_advance
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "I'll pay 1000 advance now, rest later"
+      expect_tools: [talk_to_owner]
+      expect_args: {talk_to_owner: {reason: pay_terms}}
+      expect_sent: [pay_terms]
+      expect_text: "For More detailed discussion, kindly call to the below numbers:"
+
+- id: pay_terms_cash
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "can I pay cash?"
+      expect_tools: [talk_to_owner]
+      expect_args: {talk_to_owner: {reason: pay_terms}}
+      expect_sent: [pay_terms]
+
+- id: pay_terms_at_property
+  lang: manglish
+  turns:
+    - guest: "alleppey dec 10 to 12, 2 per"
+    - guest: "Meera 9847044444"
+    - guest: "advance venda, resortil vannittu pay cheyyam"
+      expect_tools: [talk_to_owner]
+      expect_args: {talk_to_owner: {reason: pay_terms}}
+      expect_sent: [pay_terms]
+
+# moved from resort_scenarios.yaml N07
+- id: guest_called
+  turns:
+    - guest: "Hi"
+    - guest: "Alleppey Dec 10-12, 2 adults"
+    - guest: "I already called the owner"
+      expect_tools: [talk_to_owner]
+      expect_args: {talk_to_owner: {reason: guest_called}}
+      expect_sent: [guest_called, ask_contact]
+      not_sent: [staff, handoff]
+      expect_text: "Thank you sir. Please let me know if you need any help with your booking."
+      must_not: ["no record", "didn't catch", "call you back", "will contact you"]
+
+# ───────────────────────── conversation ─────────────────────────
+- id: mid_chat_hi
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "hi"
+      expect_sent: [ask_contact]
+      must_not: ["How may I assist you"]
+
+- id: thanks_with_link_open
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "ok thanks"
+      not_sent: [summary, staff, handoff]
+      must_not: ["confirmed", "booked"]
+
+- id: unrelated_question
+  turns:
+    - guest: "who won the football world cup?"
+      not_sent: [handoff, staff]
+
+- id: stop_start
+  turns:
+    - guest: "STOP"
+      outcome: opt_out
+    - guest: "START"
+      outcome: opt_in
+
+- id: restart
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "restart"
+      outcome: restart
+      expect_text: "Hi, How may I assist you?"
+    - guest: "I need a room"
+      expect_sent: [ask_location]

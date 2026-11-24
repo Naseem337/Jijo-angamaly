@@ -10,3 +10,6 @@ data/
 *.mp3
 *.wav
 .aws-sam/
+
+# agent eval transcripts (scripts/eval_agent.py)
+tests/eval/out/
