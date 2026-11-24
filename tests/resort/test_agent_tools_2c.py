@@ -70,6 +70,25 @@ def test_a_staff_alert_is_only_recorded_in_a_dry_run_and_sent_when_live(world):
     assert w.wa.texts(GUEST)[-1].startswith("Thank you. Please contact the owner directly:")
 
 
+def test_guest_called_sends_the_owners_thank_you_and_alerts_no_one(world):
+    w = world
+    result, texts, box = run(w, "talk_to_owner", {"reason": "guest_called"})
+    assert result["ok"] and result["sent"] == ["guest_called"]
+    assert texts["guest_called"] == "Thank you sir. Please let me know if you need any help with your booking."
+    assert [i for i in box.sent if i.kind == "staff"] == []
+    run(w, "talk_to_owner", {"reason": "guest_called"}, live=True)
+    assert w.wa.to(STAFF) == []  # live: still no staff alert
+    assert w.wa.texts(GUEST)[-1] == "Thank you sir. Please let me know if you need any help with your booking."
+
+
+def test_guest_called_with_an_open_step_sends_the_step_after_the_thank_you(world):
+    w = world
+    run(w, "update_enquiry", STAY)
+    result, texts, box = run(w, "talk_to_owner", {"reason": "guest_called", "language": "en"})
+    assert result["sent"][0] == "guest_called" and len(result["sent"]) == 2  # the thank-you, then the open step
+    assert [i for i in box.sent if i.kind == "staff"] == []
+
+
 def test_a_payment_failure_alerts_the_team_through_the_outbox(world):
     w = world
     run(w, "update_enquiry", STAY)

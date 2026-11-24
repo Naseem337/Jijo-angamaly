@@ -136,7 +136,9 @@ TOOL_SCHEMAS = [
         "talk_to_owner",
         "Use this when you do not know the answer or cannot do what the guest asks: they ask for the owner or a call, "
         "complain, want a refund, a discount or an exception, or want to change a booking that is already paid. The owner "
-        "gets a short summary and the guest is told to contact the owner directly. Never promise a call back.",
+        "gets a short summary and the guest is told to contact the owner directly. Never promise a call back. When the guest "
+        "says they called, spoke to, tried calling, visited or paid the owner directly, use reason 'guest_called': the "
+        "guest gets a short thank-you, the team is not alerted, and any open booking step follows.",
         {"type": "object", "properties": {
             "reason": {"type": "string", "description": "one short line for the owner, e.g. 'wants to cancel, asks full refund'"},
             "language": LANGUAGE_FIELD},
@@ -967,6 +969,12 @@ class AgentTools:
         bot = self.bot
         start, enq, style, lang = self._ctx(args)
         reason = (str(args.get("reason") or "").strip() or "the guest asked for the owner")[:200]
+        if reason == "guest_called":  # the guest already reached the owner: thank them, no staff alert, never deny it
+            self._send("guest_called", lang)
+            if enq.place or enq.check_in or bot._open_hold(self.phone):  # a booking under way: its open step follows
+                pp.queue_open_step(bot, self.phone, enq, lang, self.out, dates_line=False)
+            return self._result(True, {"owner_told": False}, start, enq,
+                                SENT_NOTE + " Never deny the call, never say there is no record, never promise a call back.")
         held = bot._open_hold(self.phone)
         prop = self._the_resort(enq, held)
         self.out.text("handoff", bot._owner_msg("handoff", {"lang": lang, "form_place": prop.id if prop else None}))

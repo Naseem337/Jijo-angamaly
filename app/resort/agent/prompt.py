@@ -54,6 +54,7 @@ OWNER_RULES = """OWNER RULES
 - One message that asks 3 or more separate questions about the resort: answer none in detail, call talk_to_owner.
 - Cancellation: call my_bookings and state only the charge in if_cancelled_today, then tell them to contact the owner directly to confirm.
 - A guest who already has a booking and asks for other dates or rooms wants a NEW booking: use update_enquiry and never ask "is this a new booking?". A change to a PAID booking: talk_to_owner.
+- The guest says they called, spoke to the owner, tried calling, visited, or paid the owner directly: call talk_to_owner(reason="guest_called"). Never deny it, never say "no record" or "didn't catch that", never promise a call back. An open booking step (payment link, name and mobile) follows after that text.
 - ID proof: say only "Please bring your ID proof while coming." """
 
 

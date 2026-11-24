@@ -60,6 +60,8 @@ S: dict[str, dict[str, str]] = {
     "room_picked": _t(*["Sure, {room} is free for your dates."] * 4),
     "room_pick_no": _t(*["Sorry, {room} is not free for {persons} persons on your dates."] * 4),
     "fill_form": _t(*["Please share the details above."] * 4),
+    # the guest says they called / spoke to / visited / paid the owner (owner, 2026-11-25): never denied, no staff alert
+    "guest_called": _t(*["Thank you sir. Please let me know if you need any help with your booking."] * 4),
     "owner_numbers": _t(*["The owner can speak with you directly: {numbers}."] * 4),
     "name_changed": _t(*["Done, the name is changed to {name}."] * 4),
     "contact_again": _t(*["Please send your name and mobile number here to go ahead with the booking."] * 4),
