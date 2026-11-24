@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -56,3 +57,10 @@ class Outbox:
         self.queue = []
         self.sent.extend(done)
         return done
+
+
+def bot_outbox(bot: Any, phone: str, *, dry_run: bool = False) -> Outbox:
+    """An outbox that sends through the BookingBot: texts and photos go to WhatsApp and are logged in the chat with the
+    WhatsApp id WhatsApp returns, so a swipe-reply to a photo or a room label finds its room (bot._note_quote)."""
+    return Outbox(phone, lambda to, text: bot._text(to, text, repeat_ok=True), lambda to, refs: bot._send_photos(to, refs),
+                  dry_run=dry_run)

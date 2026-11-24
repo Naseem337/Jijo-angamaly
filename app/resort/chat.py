@@ -934,6 +934,7 @@ class _Turn:
     priced: bool = False  # a tool worked out a price this turn (the only source of a price the AI may state)
     none_found: bool = False  # check_availability found no room this turn (the only source of 'fully booked')
     room_switched: bool = False  # the guest picked a room type this turn (handled in code)
+    quiet: bool = False  # the AI-first agent runs this turn: nothing is read from the chat log or sent past its outbox
     numbers: set[int] = field(default_factory=set)  # every number a tool returned this turn (the only amounts the AI may state)
 
 
@@ -3692,6 +3693,10 @@ class ChatMixin:
         """The last rooms went to another guest while this one was giving their name (stress test, 2026-11-18: with
         many guests at once the AI left the losers unanswered). The fixed 'not available' line goes, once per turn."""
         msg = t("rooms_none", ctx.st.get("lang", "en"))
+        if ctx.quiet:  # the agent: the fixed line only, never decided from the old chat log
+            ctx.after.append(msg)
+            ctx.silent = True
+            return
         if (self.repo.last_outbound_text(ctx.phone) or "") == msg:
             msg = t("form", ctx.st.get("lang", "en"))  # already told: ask for other dates instead of repeating it
         if msg not in ctx.after:
@@ -3938,7 +3943,7 @@ class ChatMixin:
         # "same number" = the WhatsApp number; with no name given, the guest's WhatsApp profile name is used
         # the name the guest gave in THIS conversation wins over one saved from an earlier chat (a guest who restarted
         # and gave a new name once got the old one on the summary, 2026-11-18)
-        name = (a.get("guest_name") or "").strip()[:60] or self._name_in_chat(phone) or guest.name
+        name = (a.get("guest_name") or "").strip()[:60] or ("" if ctx.quiet else self._name_in_chat(phone)) or guest.name
         raw_mobile = str(a.get("mobile") or "").strip()
         same = raw_mobile.lower() in ("same", "this", "this number", "same number", "whatsapp", "same no", "this no")
         mobile = phone if same else (try_normalize_phone(raw_mobile) or bk.get("mobile", ""))
@@ -3992,7 +3997,10 @@ class ChatMixin:
             log.error("Payment link failed for %s: %s", booking.id, exc)
             booking.status, booking.notes = "failed", f"payment link failed: {exc}"
             self.repo.save_booking(booking)
-            self._text(phone, self._owner_msg("pay_failed_link", ctx.st))
+            if ctx.quiet:
+                ctx.after.append(self._owner_msg("pay_failed_link", ctx.st))
+            else:
+                self._text(phone, self._owner_msg("pay_failed_link", ctx.st))
             self.handoff(phone, st, f"payment link could not be created for {booking.id}", notify_guest=False)
             ctx.handed_off = True
             return {"error": "payment link failed; the guest is told to contact the owner directly (with the numbers) and the team has been alerted"}
@@ -4056,7 +4064,10 @@ class ChatMixin:
             for b in parts:
                 b.status, b.notes = "failed", f"payment link failed: {exc}"
                 self.repo.save_booking(b)
-            self._text(phone, self._owner_msg("pay_failed_link", ctx.st))
+            if ctx.quiet:
+                ctx.after.append(self._owner_msg("pay_failed_link", ctx.st))
+            else:
+                self._text(phone, self._owner_msg("pay_failed_link", ctx.st))
             self.handoff(phone, st, f"payment link could not be created for {parts[0].id}", notify_guest=False)
             ctx.handed_off = True
             return {"error": "payment link failed; the guest is told to contact the owner directly (with the numbers) and the team has been alerted"}

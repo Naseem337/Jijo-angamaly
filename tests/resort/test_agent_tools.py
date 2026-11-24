@@ -8,6 +8,7 @@ from pathlib import Path
 
 from test_bot import GUEST, hold, world  # noqa: F401  (world is a fixture)
 
+from app.resort.agent import photos_plan as photos_module
 from app.resort.agent import tools as tools_module
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.state import Enquiry
@@ -46,10 +47,12 @@ def assert_shape(result):
 # --------------------------------------------------------------------------- the rules of the file
 
 
-def test_tools_py_never_reads_the_guests_words():
-    source = Path(tools_module.__file__).read_text(encoding="utf-8")
-    assert "import re" not in source and "re.compile" not in source and "re.search" not in source
-    assert {x.name for x in TOOLS} == {"update_enquiry", "get_price"}
+def test_the_agent_files_never_read_the_guests_words():
+    for module in (tools_module, photos_module):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert "import re" not in source and "re.compile" not in source and "re.search" not in source
+        assert "re.match" not in source and "re.sub" not in source and "re.findall" not in source
+    assert {x.name for x in TOOLS} == {"update_enquiry", "get_price", "send_photos"}
 
 
 # --------------------------------------------------------------------------- 1. place missing
@@ -141,12 +144,11 @@ def test_available_sends_the_owners_messages_in_order_with_the_price_in_facts(wo
     w = world
     result, texts, box = update(w, {**STAY, "adults": 2})
     assert_shape(result)
-    assert result["sent"] == ["rooms_ok", "rooms_plain", "photos:pending", "ask_contact"]
+    assert result["sent"] == ["rooms_ok", "rooms_plain", "ask_contact"]  # this resort has no glimpse or photos yet
     assert [i.key for i in box.queue] == result["sent"]
     assert texts["rooms_ok"] == "Yes, rooms are available for your dates."
     assert texts["rooms_plain"] == "For 2 persons: 1 room(s)."
     assert texts["ask_contact"] == "Please share your name and mobile number to proceed."
-    assert box.queue[2].kind == "marker" and box.queue[2].text == ""  # the photo flow is Step AI-2b: nothing is sent yet
     assert result["next_step"] == "ask_contact"
     facts = result["facts"]
     assert facts["available"] and facts["rooms"] == 1 and facts["rooms_offered"] == "1 Deluxe"

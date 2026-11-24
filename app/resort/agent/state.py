@@ -47,6 +47,8 @@ class Enquiry:
     link_open: bool = False
     paid: bool = False
     language: str = "en"  # en | manglish | tanglish | hinglish
+    photo_wish: dict[str, Any] | None = None  # photos asked for before any resort: {"kind", "room_type"}; sent once the place is known
+    intro_sent: str | None = None  # the resort whose glimpse (Property.intro) was already sent in this enquiry
 
     # ------------------------------------------------------------------ computed
 
@@ -133,7 +135,8 @@ class Enquiry:
                 "check_out": self.check_out.isoformat() if self.check_out else None, "adults": self.adults,
                 "children": self.children, "rooms": self.rooms, "room_picks": self.room_picks,
                 "extra_beds": self.extra_beds, "checked": self.checked, "booking_id": self.booking_id,
-                "link_open": self.link_open, "paid": self.paid, "language": self.language}
+                "link_open": self.link_open, "paid": self.paid, "language": self.language,
+                "photo_wish": self.photo_wish, "intro_sent": self.intro_sent}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> Enquiry:
@@ -149,7 +152,8 @@ class Enquiry:
         return cls(place=d.get("place"), check_in=day("check_in"), check_out=day("check_out"), adults=d.get("adults"),
                    children=d.get("children"), rooms=d.get("rooms"), room_picks=list(d.get("room_picks") or []),
                    extra_beds=int(d.get("extra_beds") or 0), checked=d.get("checked"), booking_id=d.get("booking_id"),
-                   link_open=bool(d.get("link_open")), paid=bool(d.get("paid")), language=lang)
+                   link_open=bool(d.get("link_open")), paid=bool(d.get("paid")), language=lang,
+                   photo_wish=d.get("photo_wish") or None, intro_sent=d.get("intro_sent") or None)
 
     @classmethod
     def load(cls, repo: Any, phone: str) -> Enquiry:

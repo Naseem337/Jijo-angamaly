@@ -18,6 +18,7 @@ from typing import Any
 
 from app.providers.llm import ToolSpec
 from app.resort import availability as av
+from app.resort.agent import photos_plan as pp
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.state import LANGUAGES, Enquiry
 from app.resort.chat import _Turn, _count_name, _money, close_word
@@ -58,6 +59,19 @@ TOOLS = [
                                    "description": "room types the guest does not want"},
             "extra_beds": {"type": "integer"},
             "language": LANGUAGE_FIELD}}),
+    ToolSpec(
+        "send_photos",
+        "Send the owner's photos when the guest asks to see the resort or its rooms. Say only WHAT they asked for with "
+        "`kind`; the owner's rules decide which photos go (never one twice, a label before each room's photos, only free "
+        "rooms once the dates are known). kind: room_type (a named room: also pass room_type), resort (outside, beach, "
+        "common areas), other_room (another room than the one offered), all_rooms (every room), default (room photos "
+        "with no room named), more (the guest wants more photos). No resort known yet: the location question goes first "
+        "and the photos follow the answer.",
+        {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": list(pp.KINDS)},
+            "room_type": {"type": "string", "description": "only for kind room_type: the room type name from the FACTS"},
+            "language": LANGUAGE_FIELD},
+         "required": ["kind"]}),
     ToolSpec(
         "get_price",
         "The price of the stay the guest already gave (or of the stay on their open payment link), worked out now from the "
@@ -100,17 +114,9 @@ class AgentTools:
         """An owner text from i18n.py, in the guest's language."""
         self.out.text(key, t(key, lang, **values))
 
-    @staticmethod
-    def _room(rooms: list[RoomType], name: str) -> RoomType | None:
+    def _room(self, rooms: list[RoomType], name: str) -> RoomType | None:
         """A room type by the name the AI passed (any case, a part of the name, or a close spelling)."""
-        said = name.strip().casefold()
-        for rt in rooms:
-            if rt.name.casefold() == said or rt.id.casefold() == said:
-                return rt
-        for rt in rooms:
-            if said and (said in rt.name.casefold() or rt.name.casefold() in said):
-                return rt
-        return None
+        return pp.find_room(self.bot, rooms, name)
 
     def _closed_place(self, place: str) -> Property | None:
         """A resort switched off in the dashboard that the AI's `place` names (and no open resort does)."""
@@ -231,6 +237,7 @@ class AgentTools:
             self._send("ask_location", lang, towns=bot._towns_text())
             return done(True, {"known": enq.to_dict()["place"]}, SENT_NOTE)
         enq.place = prop.id
+        wish, enq.photo_wish = cur.photo_wish, None  # photos asked for before the resort was known
 
         # the stay as the AI passes it; what it leaves out stays as saved (a field the AI forgets is never lost)
         try:
@@ -280,6 +287,10 @@ class AgentTools:
 
         # 2. dates or persons missing: the owner's form with only the missing lines
         if not (ci and co and adults and adults >= 1):
+            if wish:  # the photos go first, then the dates line and the form (rule 6)
+                facts = self._photos(enq, prop, str(wish.get("kind") or "default"), str(wish.get("room_type") or ""), lang)
+                if len(self.out.keys) > start:
+                    return done(True, {"missing": enq.missing, **facts}, SENT_NOTE)
             got = {"check_in": bool(ci), "check_out": bool(co), "persons": bool(adults), "rooms": wanted}
             self.out.text("form", bot._missing_form(lang, got))
             return done(True, {"missing": enq.missing}, SENT_NOTE)
@@ -363,11 +374,80 @@ class AgentTools:
             if not picked_now:
                 self._send("rooms_ok", lang)
             self.out.text(line_key, rooms_line)
-            self.out.marker("photos:pending")  # the owner's photo flow is Step AI-2b
-        else:  # only persons, rooms or the room type changed: the new rooms sentence, then the name ask
+            self._stay_photos(enq, prop, parts, bool(mix), price, True)
+        else:  # only persons, rooms or the room type changed: the new rooms sentence, a new room's photos, the name ask
             self.out.text(line_key, rooms_line)
+            self._stay_photos(enq, prop, parts, bool(mix), price, False)
         self._send("ask_contact", lang)
         return done(True, facts, SENT_NOTE)
+
+    def _stay_photos(self, enq: Enquiry, prop: Property, parts: list[dict[str, Any]], mixed: bool,
+                     price: dict[str, Any], first_time: bool) -> None:
+        """The owner's order after a room check (rule 2): the glimpse, the general photos not sent yet, then each room's
+        label and photos. Only the room photos when just the persons or rooms changed on the same dates."""
+        sent = pp.sent_refs(self.bot, self.phone, self.out)
+        if first_time:
+            if prop.intro and enq.intro_sent != prop.id:
+                nights = (enq.check_out - enq.check_in).days
+                per = price.get("per_room_per_night") or round(price["total"] / max(1, nights * sum(p["rooms"] for p in parts)))
+                self.out.text("glimpse", prop.intro.replace("{price}", _money(per)).replace("{room}", parts[0]["rt"].name))
+                enq.intro_sent = prop.id
+            if general := pp.general_photos(prop, sent):
+                self.out.photos(f"photos:{len(general)}", general)
+                sent |= set(general)
+        for part in (parts if mixed else parts[:1]):  # both room types only when the group is split over two
+            if refs := [x for x in pp.room_refs(self.bot, part["rt"], enq, part["rooms"]) if x not in sent]:
+                pp.queue_room(self.out, part["rt"], refs[:pp.MAX_ROOM_PHOTOS])
+
+    # ------------------------------------------------------------------ send_photos
+
+    def _photos(self, enq: Enquiry, prop: Property, kind: str, room_type: str, lang: str) -> dict[str, Any]:
+        """Queue the photos the owner's rules give for this kind, or the owner's text when there is nothing to send. A
+        `problem` key in the facts means the AI named a room that does not exist."""
+        bot, phone = self.bot, self.phone
+        sent = pp.sent_refs(bot, phone, self.out)
+        plan = pp.plan(bot, enq, prop, kind, room_type, sent, phone)
+        if plan.problem == "unknown_room":
+            return {"problem": f"there is no room type '{room_type}'; the room types are in the FACTS"}
+        if plan.problem == "photos_sent" and not sent:
+            return {"photos": 0, "info": "no photo has been uploaded for this resort yet"}
+        if plan.problem:  # photos_sent | no_other_room | room_not_free | other_free
+            self._send(plan.problem, lang, room=plan.room)
+            return {"photos": 0, "told": plan.problem}
+        if kind == "other_room" and enq.checked and plan.steps and plan.steps[0][0] is not None:
+            self._send("other_room_free", lang, room=plan.steps[0][0].name)
+        count = pp.queue_steps(self.out, plan.steps)
+        pp.queue_open_step(bot, phone, enq, lang, self.out)  # back to the booking: the step still open
+        return {"photos": count, "kind": kind, "rooms": [rt.name for rt, _ in plan.steps if rt is not None]}
+
+    def send_photos(self, args: dict[str, Any]) -> dict[str, Any]:
+        bot, phone, repo = self.bot, self.phone, self.bot.repo
+        start = len(self.out.keys)
+        enq = Enquiry.load(repo, phone)
+        style = args.get("language") if args.get("language") in LANGUAGES else enq.language
+        lang = I18N_LANG[style]
+        enq.language = style
+        kind, room_type = str(args.get("kind") or "default"), str(args.get("room_type") or "").strip()
+        if kind not in pp.KINDS:
+            return self._result(False, {"problem": f"kind must be one of {', '.join(pp.KINDS)}"}, start, enq,
+                                "Call again with a valid kind.")
+        held = bot._open_hold(phone)
+        if held:  # the payment link is out: that is the booking step (nothing is asked again after the photos)
+            enq.booking_id, enq.link_open = held[0].id, True
+        prop = repo.get_property(enq.place) if enq.place else None
+        if prop is None and held:
+            prop = repo.get_property(held[0].property_id)
+        if prop is None or not prop.active:  # no resort yet: the location question first, the request is kept (rule 6)
+            enq.photo_wish = {"kind": kind, "room_type": room_type}
+            self._send("ask_location", lang, towns=bot._towns_text())
+            enq.save(repo, phone)
+            return self._result(True, {"photos": 0, "waiting_for": "location"}, start, enq,
+                                SENT_NOTE + " The photos follow once the guest names the resort.")
+        facts = self._photos(enq, prop, kind, room_type, lang)
+        enq.save(repo, phone)
+        return self._result("problem" not in facts, facts, start, enq,
+                            SENT_NOTE if len(self.out.keys) > start else
+                            "Nothing was sent. Answer in one short line (no photos are uploaded yet).")
 
     def _relink(self, enq: Enquiry, prop: Property, bk: dict[str, Any], parts: list[dict[str, Any]], mix: Any,
                 held: list[Any], lang: str, rooms_line: tuple[str, str], same_dates: bool, picked_now: bool,
@@ -380,13 +460,22 @@ class AgentTools:
             bk["mix"] = [{"room_type_id": p["rt"].id, "rooms": p["rooms"], "beds": p["beds"], "total": p["total"],
                           "advance": p["advance"]} for p in parts]
         scratch = {"lang": lang, "style": enq.language, "turn": 1, "bk": bk}
-        ctx = _Turn(self.phone, scratch, text="")
+        # quiet: nothing is read from the old chat log and nothing is sent past the outbox
+        ctx = _Turn(self.phone, scratch, text="", quiet=True)
+        guest = bot.repo.get_guest(self.phone)
+        name = stay.get("guest_name") or (guest.name if guest else "")
         prep = bot._tool_prepare(ctx, {"rooms": sum(p["rooms"] for p in parts)})
         if "error" in prep:
+            self._queue_quiet(ctx, lang)  # e.g. the last rooms were just taken: the owner's text
             enq.save(bot.repo, self.phone)
             return self._result(False, {"problem": prep["error"]}, start, enq, "Tell the guest nothing invented.")
-        made = bot._tool_create(ctx, {"guest_name": stay.get("guest_name") or "", "mobile": stay.get("mobile") or "same"})
+        if not name:
+            enq.save(bot.repo, self.phone)
+            return self._result(False, {"problem": "the guest's name is not known"}, start, enq,
+                                "Ask the guest for their name, then call create_booking.")
+        made = bot._tool_create(ctx, {"guest_name": name, "mobile": stay.get("mobile") or "same"})
         if "error" in made or ctx.handed_off:
+            self._queue_quiet(ctx, lang)  # the sold-out text, or the owner's numbers when the link could not be made
             enq.save(bot.repo, self.phone)
             return self._result(False, {"problem": made.get("error", "the payment link could not be made")}, start, enq,
                                 "The guest is told to contact the owner. Do not promise anything.")
@@ -400,6 +489,12 @@ class AgentTools:
         enq.booking_id, enq.link_open = made["booking_id"], True
         enq.save(bot.repo, self.phone)
         return self._result(True, facts, start, enq, SENT_NOTE + " The old payment link is closed.")
+
+    def _queue_quiet(self, ctx: _Turn, lang: str) -> None:
+        """Texts the existing prepare / create code left for the guest in a quiet turn, through the outbox."""
+        for message in ctx.after:
+            if isinstance(message, str):
+                self.out.text("rooms_none" if message == t("rooms_none", lang) else "pay_failed_link", message)
 
     # ------------------------------------------------------------------ get_price
 
