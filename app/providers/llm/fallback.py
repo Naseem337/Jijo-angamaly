@@ -56,14 +56,16 @@ class FallbackLLM:
         messages: list[ChatMessage],
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 1024,
+        temperature: float | None = None,
     ) -> LLMResponse:
+        extra = {} if temperature is None else {"temperature": temperature}  # providers that never heard of it still work
         failures: list[str] = []
         refusal: LLMResponse | None = None
         for attempt in range(2):
             waits: list[float] = []
             for provider in self._order():
                 try:
-                    response = provider.complete(system, messages, tools, max_tokens)
+                    response = provider.complete(system, messages, tools, max_tokens, **extra)
                 except LLMError as exc:
                     log.warning("LLM provider failed, trying next: %s", exc)
                     failures.append(str(exc))

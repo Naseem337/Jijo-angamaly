@@ -39,6 +39,10 @@ class Outbox:
     def text(self, key: str, text: str) -> None:
         self.queue.append(Item("text", key, text=text))
 
+    def prepend_text(self, key: str, text: str) -> None:
+        """A text that goes BEFORE everything queued so far (the AI's own line comes first, design section 4)."""
+        self.queue.insert(0, Item("text", key, text=text))
+
     def photos(self, key: str, refs: list[str]) -> None:
         self.queue.append(Item("photos", key, refs=tuple(refs)))
 

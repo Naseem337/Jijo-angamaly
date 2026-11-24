@@ -117,6 +117,7 @@ class OpenAICompatibleLLM:
         messages: list[ChatMessage],
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 1024,
+        temperature: float | None = None,
     ) -> LLMResponse:
         body: dict[str, Any] = {
             "model": self.model,
@@ -124,6 +125,8 @@ class OpenAICompatibleLLM:
             "max_tokens": max_tokens + self._headroom,
             **self._extra,
         }
+        if temperature is not None:
+            body["temperature"] = temperature
         if tools:
             body["tools"] = [
                 {"type": "function",

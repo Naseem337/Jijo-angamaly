@@ -103,6 +103,8 @@ class LLMProvider(Protocol):
         messages: list[ChatMessage],
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 1024,
+        temperature: float | None = None,
     ) -> LLMResponse:
-        """One model call. Raises LLMError on any failure (network, HTTP, bad payload)."""
+        """One model call. Raises LLMError on any failure (network, HTTP, bad payload). temperature: only when a caller
+        needs a steady answer (the resort agent uses 0.3); None leaves the provider's own setting."""
         ...

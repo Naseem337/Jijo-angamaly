@@ -87,6 +87,7 @@ class AnthropicLLM:
         messages: list[ChatMessage],
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 1024,
+        temperature: float | None = None,
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -95,6 +96,8 @@ class AnthropicLLM:
             "messages": _to_wire(messages),
             **self._extra,
         }
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         if tools:
             kwargs["tools"] = [
                 {"name": t.name, "description": t.description, "input_schema": t.parameters}
