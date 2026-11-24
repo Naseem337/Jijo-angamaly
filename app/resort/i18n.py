@@ -120,7 +120,8 @@ S: dict[str, dict[str, str]] = {
                 '{url}'),
     "pay_nudge": _t(*["Please complete the advance payment to confirm your booking."] * 4),
     "pay_wait": _t(*["We have not received the payment yet. Once it goes through (usually within a minute or two) your booking is confirmed automatically; no need to pay again."] * 4),
-    "pay_terms": _t(*["The advance of ₹{advance} is paid online to block the room: {url}\nFor any other payment arrangement, please contact the owner directly: {numbers}."] * 4),
+    # smaller advance / cash / pay at the property / pay later (owner, 2026-11-25): the owner's exact words
+    "pay_terms": _t(*["For More detailed discussion, kindly call to the below numbers: {numbers}"] * 4),
     "hold_pay": _t(*["To hold the room, please pay the advance now using this link:\n{url}"] * 4),
     "pending": _t('Your payment link is still open for {minutes} more minutes: {url}',
                 'പേയ്മെന്റ് ലിങ്ക് ഇനി {minutes} മിനിറ്റ് കൂടി തുറന്നിരിക്കും: {url}',

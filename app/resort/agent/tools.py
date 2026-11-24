@@ -138,7 +138,9 @@ TOOL_SCHEMAS = [
         "complain, want a refund, a discount or an exception, or want to change a booking that is already paid. The owner "
         "gets a short summary and the guest is told to contact the owner directly. Never promise a call back. When the guest "
         "says they called, spoke to, tried calling, visited or paid the owner directly, use reason 'guest_called': the "
-        "guest gets a short thank-you, the team is not alerted, and any open booking step follows.",
+        "guest gets a short thank-you, the team is not alerted, and any open booking step follows. When the guest wants "
+        "other payment terms (a smaller advance, cash, pay at the property, pay later instead of the online advance), use "
+        "reason 'pay_terms': the guest gets the owner's numbers.",
         {"type": "object", "properties": {
             "reason": {"type": "string", "description": "one short line for the owner, e.g. 'wants to cancel, asks full refund'"},
             "language": LANGUAGE_FIELD},
@@ -977,6 +979,12 @@ class AgentTools:
                                 SENT_NOTE + " Never deny the call, never say there is no record, never promise a call back.")
         held = bot._open_hold(self.phone)
         prop = self._the_resort(enq, held)
+        if reason == "pay_terms":  # other payment terms than the online advance: the owner's text + numbers, team told
+            self._send("pay_terms", lang, numbers=bot._owner_numbers({"form_place": prop.id if prop else None}))
+            self._staff("guest wants other payment terms (smaller advance / cash / pay at the property / pay later)",
+                        prop.id if prop else None, lang)
+            return self._result(True, {"owner_told": True}, start, enq,
+                                SENT_NOTE + " Never agree to other terms yourself and never promise a call back.")
         self.out.text("handoff", bot._owner_msg("handoff", {"lang": lang, "form_place": prop.id if prop else None}))
         self._staff(reason, prop.id if prop else None, lang)
         return self._result(True, {"owner_told": True}, start, enq,

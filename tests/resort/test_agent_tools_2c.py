@@ -81,6 +81,17 @@ def test_guest_called_sends_the_owners_thank_you_and_alerts_no_one(world):
     assert w.wa.texts(GUEST)[-1] == "Thank you sir. Please let me know if you need any help with your booking."
 
 
+def test_pay_terms_sends_the_owners_exact_text_with_the_numbers_and_tells_the_team(world):
+    w = world
+    run(w, "update_enquiry", STAY)
+    result, texts, box = run(w, "talk_to_owner", {"reason": "pay_terms"})
+    assert result["ok"] and result["sent"] == ["pay_terms", "staff:alert"]
+    assert texts["pay_terms"] == ("For More detailed discussion, kindly call to the below numbers: "
+                                  "9497861924 / 9995855789")
+    assert "other payment terms" in [i for i in box.sent if i.kind == "staff"][0].text
+    assert "pay_terms" in (t := next(x for x in TOOL_SCHEMAS if x.name == "talk_to_owner")).description and t
+
+
 def test_guest_called_with_an_open_step_sends_the_step_after_the_thank_you(world):
     w = world
     run(w, "update_enquiry", STAY)
