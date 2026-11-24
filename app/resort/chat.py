@@ -935,6 +935,7 @@ class _Turn:
     none_found: bool = False  # check_availability found no room this turn (the only source of 'fully booked')
     room_switched: bool = False  # the guest picked a room type this turn (handled in code)
     quiet: bool = False  # the AI-first agent runs this turn: nothing is read from the chat log or sent past its outbox
+    staff: list[str] = field(default_factory=list)  # quiet turns: reasons for a staff alert, which the agent sends through its outbox
     numbers: set[int] = field(default_factory=set)  # every number a tool returned this turn (the only amounts the AI may state)
 
 
@@ -3943,7 +3944,10 @@ class ChatMixin:
         # "same number" = the WhatsApp number; with no name given, the guest's WhatsApp profile name is used
         # the name the guest gave in THIS conversation wins over one saved from an earlier chat (a guest who restarted
         # and gave a new name once got the old one on the summary, 2026-11-18)
-        name = (a.get("guest_name") or "").strip()[:60] or ("" if ctx.quiet else self._name_in_chat(phone)) or guest.name
+        if ctx.quiet:  # the agent: the name is only what the tool was given, empty is allowed (never read from the chat)
+            name = (a.get("guest_name") or "").strip()[:60]
+        else:
+            name = (a.get("guest_name") or "").strip()[:60] or self._name_in_chat(phone) or guest.name
         raw_mobile = str(a.get("mobile") or "").strip()
         same = raw_mobile.lower() in ("same", "this", "this number", "same number", "whatsapp", "same no", "this no")
         mobile = phone if same else (try_normalize_phone(raw_mobile) or bk.get("mobile", ""))
@@ -3953,9 +3957,9 @@ class ChatMixin:
             return {"error": ("ask the guest's name and mobile number for the booking" if not name else
                               "ask the guest's mobile number for the booking") if not raw_mobile
                     else "that mobile number does not look right; ask the guest to send it again"}
-        if not name:
+        if not name and not ctx.quiet:
             return {"error": "the mobile number is saved; ask ONLY the guest's name, in a few words"}
-        if name != guest.name:
+        if name and name != guest.name:
             guest.name = name
             self.repo.upsert_guest(guest)
         prop = self.repo.get_property(bk["property_id"])
@@ -3997,11 +4001,12 @@ class ChatMixin:
             log.error("Payment link failed for %s: %s", booking.id, exc)
             booking.status, booking.notes = "failed", f"payment link failed: {exc}"
             self.repo.save_booking(booking)
-            if ctx.quiet:
+            if ctx.quiet:  # the agent sends both the guest's text and the staff alert through its outbox
                 ctx.after.append(self._owner_msg("pay_failed_link", ctx.st))
+                ctx.staff.append(f"payment link could not be created for {booking.id}")
             else:
                 self._text(phone, self._owner_msg("pay_failed_link", ctx.st))
-            self.handoff(phone, st, f"payment link could not be created for {booking.id}", notify_guest=False)
+                self.handoff(phone, st, f"payment link could not be created for {booking.id}", notify_guest=False)
             ctx.handed_off = True
             return {"error": "payment link failed; the guest is told to contact the owner directly (with the numbers) and the team has been alerted"}
         booking.payment_link_id, booking.payment_link_url = link.id, link.url
@@ -4066,9 +4071,10 @@ class ChatMixin:
                 self.repo.save_booking(b)
             if ctx.quiet:
                 ctx.after.append(self._owner_msg("pay_failed_link", ctx.st))
+                ctx.staff.append(f"payment link could not be created for {parts[0].id}")
             else:
                 self._text(phone, self._owner_msg("pay_failed_link", ctx.st))
-            self.handoff(phone, st, f"payment link could not be created for {parts[0].id}", notify_guest=False)
+                self.handoff(phone, st, f"payment link could not be created for {parts[0].id}", notify_guest=False)
             ctx.handed_off = True
             return {"error": "payment link failed; the guest is told to contact the owner directly (with the numbers) and the team has been alerted"}
         ids = [b.id for b in parts]

@@ -232,14 +232,14 @@ def open_step(bot: Any, enq: Enquiry, lang: str) -> tuple[str, str] | None:
     return None
 
 
-def queue_open_step(bot: Any, phone: str, enq: Enquiry, lang: str, out: Outbox) -> None:
+def queue_open_step(bot: Any, phone: str, enq: Enquiry, lang: str, out: Outbox, *, dates_line: bool = True) -> None:
     """After the photos the guest is taken back to the booking: before any dates the reason (once per conversation),
     then the step still open, never the same text twice in a row."""
     step = open_step(bot, enq, lang)
     if step is None:
         return
     key, text = step
-    if key == "form" and not enq.check_in:
+    if dates_line and key == "form" and not enq.check_in:
         line = t("dates_for_availability", lang)
         if not already_said(bot, phone, out, line):
             out.text("dates_for_availability", line)

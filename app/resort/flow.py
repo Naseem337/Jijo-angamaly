@@ -509,13 +509,17 @@ class BookingBot(IdProofMixin, ChatMixin):
             except Exception as exc:  # outside their 24 h window (needs a template at go-live) or a network error
                 log.warning("Staff alert to %s failed: %s", mask_phone(number), exc)
 
-    def handoff(self, phone: str, st: dict[str, Any], reason: str, *, notify_guest: bool = True) -> str:
-        now = self.clock.now()
+    def handoff_summary(self, phone: str, st: dict[str, Any], reason: str) -> str:
+        """The short summary the staff get: the reason, who, the language and the last messages."""
         guest = self.repo.get_guest(phone)
         recent = self.repo.list_chat(phone, limit=6)
         lines = [f"{'Guest' if m.direction == 'in' else 'Bot'}: {m.text[:120]}" for m in recent]
-        summary = (f"Guest needs the team: {reason}\n{guest.name if guest and guest.name else 'Unknown'} {phone}\n"
-                   f"Language: {st.get('lang', 'en')}\n" + "\n".join(lines))
+        return (f"Guest needs the team: {reason}\n{guest.name if guest and guest.name else 'Unknown'} {phone}\n"
+                f"Language: {st.get('lang', 'en')}\n" + "\n".join(lines))
+
+    def handoff(self, phone: str, st: dict[str, Any], reason: str, *, notify_guest: bool = True) -> str:
+        now = self.clock.now()
+        summary = self.handoff_summary(phone, st, reason)
         # the bot never pauses itself (owner, 2026-11-20: a guest's 'Hi' after a failed payment link got silence for
         # 24 h): staff get the summary and the bot keeps answering. Only staff pause a chat (dashboard / their reply).
         if notify_guest:
@@ -567,8 +571,9 @@ class BookingBot(IdProofMixin, ChatMixin):
         prop = self.repo.get_property(b.property_id)
         return [b.id, prop.name if prop else "", fmt_date(b.check_in), fmt_date(b.check_out), str(b.rooms)]
 
-    def mark_paid(self, *, booking_id: str = "", link_id: str = "", payment_id: str = "") -> str:
-        """Razorpay says the link is paid. Idempotent. Returns paid | already_paid | refund_needed | unknown."""
+    def mark_paid(self, *, booking_id: str = "", link_id: str = "", payment_id: str = "", out: Any = None) -> str:
+        """Razorpay says the link is paid. Idempotent. Returns paid | already_paid | refund_needed | unknown.
+        out: an agent outbox; the confirmation and the staff alerts are put into it instead of being sent here."""
         b = (self.repo.get_booking(booking_id) if booking_id else None) or (
             self.repo.find_booking_by_link(link_id) if link_id else None)
         if b is None:
@@ -593,7 +598,7 @@ class BookingBot(IdProofMixin, ChatMixin):
             b.notes = (b.notes + " PAID AFTER EXPIRY, ROOMS GONE: REFUND NEEDED").strip()
             b.razorpay_payment_id = payment_id or b.razorpay_payment_id
             self.repo.save_booking(b)
-            self.alert_staff(f"REFUND NEEDED: {b.id} was paid after the hold expired and the rooms are gone "
+            self._alert(out, f"REFUND NEEDED: {b.id} was paid after the hold expired and the rooms are gone "
                              f"({b.guest_name} {b.guest_phone}, Rs {b.advance}).", b.property_id)
             return "refund_needed"
         for x in parts:
@@ -604,8 +609,15 @@ class BookingBot(IdProofMixin, ChatMixin):
                           ref=payment_id or link_id or x.payment_link_id or f"online-{x.id}", now=now)
             self.repo.save_booking(x)
         self.close_old_holds(b.guest_phone, {x.id for x in parts})  # no reminder may follow about an old enquiry
-        self.announce_paid(self.repo.get_booking(b.id) or b)
+        self.announce_paid(self.repo.get_booking(b.id) or b, out=out)
         return "paid"
+
+    def _alert(self, out: Any, text: str, property_id: str | None = None) -> None:
+        """A staff alert: sent now, or (with an agent outbox) put into it so a dry run never sends it."""
+        if out is None:
+            self.alert_staff(text, property_id)
+        else:
+            out.staff("staff:alert", text, self.staff_numbers(property_id))
 
     def reissue_link(self, b: Booking, *, discount: int = 0, advance: int = 0, by: str = "") -> str | None:
         """Give an unpaid booking a fresh payment link (optionally after the owner took `discount` rupees off the total)
@@ -660,16 +672,24 @@ class BookingBot(IdProofMixin, ChatMixin):
             return "The link is ready, but the guest could not be messaged on WhatsApp (outside the 24 hour window)"
         return None
 
-    def announce_paid(self, b: Booking) -> None:
-        """Tell the guest their booking is confirmed and alert the staff (online or desk payment)."""
+    def announce_paid(self, b: Booking, out: Any = None) -> None:
+        """Tell the guest their booking is confirmed and alert the staff (online or desk payment). With an agent
+        outbox `out` the texts and the alert go into it (the guest is chatting now: no template needed)."""
         prop = self.repo.get_property(b.property_id)
         rt = self.repo.get_room_type(b.room_type_id)
         # The client's confirmation, then the cancellation policy, then the stay details (owner, 2026-11-18).
-        delivered = self._notify_guest(b, self._confirmed_text(b, prop, rt), "paid", self._params(b))
+        if out is None:
+            delivered = self._notify_guest(b, self._confirmed_text(b, prop, rt), "paid", self._params(b))
+        else:
+            out.text("confirmed", english_letters_only(BOOKING_ID.sub("", self._confirmed_text(b, prop, rt)).strip()))
+            delivered = True
         if delivered and prop:
-            for extra in (prop.policies, prop.stay_info):
+            for key, extra in (("policies", prop.policies), ("stay_info", prop.stay_info)):
                 if extra and extra.strip():
-                    self._text(b.guest_phone, extra.strip())
+                    if out is None:
+                        self._text(b.guest_phone, extra.strip())
+                    else:
+                        out.text(key, english_letters_only(extra.strip()))
         self.end_conversation(b.guest_phone)  # a confirmed booking closes the chat: the next message starts fresh
         try:  # ask for the ID proof once (only inside the 24 h window; the day-before reminder covers the rest)
             if delivered and ASK_ID_AFTER_PAYMENT:
@@ -681,7 +701,7 @@ class BookingBot(IdProofMixin, ChatMixin):
         for x in parts:
             xrt = self.repo.get_room_type(x.room_type_id)
             names.append(f"{xrt.name if xrt else ''} x {x.rooms}")
-        self.alert_staff(f"New booking {' + '.join(x.id for x in parts)} PAID: {prop.name if prop else ''}, "
+        self._alert(out, f"New booking {' + '.join(x.id for x in parts)} PAID: {prop.name if prop else ''}, "
                          f"{' + '.join(names)}, {fmt_date(b.check_in)} to {fmt_date(b.check_out)}, "
                          f"{sum(x.adults for x in parts)}A {sum(x.children for x in parts)}C. "
                          f"{b.guest_name} {b.guest_phone}. Paid Rs {sum(x.paid_amount for x in parts)} of Rs "

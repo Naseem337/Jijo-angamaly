@@ -328,7 +328,9 @@ def test_a_failed_payment_link_in_a_change_goes_through_the_outbox_not_straight_
     texts = {i.key: i.text for i in tools.out.queue}
     assert not result["ok"] and "pay_failed_link" in texts and "9497861924" in texts["pay_failed_link"]
     assert w.wa.to(GUEST) == []  # nothing went to the guest past the outbox (a dry run sends nothing)
-    assert w.wa.to(STAFF)  # the owner's team was alerted
+    staff = [i for i in tools.out.queue if i.kind == "staff"]  # the team's alert goes through the outbox too
+    assert staff and STAFF in staff[0].to and staff[0].text.startswith("Guest needs the team: payment link could not be created")
+    assert w.wa.to(STAFF) == []  # a dry run only records it
 
 
 def test_a_sold_out_race_in_a_change_tells_the_guest_through_the_outbox(pw):

@@ -52,7 +52,9 @@ def test_the_agent_files_never_read_the_guests_words():
         source = Path(module.__file__).read_text(encoding="utf-8")
         assert "import re" not in source and "re.compile" not in source and "re.search" not in source
         assert "re.match" not in source and "re.sub" not in source and "re.findall" not in source
-    assert {x.name for x in TOOLS} == {"update_enquiry", "get_price", "send_photos"}
+    assert {x.name for x in TOOLS} == {"update_enquiry", "get_price", "send_photos", "send_map", "create_booking",
+                                       "check_payment", "send_payment_link", "my_bookings", "change_name",
+                                       "talk_to_owner", "recall_old_chat"}
 
 
 # --------------------------------------------------------------------------- 1. place missing

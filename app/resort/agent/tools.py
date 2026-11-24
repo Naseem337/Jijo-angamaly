@@ -1,4 +1,5 @@
-"""The agent's tools (docs/AI_AGENT_DESIGN.md section 3). Step AI-2a: update_enquiry and get_price.
+"""The agent's 11 tools (docs/AI_AGENT_DESIGN.md section 3): update_enquiry, get_price, send_photos, send_map,
+create_booking, check_payment, send_payment_link, my_bookings, change_name, talk_to_owner, recall_old_chat.
 
 The AI passes structured arguments; code does everything else. Nothing here reads or matches the guest's own words:
 no regex, no keyword list. A tool compares the stay the AI passed with the saved Enquiry, runs the room check with the
@@ -13,6 +14,8 @@ Every result has the same shape: {ok, facts, sent, next_step, note}.
 
 from __future__ import annotations
 
+import logging
+import time
 from datetime import date, timedelta
 from typing import Any
 
@@ -22,8 +25,11 @@ from app.resort.agent import photos_plan as pp
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.state import LANGUAGES, Enquiry
 from app.resort.chat import _Turn, _count_name, _money, close_word
-from app.resort.i18n import t
+from app.resort.i18n import status_name, t
 from app.resort.models import Property, RoomType
+from app.resort.refunds import cancellation_terms
+
+log = logging.getLogger(__name__)
 
 I18N_LANG = {"en": "en", "manglish": "mn", "tanglish": "tn", "hinglish": "hn"}
 
@@ -34,14 +40,14 @@ UNCHANGED_NOTE = ("Nothing new to send: the stay is unchanged. Answer only what 
 LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
                   "description": "the language style of the guest's latest message (manglish = Malayalam in English letters)"}
 
-TOOLS = [
+TOOL_SCHEMAS = [
     ToolSpec(
         "update_enquiry",
-        "Call this whenever the guest says anything about their stay: the place, dates or nights, persons, rooms, a room "
-        "type or number, 'one more room', 'make it 5 persons', 'change to jan 2-5', 'no cottage'. Pass the FULL stay as "
-        "you now understand it (CURRENT ENQUIRY plus what the guest just said), not only the change. Leave out what is "
-        "still unknown. The tool asks the guest for anything missing, checks the rooms, and sends the owner's messages "
-        "(listed in `sent`); never write those yourself.",
+        "Use this whenever the guest says anything about their stay: the place, dates or nights, number of persons, number "
+        "of rooms, a room type or room number, 'one more room', 'make it 5 persons', 'change to jan 2-5', 'no cottage'. "
+        "Pass the FULL stay as you now understand it (CURRENT ENQUIRY plus what the guest just said), not only the change, "
+        "and leave out what is still unknown. It asks the guest for anything missing and checks the rooms, and the owner's "
+        "messages go out for you (see `sent`): never write those yourself.",
         {"type": "object", "properties": {
             "place": {"type": "string", "description": "the resort or town the guest named, spelled however they wrote it"},
             "check_in": {"type": "string", "description": "YYYY-MM-DD; a date with no year is the next time it comes"},
@@ -60,28 +66,83 @@ TOOLS = [
             "extra_beds": {"type": "integer"},
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
+        "get_price",
+        "Use this for EVERY question about price, rate, cost, total or advance, also for one named room type ('cost of the "
+        "cottage'). It answers for the stay the guest already gave (or the stay on their open payment link) and sends the "
+        "price message for you. It never books or switches anything. If no stay is known yet, call update_enquiry instead.",
+        {"type": "object", "properties": {
+            "room_type": {"type": "string", "description": "only if the guest named a room type"},
+            "language": LANGUAGE_FIELD}}),
+    ToolSpec(
         "send_photos",
-        "Send the owner's photos when the guest asks to see the resort or its rooms. Say only WHAT they asked for with "
-        "`kind`; the owner's rules decide which photos go (never one twice, a label before each room's photos, only free "
-        "rooms once the dates are known). kind: room_type (a named room: also pass room_type), resort (outside, beach, "
-        "common areas), other_room (another room than the one offered), all_rooms (every room), default (room photos "
-        "with no room named), more (the guest wants more photos). No resort known yet: the location question goes first "
-        "and the photos follow the answer.",
+        "Use this when the guest asks to see photos or pictures of the resort or its rooms. Say only WHAT they asked for "
+        "with `kind`: room_type (a named room: also pass room_type), resort (outside, beach, common areas), other_room "
+        "(another room than the one offered), all_rooms (every room), default (room photos, no room named), more (they want "
+        "more photos). If no resort is known yet the location question goes first and the photos follow the answer.",
         {"type": "object", "properties": {
             "kind": {"type": "string", "enum": list(pp.KINDS)},
             "room_type": {"type": "string", "description": "only for kind room_type: the room type name from the FACTS"},
             "language": LANGUAGE_FIELD},
          "required": ["kind"]}),
     ToolSpec(
-        "get_price",
-        "The price of the stay the guest already gave (or of the stay on their open payment link), worked out now from the "
-        "dashboard rates. Call it for EVERY price / rate / cost / how-much question, also for one named room type. It only "
-        "answers: nothing is booked or changed and the room is never switched. The price message is sent for you.",
+        "send_map",
+        "Use this when the guest asks where the resort is, or for the location, the map, the pin or directions.",
+        {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
+    ToolSpec(
+        "create_booking",
+        "Use this as soon as rooms were found available and the guest gives their mobile number (and their name, if they "
+        "gave one). 'this number', 'same number' or 'same' means the WhatsApp number: pass mobile 'same'. The name is not "
+        "required: if they gave none, pass an empty name. Do not ask 'shall I confirm?'. The enquiry summary and the "
+        "payment link are sent for you.",
         {"type": "object", "properties": {
-            "room_type": {"type": "string", "description": "only if the guest named a room type"},
-            "language": LANGUAGE_FIELD}}),
+            "guest_name": {"type": "string", "description": "the name the guest gave, or empty"},
+            "mobile": {"type": "string", "description": "the mobile number the guest gave, or 'same' for this WhatsApp number"},
+            "language": LANGUAGE_FIELD},
+         "required": ["mobile"]}),
+    ToolSpec(
+        "check_payment",
+        "Use this when the guest says they have paid or are paying now, sends a payment screenshot, or asks whether their "
+        "payment arrived. Only this tool can confirm a payment: never confirm it yourself from their word or a screenshot. "
+        "The right message is sent for you.",
+        {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
+    ToolSpec(
+        "send_payment_link",
+        "Use this when the guest asks for the payment link again or cannot open it (reason lost), wants to hold or reserve "
+        "the room or pay later (reason hold), or says they have not paid yet (reason not_paid_yet). It only works while the "
+        "room is held; if the hold ran out it tells you and sends nothing, and you offer to check the dates again.",
+        {"type": "object", "properties": {
+            "reason": {"type": "string", "enum": ["lost", "hold", "not_paid_yet"]},
+            "language": LANGUAGE_FIELD},
+         "required": ["reason"]}),
+    ToolSpec(
+        "my_bookings",
+        "Use this when the guest asks about a booking or payment they already have (dates, status, what was paid, the "
+        "balance), or wants to cancel: it gives the cancellation charge if they cancelled today. Read only.",
+        {"type": "object", "properties": {}}),
+    ToolSpec(
+        "change_name",
+        "Use this when the guest corrects the name on their enquiry or booking ('my name is not X, it is Y'). Never start "
+        "the booking again for a name correction.",
+        {"type": "object", "properties": {
+            "name": {"type": "string", "description": "the correct name, in English letters"},
+            "language": LANGUAGE_FIELD},
+         "required": ["name"]}),
+    ToolSpec(
+        "talk_to_owner",
+        "Use this when you do not know the answer or cannot do what the guest asks: they ask for the owner or a call, "
+        "complain, want a refund, a discount or an exception, or want to change a booking that is already paid. The owner "
+        "gets a short summary and the guest is told to contact the owner directly. Never promise a call back.",
+        {"type": "object", "properties": {
+            "reason": {"type": "string", "description": "one short line for the owner, e.g. 'wants to cancel, asks full refund'"},
+            "language": LANGUAGE_FIELD},
+         "required": ["reason"]}),
+    ToolSpec(
+        "recall_old_chat",
+        "Use this only when the guest refers to something said or sent in an EARLIER conversation ('as I told you', 'the "
+        "link you sent', 'my last enquiry'). Never for a greeting, small talk or a fresh request. Read only.",
+        {"type": "object", "properties": {"query": {"type": "string", "description": "what you are looking for"}}}),
 ]
-
+TOOLS = TOOL_SCHEMAS  # the same list, under the name AI-2a used
 
 def _int(args: dict[str, Any], key: str, default: int | None = None) -> int | None:
     """An integer argument; missing or null = `default` (the saved value)."""
@@ -452,33 +513,15 @@ class AgentTools:
     def _relink(self, enq: Enquiry, prop: Property, bk: dict[str, Any], parts: list[dict[str, Any]], mix: Any,
                 held: list[Any], lang: str, rooms_line: tuple[str, str], same_dates: bool, picked_now: bool,
                 facts: dict[str, Any], start: int) -> dict[str, Any]:
-        """The stay changed after the payment link went out: the existing prepare / create code makes the new booking and
-        link and closes the old one (close_old_holds); the name and mobile come from the held booking."""
+        """The stay changed after the payment link went out: a new booking and link are made and the old one is closed
+        (close_old_holds); the name and mobile come from the held booking."""
         bot = self.bot
         stay = bot._held_stay(self.phone) or {}
-        if mix:
-            bk["mix"] = [{"room_type_id": p["rt"].id, "rooms": p["rooms"], "beds": p["beds"], "total": p["total"],
-                          "advance": p["advance"]} for p in parts]
-        scratch = {"lang": lang, "style": enq.language, "turn": 1, "bk": bk}
-        # quiet: nothing is read from the old chat log and nothing is sent past the outbox
-        ctx = _Turn(self.phone, scratch, text="", quiet=True)
         guest = bot.repo.get_guest(self.phone)
         name = stay.get("guest_name") or (guest.name if guest else "")
-        prep = bot._tool_prepare(ctx, {"rooms": sum(p["rooms"] for p in parts)})
-        if "error" in prep:
-            self._queue_quiet(ctx, lang)  # e.g. the last rooms were just taken: the owner's text
-            enq.save(bot.repo, self.phone)
-            return self._result(False, {"problem": prep["error"]}, start, enq, "Tell the guest nothing invented.")
-        if not name:
-            enq.save(bot.repo, self.phone)
-            return self._result(False, {"problem": "the guest's name is not known"}, start, enq,
-                                "Ask the guest for their name, then call create_booking.")
-        made = bot._tool_create(ctx, {"guest_name": name, "mobile": stay.get("mobile") or "same"})
-        if "error" in made or ctx.handed_off:
-            self._queue_quiet(ctx, lang)  # the sold-out text, or the owner's numbers when the link could not be made
-            enq.save(bot.repo, self.phone)
-            return self._result(False, {"problem": made.get("error", "the payment link could not be made")}, start, enq,
-                                "The guest is told to contact the owner. Do not promise anything.")
+        ctx, made, failure = self._make_booking(enq, prop, bk, parts, mix, lang, name, stay.get("mobile") or "same", start)
+        if failure is not None:
+            return failure
         if picked_now:
             self._send("room_picked", lang, room=parts[0]["rt"].name)
         if not same_dates:
@@ -490,11 +533,46 @@ class AgentTools:
         enq.save(bot.repo, self.phone)
         return self._result(True, facts, start, enq, SENT_NOTE + " The old payment link is closed.")
 
-    def _queue_quiet(self, ctx: _Turn, lang: str) -> None:
-        """Texts the existing prepare / create code left for the guest in a quiet turn, through the outbox."""
+    def _make_booking(self, enq: Enquiry, prop: Property, bk: dict[str, Any], parts: list[dict[str, Any]], mix: Any,
+                      lang: str, name: str, mobile: str, start: int
+                      ) -> tuple[_Turn, dict[str, Any], dict[str, Any] | None]:
+        """The existing prepare / create code makes the booking and the payment link. The turn is quiet: nothing is read
+        from the old chat log and nothing is sent past the outbox; the guest's texts and the staff alert come back through
+        it. Returns (turn, result, a failure result for the AI or None)."""
+        bot = self.bot
+        if mix:
+            bk["mix"] = [{"room_type_id": p["rt"].id, "rooms": p["rooms"], "beds": p["beds"], "total": p["total"],
+                          "advance": p["advance"]} for p in parts]
+        scratch = {"lang": lang, "style": enq.language, "turn": 1, "bk": bk, "property_id": prop.id}
+        ctx = _Turn(self.phone, scratch, text="", quiet=True)
+        prep = bot._tool_prepare(ctx, {"rooms": sum(p["rooms"] for p in parts)})
+        if "error" in prep:
+            self._queue_quiet(ctx, lang, prop)  # e.g. the last rooms were just taken: the owner's text
+            enq.save(bot.repo, self.phone)
+            return ctx, prep, self._result(False, {"problem": prep["error"]}, start, enq, "Tell the guest nothing invented.")
+        made = bot._tool_create(ctx, {"guest_name": name, "mobile": mobile})
+        if "error" in made or ctx.handed_off:
+            self._queue_quiet(ctx, lang, prop)  # the sold-out text, or the owner's numbers when the link could not be made
+            enq.save(bot.repo, self.phone)
+            note = ("The guest is told to contact the owner and the team is alerted. Do not promise anything."
+                    if ctx.handed_off else "Ask the guest for the missing detail in one short line. Do not guess it.")
+            return ctx, made, self._result(False, {"problem": made.get("error", "the payment link could not be made")},
+                                           start, enq, note)
+        return ctx, made, None
+
+    def _staff(self, reason: str, property_id: str | None, lang: str) -> None:
+        """A short summary for the team, through the outbox (a dry run only records it)."""
+        text = self.bot.handoff_summary(self.phone, {"lang": lang}, reason)
+        self.out.staff("staff:alert", text, self.bot.staff_numbers(property_id))
+
+    def _queue_quiet(self, ctx: _Turn, lang: str, prop: Property | None = None) -> None:
+        """What the existing prepare / create code left in a quiet turn, through the outbox: the guest's texts and the
+        staff alerts."""
         for message in ctx.after:
             if isinstance(message, str):
                 self.out.text("rooms_none" if message == t("rooms_none", lang) else "pay_failed_link", message)
+        for reason in ctx.staff:
+            self._staff(reason, prop.id if prop else None, lang)
 
     # ------------------------------------------------------------------ get_price
 
@@ -558,3 +636,271 @@ class AgentTools:
         self.out.text("price_answer", "\n".join(x for x in (night, total) if x))
         facts = {"room_type": room, "rooms": rooms, "extra_beds": beds, "nights": (co - ci).days, "price": price}
         return self._result(True, facts, start, enq, "Only a price answer: nothing is booked or changed. " + SENT_NOTE)
+
+    # ------------------------------------------------------------------ shared by the tools below
+
+    def _ctx(self, args: dict[str, Any]) -> tuple[int, Enquiry, str, str]:
+        """(outbox position, the saved Enquiry with this call's language, language style, i18n language code)."""
+        enq = Enquiry.load(self.bot.repo, self.phone)
+        style = args.get("language") if args.get("language") in LANGUAGES else enq.language
+        enq.language = style
+        return len(self.out.keys), enq, style, I18N_LANG[style]
+
+    def _the_resort(self, enq: Enquiry, held: list[Any]) -> Property | None:
+        """The resort this guest is dealing with: the Enquiry's, the one on their open link, or the only open resort."""
+        repo = self.bot.repo
+        prop = repo.get_property(enq.place) if enq.place else None
+        if prop is None and held:
+            prop = repo.get_property(held[0].property_id)
+        if prop is None and len(places := self.bot._places()) == 1:
+            prop = places[0]
+        return prop if prop is not None and prop.active else None
+
+    # ------------------------------------------------------------------ create_booking
+
+    def create_booking(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The booking and its payment link, from the stay the room check found available. The name comes only from the
+        argument (empty is allowed); mobile 'same' is the WhatsApp number."""
+        bot, phone, repo = self.bot, self.phone, self.bot.repo
+        start, enq, style, lang = self._ctx(args)
+        prop = repo.get_property(enq.place) if enq.place else None
+        if prop is None or not (enq.check_in and enq.check_out and enq.adults) or not (enq.checked or {}).get("available"):
+            return self._result(False, {"problem": "no available stay has been checked yet"}, start, enq,
+                                "Call update_enquiry with the stay first; the owner's messages for it are sent for you.")
+        ids, _, problem = self._picks(prop, list(enq.room_picks or []), [])
+        if problem:
+            return self._result(False, {"problem": problem}, start, enq, "Ask the guest which room they mean.")
+        pref = ids[0] if len(set(ids)) == 1 else ""
+        wanted = len(ids) if len(set(ids)) > 1 else (enq.rooms or 0)
+        bk: dict[str, Any] = {"property_id": prop.id, "check_in": enq.check_in.isoformat(),
+                              "check_out": enq.check_out.isoformat(), "adults": enq.adults,
+                              "children": enq.children or 0, "rooms": wanted, "own": phone}
+        if len(set(ids)) > 1:
+            bk["pick"] = ids
+        if pref:
+            bk["pref"] = pref
+        least = av.fewest_rooms(repo.list_room_types(prop.id), enq.adults, enq.children or 0)
+        if wanted and least and wanted < least:
+            wanted = bk["rooms"] = least
+        parts, mix = self._plan(prop, bk, wanted)
+        if not parts:  # the rooms went to someone else since the check
+            self._send("rooms_none", lang)
+            enq.checked = None
+            enq.save(repo, phone)
+            return self._result(False, {"available": False}, start, enq, SENT_NOTE)
+        self._price_of(prop, parts, enq.check_in, enq.check_out)  # fills each part's total for a split stay
+        name = str(args.get("guest_name") or "").strip()
+        ctx, made, failure = self._make_booking(enq, prop, bk, parts, mix, lang, name, str(args.get("mobile") or "").strip(),
+                                                start)
+        if failure is not None:
+            return failure
+        self.out.text("summary", ctx.summary_message)
+        self.out.text("pay", ctx.pay_message)
+        enq.booking_id, enq.link_open, enq.photo_wish = made["booking_id"], True, None
+        enq.save(repo, phone)
+        return self._result(True, {"booked": True, "hold_minutes": bot.config.hold_minutes}, start, enq,
+                            SENT_NOTE + " Never say it is booked or confirmed: it is confirmed only when the payment is "
+                            "received.")
+
+    # ------------------------------------------------------------------ check_payment
+
+    def check_payment(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Ask the payment provider about the guest's OWN link, at most once every 15 seconds. Only the provider decides."""
+        bot, phone, repo = self.bot, self.phone, self.bot.repo
+        start, enq, style, lang = self._ctx(args)
+        links = [b for b in repo.list_bookings(status="hold", phone=phone, limit=20)
+                 if b.payment_link_id and not (b.group_id and b.group_id != b.id)]
+        if not links:
+            latest = next(iter(repo.list_bookings(phone=phone, limit=1)), None)
+            if latest is not None and latest.status == "paid":
+                return self._result(True, {"already_paid": True}, start, enq,
+                                    "This booking is already paid and its confirmation was sent: say nothing more, or one "
+                                    "warm line.")
+            return self._result(True, {"checked": False, "reason": "no open payment link"}, start, enq,
+                                "There is nothing to check: follow next_step (the guest has no payment link yet).")
+        last = bot.__dict__.setdefault("_pay_checked", {})
+        if time.monotonic() - last.get(phone, -1e9) < bot.PAY_CHECK_GAP_S:  # just checked: the answer would be the same
+            self._send("pay_wait", lang)
+            return self._result(True, {"paid": False, "throttled": True}, start, enq, SENT_NOTE)
+        last[phone] = time.monotonic()
+        for b in links:
+            try:
+                status = bot.payments.link_status(b.payment_link_id)
+            except Exception as exc:  # the provider being slow must never stop the guest being answered
+                log.warning("Payment check failed: %s", exc)
+                continue
+            if not status.get("paid"):
+                continue
+            if self.out.dry_run:  # a dry run never marks anything paid or sends a confirmation
+                self.out.marker("confirmed")
+                return self._result(True, {"paid": True, "applied": False}, start, enq,
+                                    "Dry run: the payment was found but nothing was applied.")
+            outcome = bot.mark_paid(booking_id=b.id, payment_id=status.get("payment_id", ""), out=self.out)
+            if outcome == "paid":
+                enq.paid, enq.link_open = True, False
+                enq.save(repo, phone)
+                return self._result(True, {"paid": True}, start, enq,
+                                    SENT_NOTE + " The booking is confirmed: say nothing more.")
+            if outcome == "refund_needed":  # paid after the hold ran out and the rooms are gone
+                self.out.text("owner_will_help", bot._owner_msg("owner_will_help", {"lang": lang, "form_place": b.property_id}))
+                return self._result(True, {"paid": True, "rooms_gone": True}, start, enq,
+                                    SENT_NOTE + " Never promise a refund; the owner's numbers were given.")
+            return self._result(True, {"paid": True, "already_confirmed": True}, start, enq,
+                                "The booking was already confirmed: say nothing more.")
+        self._send("pay_wait", lang)
+        return self._result(True, {"paid": False}, start, enq, SENT_NOTE + " Never say it is confirmed.")
+
+    # ------------------------------------------------------------------ send_payment_link
+
+    def send_payment_link(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The payment link again, only while the hold is live. hold -> the owner's 'pay now' line; others -> the link."""
+        bot, phone, repo = self.bot, self.phone, self.bot.repo
+        start, enq, style, lang = self._ctx(args)
+        reason = str(args.get("reason") or "")
+        if reason not in ("lost", "hold", "not_paid_yet"):
+            return self._result(False, {"problem": "reason must be lost, hold or not_paid_yet"}, start, enq,
+                                "Call again with a valid reason.")
+        now = bot.clock.now()
+        live = [b for b in repo.list_bookings(phone=phone, status="hold", limit=5)
+                if b.payment_link_url and b.hold_expires_at and b.hold_expires_at > now]
+        if not live:
+            latest = next(iter(repo.list_bookings(phone=phone, limit=1)), None)
+            if latest is not None and latest.payment_link_id and latest.status in ("hold", "expired"):
+                return self._result(False, {"hold_expired": True}, start, enq,
+                                    "The hold ran out and nothing was sent. Offer to check the dates again with update_enquiry.")
+            return self._result(False, {"open_link": False}, start, enq,
+                                "No payment link is open for this guest: follow next_step.")
+        b = live[0]
+        minutes = max(1, int((b.hold_expires_at - now).total_seconds() // 60))
+        if reason == "hold":
+            self.out.text("hold_pay", t("hold_pay", lang, url=b.payment_link_url))
+        else:
+            self.out.text("pay", t("pay", lang, id=b.id, minutes=minutes, advance=f"{b.advance:,}", url=b.payment_link_url))
+        enq.booking_id, enq.link_open = b.id, True
+        return self._result(True, {"minutes_left": minutes}, start, enq,
+                            SENT_NOTE + " Never explain the hold or when the link expires.")
+
+    # ------------------------------------------------------------------ send_map
+
+    def send_map(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The resort's Google Maps link, then the booking step still open."""
+        bot = self.bot
+        start, enq, style, lang = self._ctx(args)
+        held = bot._open_hold(self.phone)
+        if held:
+            enq.booking_id, enq.link_open = held[0].id, True
+        prop = self._the_resort(enq, held)
+        if prop is None:
+            return self._result(False, {"problem": "no resort is known yet"}, start, enq,
+                                "Ask which resort with update_enquiry (the location question is sent for you).")
+        if not prop.map_url:
+            return self._result(True, {"map": False}, start, enq,
+                                "No map link is saved for this resort: say so in one line and give the owner's numbers "
+                                "with talk_to_owner.")
+        self.out.text("map", f"\U0001F4CD {prop.name}\n{prop.map_url}")
+        pp.queue_open_step(bot, self.phone, enq, lang, self.out, dates_line=False)  # the map needs no reason for the dates
+        enq.save(bot.repo, self.phone)
+        return self._result(True, {"map": True}, start, enq, SENT_NOTE)
+
+    # ------------------------------------------------------------------ my_bookings (read only)
+
+    def my_bookings(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The guest's own recent bookings. Never a booking id, never a payment link (the AI uses send_payment_link)."""
+        bot = self.bot
+        start, enq, style, lang = self._ctx(args)
+        today = bot._today()
+        rows = []
+        for b in bot.repo.list_bookings(phone=self.phone, limit=5):
+            prop = bot.repo.get_property(b.property_id)
+            row: dict[str, Any] = {"place": bot._place_label(prop) if prop else "", "check_in": b.check_in.isoformat(),
+                                   "check_out": b.check_out.isoformat(), "rooms": b.rooms,
+                                   "status": status_name(b.status, "en"), "total": b.total, "paid": b.paid_amount,
+                                   "balance_at_property": b.balance}
+            if b.status == "hold" and b.payment_link_url:
+                row["payment_link_open"] = bool(b.hold_expires_at and b.hold_expires_at > bot.clock.now())
+            if b.status == "paid" and b.check_in >= today and (terms := cancellation_terms(prop, b, today)):
+                row["if_cancelled_today"] = terms  # the owner's policy, worked out in code
+            rows.append(row)
+        facts = {"bookings": rows} if rows else {"bookings": [], "info": "this guest has no booking yet"}
+        return self._result(True, facts, start, enq,
+                            "Read only. Say only what was asked. A cancellation: state only the charge in if_cancelled_today "
+                            "and tell them to contact the owner directly to confirm (talk_to_owner).")
+
+    # ------------------------------------------------------------------ change_name
+
+    def change_name(self, args: dict[str, Any]) -> dict[str, Any]:
+        """A name correction: the name changes on the guest's open and upcoming bookings; nothing restarts."""
+        bot, repo = self.bot, self.bot.repo
+        start, enq, style, lang = self._ctx(args)
+        raw = "".join(ch for ch in str(args.get("name") or "") if ch.isascii() and (ch.isalpha() or ch in " .'")).strip()[:60]
+        if not raw:
+            return self._result(False, {"problem": "give the new name in English letters"}, start, enq,
+                                "Ask the guest to spell the name.")
+        name = " ".join(w[:1].upper() + w[1:] for w in raw.split())
+        today, changed = bot._today(), 0
+        for b in repo.list_bookings(phone=self.phone, limit=10):
+            if b.status in ("hold", "paid", "checked_in") and b.check_out >= today:
+                b.guest_name = name
+                repo.save_booking(b)
+                changed += 1
+        guest = repo.get_guest(self.phone)
+        if guest is not None:
+            guest.name = name
+            repo.upsert_guest(guest)
+        self._send("name_changed", lang, name=name)
+        return self._result(True, {"bookings_changed": changed}, start, enq, SENT_NOTE)
+
+    # ------------------------------------------------------------------ talk_to_owner
+
+    def talk_to_owner(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The team gets a short summary; the guest is told to contact the owner directly (with the numbers). The agent
+        keeps answering afterwards."""
+        bot = self.bot
+        start, enq, style, lang = self._ctx(args)
+        reason = (str(args.get("reason") or "").strip() or "the guest asked for the owner")[:200]
+        held = bot._open_hold(self.phone)
+        prop = self._the_resort(enq, held)
+        self.out.text("handoff", bot._owner_msg("handoff", {"lang": lang, "form_place": prop.id if prop else None}))
+        self._staff(reason, prop.id if prop else None, lang)
+        return self._result(True, {"owner_told": True}, start, enq,
+                            SENT_NOTE + " Never promise a call back or say the owner will contact them.")
+
+    # ------------------------------------------------------------------ recall_old_chat (read only)
+
+    def recall_old_chat(self, args: dict[str, Any]) -> dict[str, Any]:
+        """What was said in this guest's EARLIER conversations (a 24 h gap or a restart ends one). Links are hidden."""
+        bot = self.bot
+        start, enq, style, lang = self._ctx(args)
+        rows = bot.repo.list_chat(self.phone, limit=80)
+        older = rows[:bot._session_start(rows, by_time=True)]
+        if not older:
+            return self._result(True, {"messages": [], "info": "there is no earlier chat with this guest"}, start, enq,
+                                "Read only.")
+        words = [w for w in str(args.get("query") or "").casefold().split() if len(w) >= 3]
+        hits = [m for m in older if any(w in m.text.casefold() for w in words)] if words else []
+        chosen = (hits or older)[-30:]
+        lines = [f"{m.at.strftime('%d %b')} {'Guest' if m.direction == 'in' else 'Bot'}: "
+                 + " ".join("[link]" if w.startswith("http") else w for w in m.text.split())[:300] for m in chosen]
+        return self._result(True, {"messages": lines}, start, enq,
+                            "Earlier chat, oldest first, links hidden. Never paste a link: use send_payment_link (only "
+                            "while the hold is live). Answer only what the guest asked.")
+
+    # ------------------------------------------------------------------ calling a tool by name
+
+    def call(self, name: str, args: dict[str, Any] | None) -> dict[str, Any]:
+        """Run one tool the AI asked for. An unknown name or a crash is a normal result, never an exception."""
+        handlers = {"update_enquiry": self.update_enquiry, "get_price": self.get_price, "send_photos": self.send_photos,
+                    "send_map": self.send_map, "create_booking": self.create_booking,
+                    "check_payment": self.check_payment, "send_payment_link": self.send_payment_link,
+                    "my_bookings": self.my_bookings, "change_name": self.change_name,
+                    "talk_to_owner": self.talk_to_owner, "recall_old_chat": self.recall_old_chat}
+        start, enq = len(self.out.keys), Enquiry.load(self.bot.repo, self.phone)
+        handler = handlers.get(name)
+        if handler is None:
+            return self._result(False, {"problem": f"unknown tool {name}"}, start, enq, "Use one of the listed tools.")
+        try:
+            return handler(args or {})
+        except Exception as exc:  # a bad tool call must never leave the guest unanswered
+            log.exception("Tool %s failed", name)
+            return self._result(False, {"problem": f"internal error: {type(exc).__name__}"}, start, enq,
+                                "Say nothing invented; use talk_to_owner.")
