@@ -53,6 +53,8 @@ Files:
 
 Switch: `AGENT_MODE` per resort (or per phone) = `old` | `shadow` | `agent`.
 `shadow` = old bot answers the guest; agent runs on the same message with a dry-run outbox and logs what it would have sent.
+**Shadow mode is dropped (2026-11-25):** there is no live traffic to shadow. AI-6 is now the owner testing the agent on a
+test WhatsApp number (`AGENT_MODE=agent`). The `shadow` value stays accepted in config but nothing uses it.
 
 ---
 
@@ -318,12 +320,12 @@ gate, take `kind` from the tool call. Unit-test each tool without the LLM (call 
 **AI-5 — evals.** `tests/eval/agent_scenarios.yaml` + runner `scripts/eval_agent.py` (3 runs each, judge for tone).
 Start with the happy path + every case in handoff section 10 + the real failed chats.
 
-**AI-6 — shadow mode.** `AGENT_MODE=shadow`: the agent runs on real messages with a dry-run outbox and logs to a
-`shadow_log` table: guest msg, old bot reply, agent reply, tools called. Add a dashboard page to compare side by side.
-Run 3–7 days.
+**AI-6 — owner test on a test number.** (Shadow mode is dropped: there is no live traffic.) `AGENT_MODE=agent` on a
+test WhatsApp number; the owner chats with it like a guest. Every failed chat becomes an eval scenario and is fixed
+with a general rule.
 
-**AI-7 — switch.** Review the shadow log, turn failures into scenarios, fix with general rules. When evals pass and the
-shadow log looks good: `AGENT_MODE=agent` for one resort first, then all.
+**AI-7 — switch.** When the evals pass and the owner's test chats look good: `AGENT_MODE=agent` for one resort first,
+then all.
 
 **AI-8 — cleanup (later).** After 2 weeks stable, delete the old `_dispatch` handlers, `_stay_in_code` and the
 post-filters. Update `tests/resort` to test behaviour (tool calls + sent texts), not the old regex paths.

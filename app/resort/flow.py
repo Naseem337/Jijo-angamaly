@@ -168,6 +168,9 @@ class BookingBot(IdProofMixin, ChatMixin):
     # ------------------------------------------------------------------ entry point
 
     def handle(self, msg: InboundMessage) -> str:
+        if self.config.agent_mode == "agent":  # the AI-first agent (app/resort/agent/); 'old' (the default) runs below
+            from app.resort.agent.gate import handle as agent_gate
+            return agent_gate(self, msg)
         now, phone = self.clock.now(), msg.phone
         if not self.repo.mark_event_processed(msg.id, now):
             return "duplicate"

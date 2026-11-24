@@ -3,8 +3,11 @@
 Everything that leaves the agent goes through here: texts and photos for the guest, and alerts for the staff. A DRY-RUN
 outbox only records what would have gone out and never calls WhatsApp (the shadow mode of Step AI-6 uses it); only a live
 outbox sends, and only the live senders (bot_outbox) log each message with the WhatsApp id WhatsApp returns, so a
-swipe-reply to a photo or a room label can find its room. Never-same-text-twice, the AI's own line first and the
-never-silent check come in Step AI-4.
+swipe-reply to a photo or a room label can find its room.
+
+Order in one turn (design section 4, put together by turn.py): the AI's own line (prepend_text) -> the tools' messages
+in the order they were queued -> the open step only when nothing at all was queued (never silent). The AI's line is
+dropped when the same text already went out in this conversation (guard.py e); tool messages are never dropped.
 """
 
 from __future__ import annotations
@@ -53,6 +56,16 @@ class Outbox:
     def marker(self, key: str) -> None:
         """A placeholder in `sent` that sends nothing."""
         self.queue.append(Item("marker", key))
+
+    @property
+    def spoke(self) -> bool:
+        """Something for the guest (a text or photos) was sent or queued this turn."""
+        return any(i.kind in ("text", "photos") for i in (*self.sent, *self.queue))
+
+    @property
+    def texts(self) -> list[str]:
+        """The texts for the guest sent or queued this turn (before the AI's line: the tools' messages)."""
+        return [i.text for i in (*self.sent, *self.queue) if i.kind == "text"]
 
     @property
     def keys(self) -> list[str]:

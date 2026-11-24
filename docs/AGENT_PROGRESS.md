@@ -14,10 +14,42 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
   adults above 6 years only, new form text, see below)
 - Owner rule follow-up: a layout change after the link closes the old link AT ONCE (before the extra-bed answer); see below
 
+- AI-4 gate + guard + outbox: see the commit `Step AI-4: gate + guardrails + outbox` (`agent/gate.py`, `agent/guard.py`,
+  tests `test_agent_gate.py`, `test_agent_guard.py`). The old bot is NOT live (CLAUDE.md): never edit flow.py / chat.py
+  except the one routing line in `BookingBot.handle()`.
+
 ## Next
-- AI-4 gate (dedupe, voice, STOP/START, restart, pause, lock) + guard (design section 6, retry with feedback) + outbox rules
-  (never the same text twice). `run_turn` has NO guardrails on the AI's own words yet.
-- Then AI-5 evals, AI-6 shadow, AI-7 switch, AI-8 cleanup.
+- AI-5 evals (`tests/eval/agent_scenarios.yaml` + `scripts/eval_agent.py`).
+- AI-6 is now the OWNER TESTING on a test WhatsApp number with `AGENT_MODE=agent` (shadow mode dropped: no live traffic).
+- Then AI-7 switch, AI-8 cleanup.
+
+## Gate (agent/gate.py), AGENT_MODE=agent only
+- `BookingBot.handle()` sends the message to `gate.handle(bot, msg)` when `config.agent_mode == "agent"`; `old` stays default.
+- Order: dedupe (message id) -> media (reaction / sticker / edits / system = no reply; location / contacts / video /
+  document = `unsupported`; voice -> the existing voice-in service, one retry, `too_long` / `unclear` not retried, failure =
+  `voice_problem` + a chat row with the reason; image -> "[Guest sent an image]" (+ ": caption") for the AI) -> the message is
+  saved -> per-guest lock -> exact `STOP` / `START` (state `opted_out` + guest `offers_consent`; START only after a STOP,
+  STOP twice or START when not stopped goes to the AI; both work even while paused) -> staff pause (24 h auto-resume) ->
+  exact `restart` (state cleared incl. the Enquiry, keeps `opted_out`, greet, RESTART_MARK) -> `run_turn` with `swipe_note`.
+- Commands are the whole message only ("stop please" goes to the AI). `reset` is no longer a restart in the agent.
+- Gate texts go through the outbox; `gate.handle(..., dry_run=True)` sends nothing (mark_read aside).
+
+## Guard (agent/guard.py), only the AI's own line; tool messages are never checked, changed or dropped
+- a) every ₹ amount (`₹`, `Rs`, `INR`, `/-`, `rupees`), date (12 Dec, Dec 12, 12/12, ISO) and room count ("N rooms") must be in
+  this turn's tool results or tool texts, FACTS + the saved enquiry + today/tomorrow, or the guest's messages of this
+  conversation. Room counts must match a room count there (not any number). NOTE: an amount from an EARLIER turn is not
+  allowed (the AI must call get_price again), as the design says.
+- b) booked / confirmed / reserved only if `Enquiry.paid` or a paid booking of this guest; a sentence with not / until /
+  once / after / yet ... is allowed ("will be confirmed once you pay").
+- c) promise words (will contact you, get back, one moment, please wait, let me check ...).
+- a/b/c -> ONE retry: the bad reply + a "[CHECK] ..." user message saying exactly what was wrong; the retry may call tools
+  (rounds count toward the same 6). Still bad -> `handoff` text (unless talk_to_owner already queued it) + `staff:guard`
+  alert, outcome `handoff`. `TurnResult.guard` / `.retried` record it.
+- d) stripped quietly: Razorpay / rzp (+ "via"), booking ids (flow.BOOKING_ID), lines in other scripts
+  (chat.english_letters_only; all-native = no line, so the open step goes), links not from this turn's tools, the guest's
+  name and first name (guest profile + Enquiry.contact).
+- e) the AI's line identical to one already sent this conversation (bot._already_sent) is dropped, unless it carries a
+  link from this turn. Dropped and nothing else queued -> never-silent open step.
 
 ## How a turn works now (agent/turn.py)
 - `run_turn(bot, llm, phone, text, outbox, swipe="")`: system prompt + last 20 real messages (conversation = since a restart or a
@@ -60,7 +92,7 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
 
 ## Open issues
 - A dry run keeps WhatsApp and staff alerts off, but `create_booking` / `update_enquiry` still write to the database and make a
-  payment link. AI-6 shadow mode needs a scratch database and mock payments.
+  payment link (no longer blocking: shadow mode is dropped).
 - Photo / room-label helpers exist twice (chat.py and agent/photos_plan.py) until AI-8.
 - `get_price` also still exists in chat.py (the old bot offers it until AI-8).
 - Old chat.py `other_room_free` line is said whenever kind=other_room and rooms are checked (the old regex "not a photo word"

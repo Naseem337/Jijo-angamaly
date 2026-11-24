@@ -5,8 +5,9 @@
       -> the outbox: the AI's own line first, then the tools' messages in the order they were queued,
          then the open step if nothing at all went out (never silent)
 
-The model comes from the LLM chain (LLM_CHAIN) only: nothing here names one. Temperature is 0.3. There are no guardrails on
-the AI's own words yet (Step AI-4); a failing LLM gets the ai_down text and one staff alert per 30 minutes.
+The model comes from the LLM chain (LLM_CHAIN) only: nothing here names one. Temperature is 0.3. The AI's own text goes
+through guard.py (one retry with the problem told to the AI; still bad -> handoff text + staff alert); tool messages are
+never checked. A failing LLM gets the ai_down text and one staff alert per 30 minutes.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from datetime import timedelta
 from typing import Any
 
 from app.providers.llm import ChatMessage
+from app.resort.agent import guard
 from app.resort.agent import photos_plan as pp
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.prompt import build_system_prompt
@@ -46,6 +48,8 @@ class TurnResult:
     calls: list[dict[str, Any]] = field(default_factory=list)  # [{"name", "args", "result"}] in order
     sent: list[str] = field(default_factory=list)  # the outbox keys, in the order they went out
     error: str = ""
+    guard: list[str] = field(default_factory=list)  # what the guard found wrong with the AI's own text
+    retried: bool = False  # the AI got its one retry
 
 
 # ------------------------------------------------------------------ what the AI sees
@@ -113,6 +117,11 @@ def _with_guest_message(messages: list[ChatMessage], text: str, swipe: str) -> l
 # ------------------------------------------------------------------ the turn
 
 
+def _own_text(response: Any) -> str:
+    reply = (response.text or "").strip() if response is not None else ""
+    return "" if reply.lower() == NO_REPLY else reply
+
+
 def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe: str = "") -> TurnResult:
     """Answer one guest message. The outbox is flushed at the end (a dry-run outbox only records)."""
     enq = Enquiry.load(bot.repo, phone)
@@ -122,9 +131,9 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     result = TurnResult("answered")
     response = None
     failure: Exception | None = None
-    try:
-        if llm is None:
-            raise RuntimeError("no LLM configured")
+
+    def ask() -> Any:
+        """One LLM reply, with every tool call it makes run and fed back (MAX_ROUNDS for the whole turn)."""
         response = llm.complete(system, messages, TOOL_SCHEMAS, MAX_REPLY_TOKENS, temperature=TEMPERATURE)
         while response.tool_calls:
             if result.rounds >= MAX_ROUNDS:
@@ -142,24 +151,60 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
                 messages.append(ChatMessage.tool_result(call.id, json.dumps(out, ensure_ascii=False), is_error=not out["ok"]))
             result.rounds += 1
             response = llm.complete(system, messages, TOOL_SCHEMAS, MAX_REPLY_TOKENS, temperature=TEMPERATURE)
+        return response
+
+    def check(reply: str) -> tuple[list[str], guard.Sources]:
+        enq = Enquiry.load(bot.repo, phone)
+        src = guard.sources(bot, phone, enq, result.calls, outbox.texts, text)
+        return guard.problems(reply, src), src
+
+    reply, src, blocked = "", None, False
+    try:
+        if llm is None:
+            raise RuntimeError("no LLM configured")
+        response = ask()
+        reply = _own_text(response)
+        found, src = check(reply)
+        if found:  # design section 6: ONE retry, the AI is told exactly what was wrong
+            result.guard, result.retried = found, True
+            log.info("Guard: retry for %s: %s", phone[-4:], found)
+            messages.append(ChatMessage("assistant", reply))
+            messages.append(ChatMessage("user", guard.retry_message(found)))
+            response = ask()
+            reply = _own_text(response)
+            found, src = check(reply)
+            if found:
+                blocked, reply = True, ""
+                result.guard = result.guard + found
     except Exception as exc:  # an LLM outage or a crash must never leave the guest unanswered
         failure = exc
         log.warning("AI turn failed: %s", exc)
 
     enq = Enquiry.load(bot.repo, phone)  # the tools may have changed it
     lang = I18N_LANG[enq.language]
-    spoke = any(i.kind in ("text", "photos") for i in (*outbox.sent, *outbox.queue))
     if failure is not None:
         result.outcome, result.error = "ai_down", f"{type(failure).__name__}: {failure}"
-        if not spoke:
+        if not outbox.spoke:
             outbox.text("ai_down", bot._owner_msg("ai_down", {"lang": lang, "form_place": enq.place}))
         _alert_ai_down(bot, outbox, phone, text, enq)
     else:
-        reply = (response.text or "").strip() if response is not None else ""
-        result.reply = "" if reply.lower() == NO_REPLY else reply
-        if result.reply:  # design section 4: the AI's own line first, then the tools' messages in their order
-            outbox.prepend_text("ai", result.reply)
-        elif not spoke:  # never silent: the booking step still open, else a short ask to say it again
+        if blocked:  # still wrong after the retry: the owner's handoff text and the team are told
+            result.outcome = "handoff"
+            log.warning("Guard: reply blocked for %s: %s", phone[-4:], result.guard)
+            if "handoff" not in outbox.keys:
+                outbox.text("handoff", bot._owner_msg("handoff", {"lang": lang, "form_place": enq.place}))
+            outbox.staff("staff:guard", bot.handoff_summary(
+                phone, {"lang": lang}, "the bot's reply failed its checks twice: " + " | ".join(result.guard)[:600]),
+                bot.staff_numbers(enq.place))
+        if reply and src is not None:
+            reply = guard.clean(reply, src)  # d) provider name, booking ids, other scripts, old links, the name
+        if reply and guard.is_repeat(bot, phone, reply) and not guard.LINK.search(reply):
+            log.info("Guard: the AI's line was already sent to %s; dropped", phone[-4:])  # e)
+            reply = ""
+        result.reply = reply
+        if reply:  # design section 4: the AI's own line first, then the tools' messages in their order
+            outbox.prepend_text("ai", reply)
+        elif not outbox.spoke:  # never silent: the booking step still open, else a short ask to say it again
             step = pp.open_step(bot, enq, lang)
             outbox.text(*(step or ("say_again", t("say_again", lang))))
             result.outcome = "never_silent"

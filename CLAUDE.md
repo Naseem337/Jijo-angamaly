@@ -31,6 +31,7 @@ Design and build steps (AI-0 … AI-8, one at a time, commit `Step AI-n: ...`) a
 - Code owns: availability, prices, totals, advance, links, payment status, the owner's exact texts, the photo order.
 - When the agent fails on a message, fix it with (a) a general prompt rule, (b) a better tool description, or (c) a better tool result. Never a special case for one sentence. Every fix adds an eval scenario.
 - New agent code goes in `app/resort/agent/`; the old `flow.py` / `chat.py` logic is not edited (it stays as the fallback until the switch).
+- **The old bot (flow.py/chat.py logic) is NOT live. Never change it. All work goes into app/resort/agent/ only. The old code is kept only as reference until AI-8.**
 
 ## Status (last updated 2026-10-16)
 
