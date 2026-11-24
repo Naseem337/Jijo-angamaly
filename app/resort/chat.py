@@ -602,6 +602,9 @@ def contact_in(text: str) -> tuple[str, str] | None:
 
 _MONEY = re.compile(r"₹|\brs\.?\s?\d|\brupees?\b|\binr\b|\badvance\b|\d{1,3},\d{3}|\bbalance\b|\bbakki\b|"
                     r"\bbaaki\b|\bpending\b|\bmeedhi\b", re.IGNORECASE)  # balance talk only when asked (2026-11-19)
+# a rupee amount in a reply: '₹4,000', 'Rs 4000', '4,000 rupees', or any comma-grouped number
+_AMOUNT = re.compile(r"(?:₹|\brs\.?|\binr)\s?(\d[\d,]*)|\b(\d[\d,]*)\s*(?:rs\b|rupees?|/-)|\b(\d{1,3}(?:,\d{3})+)\b",
+                     re.IGNORECASE)
 _PRICE_ASK = re.compile(r"price|rate|cost|how much|charge|amount|advance|total|tariff|ethra|ethrayaa|evlo|kitna|"
                         r"kitne|kimat|keemat|daam|kiraya|vila|vilai|kaasu|rupee|₹|budget|cheap|discount|offer|reduce|pay|"
                         r"എത്ര|വില|റേറ്റ്|ചാർജ്|எவ்வளவு|விலை|கட்டணம்|ரேட்|कितना|कितने|दाम|किराया|कीमत|रेट|पैसे",
@@ -931,6 +934,7 @@ class _Turn:
     priced: bool = False  # a tool worked out a price this turn (the only source of a price the AI may state)
     none_found: bool = False  # check_availability found no room this turn (the only source of 'fully booked')
     room_switched: bool = False  # the guest picked a room type this turn (handled in code)
+    numbers: set[int] = field(default_factory=set)  # every number a tool returned this turn (the only amounts the AI may state)
 
 
 LANGUAGE_FIELD = {"type": "string", "enum": list(STYLES),
@@ -1026,6 +1030,15 @@ TOOLS = [
             "check_out": {"type": "string", "description": "new check-out, YYYY-MM-DD"},
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
+        "get_price",
+        "The price of the stay already checked (or of the stay on the open payment link), read from the dashboard at "
+        "this moment: total, rooms, extra beds and the per-night rate when every night costs the same. Call it for "
+        "EVERY price / rate / cost / how-much question, also for one named room type ('cost of the cottage'). It is "
+        "only a price answer: nothing is booked or changed. No stay checked yet: call ask_stay_details instead.",
+        {"type": "object", "properties": {
+            "room_type": {"type": "string", "description": "only if the guest named a room type"},
+            "rooms": {"type": "integer", "description": "only if the guest named a number of rooms"}}}),
+    ToolSpec(
         "send_payment_link",
         "Send the guest their payment link again (they lost it, it did not open, or they ask for it). Only works "
         "while their booking is still on hold. The link is sent automatically after your reply.",
@@ -1080,9 +1093,52 @@ class ChatMixin:
                     f"({rt.max_adults} adults, {rt.max_children} children)")
             if rt.room_list:
                 line += f", room numbers {', '.join(rt.room_list)} (only to understand a guest who names one; never tell them)"
-            extras = " ".join(x for x in (rt.description, rt.amenities) if x and "PLACEHOLDER" not in x)
+            extras = " ".join(y for y in (self._no_amounts(x) for x in (rt.description, rt.amenities)
+                                          if x and "PLACEHOLDER" not in x) if y)
             lines.append(line + "." + (f" {extras}" if extras else ""))
         return lines
+
+    @staticmethod
+    def _no_amounts(text: str) -> str:
+        """Dashboard free text without the sentences that state a rupee amount (prices come only from the tools)."""
+        out = []
+        for line in (text or "").split("\n"):
+            parts = [x for x in re.split(r"(?<=[.!?])\s+", line) if x.strip() and not _AMOUNT.search(x)]
+            out.append(" ".join(parts))
+        return "\n".join(out).strip()
+
+    @staticmethod
+    def _amounts_in(text: str) -> set[int]:
+        """The rupee amounts a text states, as numbers."""
+        found: set[int] = set()
+        for m in _AMOUNT.finditer(text or ""):
+            raw = next(g for g in m.groups() if g).replace(",", "")
+            if raw.isdigit():
+                found.add(int(raw))
+        return found
+
+    def _unbacked_amounts(self, reply: str, ctx: _Turn, guest_text: str) -> list[int]:
+        """Amounts in the AI's reply that no tool gave in THIS turn (and the guest did not write): a made-up or stale
+        price. Sorted."""
+        given = ctx.numbers | {int(n.replace(",", "")) for n in re.findall(r"\d[\d,]*", guest_text or "")
+                               if n.replace(",", "").isdigit()}
+        return sorted(self._amounts_in(reply) - given)
+
+    def _fix_amounts(self, llm, system: str, messages: list[ChatMessage], reply: str, guest_text: str,
+                     ctx: _Turn) -> str:
+        """A ₹ amount no tool gave this turn blocks the reply: the AI is asked ONCE to say it again without it. If it
+        still has one, `_tool_prices_only` drops those sentences later."""
+        bad = self._unbacked_amounts(reply, ctx, guest_text)
+        if not bad:
+            return reply
+        ask = ChatMessage.user("Rewrite that reply without the amount(s) " + ", ".join(f"₹{n:,}" for n in bad)
+                               + ". No tool gave you them in this turn, so never state an amount you were not given. "
+                               "Leave the price out; keep the rest short.")
+        try:
+            fixed = llm.complete(system, [*messages, ChatMessage("assistant", reply), ask], None, MAX_REPLY_TOKENS).text.strip()
+        except LLMError:
+            fixed = ""
+        return fixed if fixed and not self._unbacked_amounts(fixed, ctx, guest_text) else reply
 
     def _resort_names(self) -> list[str]:
         """Every resort by its full name, open or not ('Vibes Kanthalloor', 'Pozhiyoram Resort, Alleppey')."""
@@ -1883,8 +1939,14 @@ class ChatMixin:
         """A price, total or advance only from a tool this turn (2026-11-18: an English guest asking 'how much is it?'
         got a made-up Rs 2,000 a night). Amounts the AI wrote without a tool are dropped; when the stay is known the
         real price for those dates is put in their place."""
-        if ctx.priced or not _MONEY.search(reply):
+        if not _MONEY.search(reply):
             return reply
+        if ctx.priced:  # a tool priced the stay: only the amounts it gave may be stated, other sentences are dropped
+            bad = set(self._unbacked_amounts(reply, ctx, ctx.text))
+            if not bad:
+                return reply
+            return " ".join(s for s in re.split(r"(?<=[.?!])\s+|\n+", reply)
+                            if s.strip() and not (self._amounts_in(s) & bad)).strip()
         keep = [s for s in re.split(r"(?<=[.?!])\s+|\n+", reply) if s.strip() and not _MONEY.search(s)]
         bk = ctx.st.get("bk") or {}
         prop = self.repo.get_property(bk["property_id"]) if bk.get("property_id") else None
@@ -2128,23 +2190,28 @@ class ChatMixin:
         for p in self._places():
             numbers = ", ".join(display_phone(n) for n in p.contact_numbers) or "not set"
             out.append(f"PLACE '{self._place_label(p)}' (property name {p.name})")
+            # NO prices, rates or amounts reach the AI through the FACTS (owner, 2026-11-24): every amount comes from a
+            # tool (get_price, check_availability, prepare_booking, create_booking, my_bookings), which reads the
+            # dashboard database at call time. Free text typed in the dashboard is stripped of rupee amounts too.
             if p.description and "PLACEHOLDER" not in p.description:
-                out.append(f"  About: {p.description}")
+                if about := self._no_amounts(p.description):
+                    out.append(f"  About: {about}")
             if p.highlights:
-                out.append(f"  Good points: {'; '.join(p.highlights)}")
+                if good := [h for h in (self._no_amounts(h) for h in p.highlights) if h]:
+                    out.append(f"  Good points: {'; '.join(good)}")
             if p.map_url:
                 out.append(f"  Location (Google Maps link, send it when the guest asks where it is): {p.map_url}")
             out.append(f"  Check-in {p.checkin_time}, check-out {p.checkout_time}. To confirm a booking the guest pays "
-                       f"{p.advance_pct}% online now; the rest is paid at the property.")
+                       "an advance online now; the rest is paid at the property. (The advance amount comes only from the tools.)")
             if p.extra_bed_rate:
-                out.append(f"  Extra bed: {_money(p.extra_bed_rate)} per bed per night.")
+                out.append("  Extra bed: available (its cost comes only from the tools).")
             if p.early_checkin_time and p.early_checkin_rate:
-                out.append(f"  Early check-in (only if asked): from {self._short_time(p.early_checkin_time)}, "
-                           f"{_money(p.early_checkin_rate)} per room.")
-            if p.meal_plan:
-                out.append(f"  Meal plan: {p.meal_plan}.")
-            if p.policies:
-                out.append(f"  Policies: {p.policies}")
+                out.append(f"  Early check-in (only if asked): from {self._short_time(p.early_checkin_time)}; the "
+                           "charge comes only from prepare_booking / create_booking.")
+            if p.meal_plan and (meal := self._no_amounts(p.meal_plan)):
+                out.append(f"  Meal plan: {meal}.")
+            if p.policies and (policies := self._no_amounts(p.policies)):
+                out.append(f"  Policies: {policies}")
             out.append(f"  Owner's phone/WhatsApp numbers: {numbers}")
             out += self._rooms_facts(p)
         return "\n".join(out)
@@ -2310,8 +2377,9 @@ class ChatMixin:
             "- When the guest's message also asks a question, ANSWER that question in one or two short lines even "
             "when a tool tells you to reply [no reply]: the booking messages still go automatically after your answer. "
             "Never repeat those booking messages yourself.\n"
-            "- A price, total or advance only from a tool result in THIS turn (call check_availability); never from "
-            "memory or the welcome message.\n"
+            "- Every price, rate, total, advance, extra-bed or early-check-in amount only from a tool result in THIS turn "
+            "(price question: call get_price; also check_availability / prepare_booking). The FACTS below have NO amounts "
+            "on purpose; never from memory, an earlier message or the welcome message. An amount no tool gave you is blocked.\n"
             "- When the guest's message carries a note that they swiped to reply to an earlier message, answer about "
             "THAT message.\n"
             "- VERY SIMPLE: easy everyday words a school child understands, short sentences, no fancy or formal "
@@ -2365,7 +2433,7 @@ class ChatMixin:
             "chosen automatically.\n"
             "- ID proof: if asked, say only 'Please bring your ID proof while coming.' Never name ID types and never ask "
             "for an ID photo on WhatsApp.\n"
-            "- Early check-in: only if the guest asks. Tell them the time and charge from the FACTS and pass "
+            "- Early check-in: only if the guest asks. Tell them the time from the FACTS and the charge from prepare_booking / create_booking, and pass "
             "early_checkin true to create_booking if they want it.\n"
             "- Never ask the same thing twice.\n"
             "- Before the payment is received, NEVER say the room or booking is booked, confirmed, reserved or done. "
@@ -2386,7 +2454,7 @@ class ChatMixin:
             "and say only 'Please contact the owner directly: <the owner's numbers>'. Only a VOICE note that was clearly "
             "heard wrongly may be answered by asking the guest to say it again in a few words.\n"
             "- Rooms and extra beds (the owner's rule): 2 persons per room. Fewer rooms only when the guest asks for "
-            "fewer: then up to 3 per room, the 3rd on an extra bed at the FACTS price. When the guest asks for a "
+            "fewer: then up to 3 per room, the 3rd on an extra bed (its cost comes from the tools). When the guest asks for a "
             "number of rooms, call check_availability with that rooms number; the code adds the beds and the cost.\n\n"
             "PAYMENT\n"
             "- Asked how to pay: say only 'You can use UPI, card, net banking or wallet.' Never mention Razorpay, "
@@ -3006,6 +3074,7 @@ class ChatMixin:
                 response = llm.complete(system, messages, tools, MAX_REPLY_TOKENS)
             if not coded and not response.tool_calls:
                 reply = self._fix_reply(llm, system, messages, response.text.strip(), text, st)
+                reply = self._fix_amounts(llm, system, messages, reply, text, ctx)  # no ₹ amount without a tool this turn
                 if not GREETING.match(text) and reply.strip().rstrip(".!?").lower() in {
                         t("greet", lg).rstrip(".!?").lower() for lg in ("en", "mn", "tn", "hn")}:
                     reply = NO_REPLY  # 'Any places nearby?' once got 'Hi, How may I assist you?' (Sarvam, 2026-11-20)
@@ -3187,7 +3256,7 @@ class ChatMixin:
                     "create_booking": self._tool_create, "my_bookings": self._tool_bookings,
                     "send_payment_link": self._tool_resend, "recall_old_chat": self._tool_recall,
                     "talk_to_owner": self._tool_owner, "change_name": self._tool_change_name,
-                    "change_enquiry": self._tool_change}
+                    "change_enquiry": self._tool_change, "get_price": self._tool_get_price}
         handler = handlers.get(call.name)
         if handler is None or call.arguments_error:
             return json.dumps({"error": call.arguments_error or f"unknown tool {call.name}"}), True
@@ -3198,7 +3267,9 @@ class ChatMixin:
         except Exception as exc:
             log.exception("Tool %s failed", call.name)
             return json.dumps({"error": f"internal error: {exc}"}), True
-        return json.dumps(result, ensure_ascii=False), "error" in result
+        text_out = json.dumps(result, ensure_ascii=False)
+        ctx.numbers |= {int(n.replace(",", "")) for n in re.findall(r"\d[\d,]*", text_out) if n.replace(",", "").isdigit()}
+        return text_out, "error" in result
 
     @staticmethod
     def _int(args: dict[str, Any], key: str, default: int = 0) -> int:
@@ -3693,6 +3764,61 @@ class ChatMixin:
             out["extra_bed_cost"] = beds * prop.extra_bed_rate * q.nights
         if fee:
             out["early_checkin"] = f"from {self._short_time(prop.early_checkin_time)}, {_money(fee)}"
+        return out
+
+    def _tool_get_price(self, ctx: _Turn, a: dict[str, Any]) -> dict[str, Any]:
+        """The price of the stay already known, read from the dashboard data now. Only answers: nothing is booked,
+        the chosen room, the enquiry and any open payment link stay as they are."""
+        st, bk = ctx.st, ctx.st.get("bk") or {}
+        args = {k: a[k] for k in ("room_type", "rooms") if a.get(k)}
+        if st.get("checked") and bk.get("check_in") and bk.get("check_out") and bk.get("adults"):
+            before = bk.get("chosen")
+            out = self._tool_prepare(ctx, args)
+            if "error" in out and args:
+                out = self._tool_prepare(ctx, {})
+            if before is None:
+                bk.pop("chosen", None)
+            else:
+                bk["chosen"] = before
+            if "error" in out:
+                return out
+            prop = self.repo.get_property(bk["property_id"])
+            rt = next((r for r in self.repo.list_room_types(prop.id) if r.name == out["room_type"]), None) if prop else None
+            if rt is not None:
+                ci, co = date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"])
+                rates = {r for _, r in av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, 1).per_night}
+                if len(rates) == 1:
+                    out["per_room_per_night"] = rates.pop()
+            out.pop("next_step", None)
+            out["note"] = ("Only a price answer, nothing is booked. Say the total (and the per-night rate if given), "
+                           "never seasons or that rates change.")
+            return out
+        held = self._held_stay(ctx.phone)
+        prop = self.repo.get_property(held["property_id"]) if held else None
+        if held is None or prop is None:
+            return {"error": "no stay is known yet: call ask_stay_details (or ask_location) first"}
+        rooms = self.repo.list_room_types(prop.id)
+        wanted = str(a.get("room_type") or "")
+        rt = (self._room_in_words(wanted, rooms) if wanted else None) or next(
+            (r for r in rooms if r.id in held["room_type_ids"]), None)
+        if rt is None:
+            return {"error": "unknown room type"}
+        ci, co = date.fromisoformat(held["check_in"]), date.fromisoformat(held["check_out"])
+        free = self.repo.free_rooms(rt, ci, co, self.clock.now(), ctx.phone)
+        beds_ok = bool(prop.extra_bed_rate)
+        plan = av.plan_rooms(rt, held["adults"], held["children"], free, int(held.get("rooms") or 0), beds_ok) \
+            or av.plan_rooms(rt, held["adults"], held["children"], free, 0, beds_ok)
+        if not plan:
+            return {"error": f"{rt.name} is not free for these dates"}
+        ctx.priced = True
+        n = plan[0]
+        beds = self._beds_for(prop, rt, held["adults"], held["children"], n)
+        _, _, total, _ = self._price(prop, rt, ci, co, n, beds, False)
+        out = {"room_type": rt.name, "rooms": n, "extra_beds": beds, "nights": (co - ci).days, "total": total,
+               "note": "Only a price answer: the booking and the open payment link are unchanged."}
+        rates = {r for _, r in av.quote(prop, rt, self.repo.list_rate_rules(rt.id), ci, co, 1).per_night}
+        if len(rates) == 1:
+            out["per_room_per_night"] = rates.pop()
         return out
 
     @staticmethod

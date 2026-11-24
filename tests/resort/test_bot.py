@@ -520,7 +520,7 @@ def test_system_prompt_has_the_rules_and_facts(world):
     assert "9497861924" in system and "9995855789" in system and "https://maps.app.goo.gl/abc" in system
     assert "Never ask which language" in system and "Manglish" in system and "Hinglish" in system
     assert "the owner does it" in system and "NEGOTIATION" in system and "The FIRST time the guest asks for a lower price" in system
-    assert "₹4,000" not in system and "Extra bed: ₹500" in system  # prices only ever come from the tools
+    assert "₹" not in system.split("FACTS", 1)[-1].split("GUEST RECORDS")[0] and "Extra bed: available" in system  # no amount in the FACTS: prices only come from the tools
     assert "Kanthalloor, Munnar" in system and "2026-11-02 (Monday)" in system
 
 
