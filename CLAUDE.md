@@ -21,6 +21,17 @@ everything above it. Build order is PLAN.md §6.
 - Run tests with `.venv\Scripts\python.exe -m pytest -q`. Code must stay 3.12-compatible, because
   Lambda runs 3.12 and the local machine has 3.13.
 
+## Resort bot → AI-first agent: the one rule (2026-11-24)
+
+Design and build steps (AI-0 … AI-8, one at a time, commit `Step AI-n: ...`) are in [docs/AI_AGENT_DESIGN.md](docs/AI_AGENT_DESIGN.md). Background: [docs/RESORT_AI_AGENT_HANDOFF.md](docs/RESORT_AI_AGENT_HANDOFF.md).
+
+**The AI understands and decides. Code holds the facts and sends the owner's fixed messages.**
+
+- No regex or keyword list decides what the guest means. Ever. (Only exceptions: exact `STOP` / `START` / `restart` commands.)
+- Code owns: availability, prices, totals, advance, links, payment status, the owner's exact texts, the photo order.
+- When the agent fails on a message, fix it with (a) a general prompt rule, (b) a better tool description, or (c) a better tool result. Never a special case for one sentence. Every fix adds an eval scenario.
+- New agent code goes in `app/resort/agent/`; the old `flow.py` / `chat.py` logic is not edited (it stays as the fallback until the switch).
+
 ## Status (last updated 2026-10-16)
 
 | Step | State |
