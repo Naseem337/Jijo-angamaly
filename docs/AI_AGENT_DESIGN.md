@@ -77,7 +77,8 @@ class Enquiry:
     paid: bool
     language: str                # en | manglish | tanglish | hinglish
     missing: list[str]           # computed: what the next step needs
-    next_step: str               # computed: ask_location | ask_details | ask_contact | pay | done
+    next_step: str               # computed: ask_location | ask_details | check | ask_contact | pay | done
+                                 # check = everything is known but the room check has not run yet
 ```
 
 Rendered to the AI as plain lines, for example:
