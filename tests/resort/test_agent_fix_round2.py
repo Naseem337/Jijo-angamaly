@@ -77,7 +77,7 @@ def test_the_language_field_explains_each_style_with_example_words():
 
 def test_a_wanted_room_type_goes_in_room_picks_and_exclude_only_for_a_refused_type():
     props = spec("update_enquiry").parameters["properties"]
-    assert "Guest wants a room type → room_picks=[that type]" in props["room_picks"]["description"]
+    assert "ONLY a clear CHOICE ('take X', 'change to X', 'X venam', 'book X'" in props["room_picks"]["description"]
     assert props["exclude_room_types"]["description"].startswith("use ONLY when the guest says they don't want a type")
 
 

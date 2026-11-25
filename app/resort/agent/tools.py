@@ -81,7 +81,7 @@ TOOL_SCHEMAS = [
     ToolSpec(
         "update_enquiry",
         "Any wish to book, see rooms or know availability (even 'I need a room'), and anything the guest says about "
-        "their stay (place, dates, nights, adults, rooms, a room type or number, 'make it 5 persons'). "
+        "their stay (place, dates, nights, adults, rooms, a room they CHOOSE, 'make it 5 persons'). "
         "A place or resort name on its own ('Alleppey', 'kanthaloor', even misspelt) IS booking information → call "
         "update_enquiry(place=...). Pass the FULL stay (CURRENT ENQUIRY + what the guest just said); leave out what is "
         "unknown. Give check_out OR nights: code works out the other. It asks for anything missing and checks the "
@@ -93,11 +93,12 @@ TOOL_SCHEMAS = [
             "nights": {"type": "integer", "description": "instead of check_out"},
             "adults": {"type": "integer", "description": "adults above 6 years, as the guest said (never assume)"},
             "rooms": {"type": "integer", "description": "only if the guest said a number of rooms"},
-            "room_picks": {"type": "array", "description": "rooms the guest CHOSE themselves ('cottage venam', 'room "
-                                                         "103', a swipe-reply 'this one' on a room's photo), one entry "
-                                                         "per kind; [] clears it. Guest wants a room type → "
-                                                         "room_picks=[that type]. Only asking about or wanting to see "
-                                                         "another room → send_photos, not room_picks.",
+            "room_picks": {"type": "array", "description": "ONLY a clear CHOICE ('take X', 'change to X', 'X venam', "
+                                                         "'book X', 'room 103', a swipe-reply 'this one' on a room's "
+                                                         "photo), one entry per kind; [] clears it. A QUESTION about "
+                                                         "another room ('do you have X also?', 'is there a cottage?', "
+                                                         "'any deluxe?') is NOT a choice → send_photos, never "
+                                                         "room_picks.",
                            "items": {"type": "object", "properties": {
                                "room_type": {"type": "string", "description": "a room type name from FACTS"},
                                "room_number": {"type": "string"},
@@ -119,8 +120,10 @@ TOOL_SCHEMAS = [
         "send_photos",
         "The guest wants to see rooms or the resort, in any words ('pics?'). Never refuse, never ask for dates first. "
         "Any stage, also after payment. kind: room_type (also pass room_type), resort, other_room, all_rooms, default "
-        "(no room named), more. Asking about another room ('is the cottage free?') → other_room or room_type: code says "
-        "if it is free and shows it; it never switches their room.",
+        "(no room named), more. A QUESTION about another room ('do you have X also?', 'is there a cottage?', 'any "
+        "deluxe?') → kind room_type (with room_type) or other_room: code says if it is free and shows it; it never "
+        "switches their room. Only a clear CHOICE ('take X', 'change to X', 'X venam', 'book X') → update_enquiry "
+        "room_picks.",
         {"type": "object", "properties": {
             "kind": {"type": "string", "enum": list(pp.KINDS)},
             "room_type": {"type": "string", "description": "only for kind room_type: a room type name from FACTS"},

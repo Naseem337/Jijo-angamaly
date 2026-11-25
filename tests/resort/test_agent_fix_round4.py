@@ -59,9 +59,9 @@ def test_the_code_picking_by_priority_never_sends_room_picked(world):
 
 
 def test_the_prompt_and_room_picks_say_what_choosing_is():
-    assert "Guest CHOOSES a room (this one, take it, change to X, 'cottage venam', 'room 103', a swipe-reply" in SYSTEM
+    assert "Only a clear CHOICE ('take X', 'change to X', 'X venam', 'book X', 'room 103', a\n  swipe-reply" in SYSTEM
     desc = spec("update_enquiry").parameters["properties"]["room_picks"]["description"]
-    assert "'cottage venam', 'room 103'" in desc and "send_photos, not room_picks" in desc
+    assert "'book X', 'room 103'" in desc and "send_photos, never room_picks" in desc
 
 
 # --------------------------------------------------------------------------- 1d) photos at any stage

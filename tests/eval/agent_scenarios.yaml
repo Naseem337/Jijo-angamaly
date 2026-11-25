@@ -28,7 +28,7 @@
   lang: en
   turns:
     - guest: "hi"
-      none: true
+      expect_tools: [greet]  # the greet tool sends the owner's greeting
       expect_text: "Hi, How may I assist you?"
     - guest: "I need a room"
       expect_sent: [ask_location]
@@ -359,11 +359,11 @@
       must_not: ["no record", "didn't catch", "call you back", "will contact you"]
 
 # ───────────────────────── conversation ─────────────────────────
-- id: mid_chat_hi
+- id: mid_chat_hi  # the name ask is already our last message: never re-sent
   turns:
     - guest: "Alleppey dec 10 to 12, 2 adults"
     - guest: "hi"
-      expect_sent: [ask_contact]
+      not_sent: [ask_contact]
       must_not: ["How may I assist you", "assist"]
 
 - id: question_then_open_step  # fix round 1: code closes the turn with the open step
@@ -376,9 +376,9 @@
   turns:
     - guest: "Alleppey dec 10 to 12, 2 adults"
     - guest: "Meera 9847044444"
-    - guest: "is check-in at 12?"
-      expect_sent: [pay]
-      not_sent: [summary]
+    - guest: "is check-in at 12?"  # the link is among our last 2 messages: the answer only, no link again
+      ai_required: true
+      not_sent: [summary, pay]
 
 - id: thanks_with_link_open
   turns:
@@ -457,16 +457,16 @@
       must_not: ["anything else", "feel free", "as an AI", "owner", "don't hesitate", "please note"]
 
 # ───────────────────────── fix round 4 ─────────────────────────
-- id: closed_place_then_yes  # Kanthalloor switched off: closed_place; "yes" -> the form (AI asks nothing itself)
+- id: closed_place_then_yes  # Kanthalloor switched off: closed_place; "yes" -> the location question (AI asks nothing itself)
   closed: [Kanthalloor]
   turns:
     - guest: "Vibes Kanthalloor"
       expect_sent: [closed_place]
-    - guest: "yes"
-      expect_sent: [form]
+    - guest: "yes"  # after closed_place: the location question again
+      expect_sent: [ask_location]
       must_not: ["check-in", "check-out", "adults", "dates"]
     - guest: "ok"
-      not_sent: [form]
+      not_sent: [form, ask_location]
       max_words: 10
 
 - id: not_our_place_2  # Munnar is NOT used here: in the dashboard Munnar is Kanthalloor's own town (see the next one)
@@ -513,14 +513,16 @@
       not_sent: [ask_contact]
       max_words: 10
 
-- id: photos_after_link  # photos are always allowed, also with a link open for 2 rooms
+- id: photos_after_link  # photos are always allowed, also with a link open; already sent -> photos_sent
   turns:
     - guest: "Alleppey dec 10 to 12, 4 adults"
     - guest: "Meera 9847044444"
       expect_sent: [summary, pay]
-    - guest: "send room pics"
+    - guest: "send room pics"  # all its photos already went: never re-sent
       expect_tools: [send_photos]
-      in_order: [room_label, photos]
+      expect_sent: [photos_sent]
+      expect_text: "All the photos are sent above."
+      not_sent: [photos]
       must_not: ["not free", "can't share"]
 
 - id: other_room_then_choose  # 'any other room?' only shows it; 'take that one' switches, closes the link, new link

@@ -351,7 +351,7 @@ def test_another_room_is_shown_never_switched(pw):  # noqa: F811
 
 def test_the_room_picks_description_keeps_asking_apart_from_choosing():
     desc = spec("update_enquiry").parameters["properties"]["room_picks"]["description"]
-    assert "rooms the guest CHOSE themselves" in desc and "send_photos, not room_picks" in desc
+    assert "ONLY a clear CHOICE" in desc and "send_photos, never room_picks" in desc
     assert "never switches their room" in spec("send_photos").description
 
 

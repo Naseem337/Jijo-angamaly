@@ -371,7 +371,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             if step := quiet_reply(bot, phone, enq, lang, wanted=wanted, ack=result.ack):  # pay nudge / step / 'Sure.'
                 outbox.text(*step)
             else:
-                second = second_chance()  # a) the AI once more (internal: the guest never sees the ask)
+                second = "" if result.ack else second_chance()  # a) the AI once more, only for an EMPTY reply
                 if second:
                     result.reply = second
                     outbox.prepend_text("ai", second)
@@ -438,22 +438,20 @@ def quiet_reply(bot: Any, phone: str, enq: Enquiry, lang: str, *, wanted: bool =
     (then run_turn asks the AI once more, then re-sends the open step / says 'say again': never silent):
     - an open unpaid link: pay_nudge once (not when pay_nudge or the link is among the last 2 messages)
     - an open step not among the last 2 messages: that step
-    - NO step open: 'Sure.' ONLY when the AI marked the message as a pure acknowledgement (`ack`: it wrote exactly ACK
-      for 'ok' / 'thanks') and 'Sure.' was not the last message; anything else: None, so the AI is asked once more
-      (live test 2026-11-25: 'hello' got 'Sure.')
-    'Sure.' never answers while a step is open (live test 2026-11-25: 'what sure' / 'send' got 'Sure' or nothing)."""
-    recent = pp.recent_texts(bot, phone, 2)
+    - otherwise 'Sure.' ONLY when the AI marked the message as a pure acknowledgement (`ack`: it wrote exactly ACK for
+      'ok' / 'thanks'), also while a step is open that is among the last 2 messages (Haiku eval 2026-11-25: 'ok' after
+      the name ask re-sent the ask); anything else: None, so the AI is asked once more (only for an EMPTY reply,
+      never for ACK; live test 2026-11-25: 'hello' got 'Sure.')
+    'Sure.' never answers an unclear message while a step is open ('what sure' / 'send' → repeat_step)."""
+    sure = ("sure", t("sure", lang)) if ack else None
     if (link := live_link(bot, phone)) is not None and enq.next_step == "pay":
         nudge = t("pay_nudge", lang)
-        return None if _recent(bot, phone, nudge, link) else ("pay_nudge", nudge)
+        return sure if _recent(bot, phone, nudge, link) else ("pay_nudge", nudge)
     # a step is open while a booking is under way, or when this turn's own booking ask / answer was taken out (`wanted`)
     step = pp.open_step(bot, enq, lang) if (enq.active or wanted) else None
     if step is not None:
-        return None if _recent(bot, phone, step[1]) else step
-    if not ack or not greeted(bot, phone):
-        return None
-    sure = ("sure", t("sure", lang))
-    return None if recent and near_same(recent[-1], sure[1]) else sure
+        return sure if _recent(bot, phone, step[1]) else step
+    return sure
 
 
 def open_step_now(bot: Any, phone: str, enq: Enquiry, lang: str, *, wanted: bool = False) -> tuple[str, str] | None:
