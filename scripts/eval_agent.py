@@ -249,12 +249,14 @@ def run_scenario(sc: dict[str, Any], llm: Any) -> dict[str, Any]:
 
 
 JUDGE = """You grade one WhatsApp chat between a guest and a resort's front-desk bot. Score the BOT 1-5:
-5 = short (1-2 lines of its own), polite and warm, in the guest's language style ({lang}; manglish/tanglish/hinglish
-    = that language in English letters), and it answers what the guest asked.
+5 = short (1-2 lines of its own), polite and warm, in the right language, and it answers what the guest asked.
 4 = good, one small slip. 3 = clearly too long, cold, the wrong language, or it missed a question. 1-2 = bad.
-Score ONLY the lines marked "BOT (own words)". The owner's fixed messages (forms, summaries, payment links, owner
-numbers, room checks) are the owner's exact words: never mark them down, but DO mark down own words that repeat what
-those fixed messages already said. A turn with no own words is fine. Answer ONLY with JSON: {{"score": <1-5>, "reason": "<one short line>"}}"""
+The right language of a BOT line is the language of the GUEST message just before it, nothing else: an English
+message -> English is correct; Malayalam / Tamil / Hindi written in English letters -> that style in English letters.
+Score ONLY the lines marked "BOT (own words)". Turns marked "[no own words]" are NOT scored at all: skip them.
+The owner's fixed messages (forms, summaries, payment links, owner numbers, room checks) are the owner's exact words:
+never mark them down, but DO mark down own words that repeat what those fixed messages already said.
+Answer ONLY with JSON: {"score": <1-5>, "reason": "<one short line>"}"""
 
 
 def judge(llm: Any, sc: dict[str, Any], log: list[dict[str, Any]]) -> tuple[int | None, str]:
@@ -265,17 +267,16 @@ def judge(llm: Any, sc: dict[str, Any], log: list[dict[str, Any]]) -> tuple[int 
         if "outcome" not in e:
             continue
         lines.append(f"GUEST: {e['guest']}")
-        if e.get("ai"):
-            lines.append(f"BOT (own words): {e['ai']}")
+        if not e.get("ai"):  # only the owner's fixed texts (or nothing): this turn is not judged
+            lines.append("[no own words]")
+            continue
+        lines.append(f"BOT (own words): {e['ai']}")
         if e.get("fixed"):
             lines.append(f"[then the owner's fixed messages went out: {', '.join(e['fixed'])}]")
         if e.get("photos"):
             lines.append(f"[{e['photos']} photos]")
-        if not e.get("ai") and not e.get("fixed") and e.get("texts"):
-            lines += [f"BOT (fixed text): {t}" for t in e["texts"]]
     try:
-        r = llm.complete(JUDGE.format(lang=sc.get("lang", "en")), [ChatMessage("user", "\n".join(lines))], None, 300,
-                         temperature=0)
+        r = llm.complete(JUDGE, [ChatMessage("user", "\n".join(lines))], None, 300, temperature=0)
         m = re.search(r"\{.*\}", r.text or "", re.S)
         data = json.loads(m.group(0)) if m else {}
         return int(data["score"]), str(data.get("reason", ""))[:200]

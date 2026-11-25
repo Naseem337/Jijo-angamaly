@@ -24,7 +24,7 @@ from app.resort.agent import photos_plan as pp
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.prompt import build_system_prompt
 from app.resort.agent.state import Enquiry
-from app.resort.agent.tools import I18N_LANG, TOOL_SCHEMAS, AgentTools
+from app.resort.agent.tools import I18N_LANG, TOOL_SCHEMAS, AgentTools, live_link, pay_text
 from app.resort.chat import RESTART_MARK
 from app.resort.i18n import t
 
@@ -126,7 +126,8 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     """Answer one guest message. The outbox is flushed at the end (a dry-run outbox only records)."""
     enq = Enquiry.load(bot.repo, phone)
     messages = _with_guest_message(history(bot, phone), text, swipe)
-    system = build_system_prompt(bot, phone, enq, fresh=len(messages) <= 1)
+    fresh = len(messages) <= 1
+    system = build_system_prompt(bot, phone, enq, fresh=fresh)
     tools = AgentTools(bot, phone, outbox)
     result = TurnResult("answered")
     response = None
@@ -158,12 +159,19 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         src = guard.sources(bot, phone, enq, result.calls, outbox.texts, text)
         return guard.problems(reply, src), src
 
+    def own(response: Any) -> str:
+        reply = _own_text(response)
+        if reply and outbox.spoke and guard.repeats_tools(reply):  # g) the tools already said it
+            log.info("Guard: the AI's line repeats the tools' messages for %s; dropped", phone[-4:])
+            return ""
+        return reply
+
     reply, src, blocked = "", None, False
     try:
         if llm is None:
             raise RuntimeError("no LLM configured")
         response = ask()
-        reply = _own_text(response)
+        reply = own(response)
         found, src = check(reply)
         if found:  # design section 6: ONE retry, the AI is told exactly what was wrong
             result.guard, result.retried = found, True
@@ -171,7 +179,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             messages.append(ChatMessage("assistant", reply))
             messages.append(ChatMessage("user", guard.retry_message(found)))
             response = ask()
-            reply = _own_text(response)
+            reply = own(response)
             found, src = check(reply)
             if found:
                 blocked, reply = True, ""
@@ -198,19 +206,55 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
                 bot.staff_numbers(enq.place))
         if reply and src is not None:
             reply = guard.clean(reply, src)  # d) provider name, booking ids, other scripts, old links, the name
+        asked = False  # the AI asked for booking details itself: the code's open step takes its place
+        if reply:
+            kept = guard.drop_detail_asks(reply)  # f) the code's open step asks for the details, not the AI
+            asked, reply = kept != reply, kept
         if reply and guard.is_repeat(bot, phone, reply) and not guard.LINK.search(reply):
             log.info("Guard: the AI's line was already sent to %s; dropped", phone[-4:])  # e)
             reply = ""
         result.reply = reply
         if reply:  # design section 4: the AI's own line first, then the tools' messages in their order
             outbox.prepend_text("ai", reply)
-        elif not outbox.spoke:  # never silent: the booking step still open, else a short ask to say it again
+        if outbox.spoke and (step := due_step(bot, phone, enq, lang, outbox, fresh=fresh and not result.calls,
+                                              asked=asked)):
+            outbox.text(*step)  # the open booking step always closes the turn (fix round 1)
+        if not outbox.spoke:  # never silent: the booking step still open, else a short ask to say it again
             step = pp.open_step(bot, enq, lang)
             outbox.text(*(step or ("say_again", t("say_again", lang))))
             result.outcome = "never_silent"
     outbox.flush()
     result.sent = outbox.keys
     return result
+
+
+# the owner texts that ARE each open step: when one went out this turn, the step is not added again
+STEP_KEYS = {"ask_location": ("ask_location",), "ask_details": ("form", "past_date"),
+             "ask_extra_bed": ("ask_extra_bed", "ask_extra_beds"), "ask_contact": ("ask_contact",),
+             "pay": ("pay", "hold_pay")}
+
+
+def due_step(bot: Any, phone: str, enq: Enquiry, lang: str, outbox: Outbox, *, fresh: bool = False,
+             asked: bool = False) -> tuple[str, str] | None:
+    """The open booking step the code adds at the end of a turn: (key, owner text), or None. Only while a booking is
+    under way (never on a first 'hi') or when the AI's own ask for details was dropped (`asked`), only when the step
+    needs the guest (location, details, extra bed, name and mobile, payment), when its owner text was not sent this
+    turn and it is not already the last message we sent."""
+    step = enq.next_step
+    if step not in STEP_KEYS or any(k in outbox.keys for k in STEP_KEYS[step]):
+        return None
+    if not asked and (fresh or not enq.active):
+        return None
+    if step == "pay":
+        b = live_link(bot, phone)
+        found = ("pay", pay_text(b, lang, bot.clock.now())) if b is not None else None
+    elif step == "ask_location" and len([p for p in bot._places() if p.active]) == 1:
+        found = None  # one resort only: the place is never asked
+    else:
+        found = pp.open_step(bot, enq, lang)
+    if found is None or found[1] == pp.last_text(bot, phone, outbox):
+        return None
+    return found
 
 
 def _alert_ai_down(bot: Any, outbox: Outbox, phone: str, text: str, enq: Enquiry) -> None:

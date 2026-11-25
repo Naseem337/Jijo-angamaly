@@ -33,9 +33,20 @@ log = logging.getLogger(__name__)
 
 I18N_LANG = {"en": "en", "manglish": "mn", "tanglish": "tn", "hinglish": "hn"}
 
-SENT_NOTE = ("The owner's messages listed in `sent` were already sent to the guest: never write them again. Add ONE short "
-             "line of your own only if the guest also asked something else.")
+ALREADY_SENT = "Already sent to the guest. Do not repeat it."  # the start of every note when a tool sent messages
+SENT_NOTE = ("Write NOTHING unless the guest also asked something these messages did not answer; then answer only that, "
+             "in one short sentence.")
 UNCHANGED_NOTE = ("Nothing new to send: the stay is unchanged. Answer only what the guest asked, in one short line.")
+
+# talk_to_owner(reason): each reason has its fixed owner text (i18n key) and a line for the team (None = no alert)
+OWNER_REASONS: dict[str, tuple[str, str | None]] = {
+    "pay_terms": ("pay_terms", "guest wants other payment terms (smaller advance / cash / pay at the property / pay later)"),
+    "guest_called": ("guest_called", None),  # the guest already reached the owner: no alert
+    "cannot_answer": ("handoff", "the bot could not answer the guest's question"),
+    "call_request": ("handoff", "the guest asks for the owner or a call"),
+    "change_or_cancel_paid": ("handoff", "the guest wants to change or cancel a PAID booking"),
+    "other": ("handoff", "the guest needs the owner"),
+}
 
 LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
                   "description": "the language style of the guest's latest message (manglish = Malayalam in English letters)"}
@@ -43,14 +54,19 @@ LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
 TOOL_SCHEMAS = [
     ToolSpec(
         "update_enquiry",
-        "Use this whenever the guest says anything about their stay: the place, dates or nights, number of adults, number "
+        "Use this for any wish to book, see rooms or know availability, even with no details at all ('I need a room'). "
+        "Also whenever the guest says anything about their stay: the place, dates or nights, number of adults, number "
         "of rooms, a room type or room number, 'one more room', 'make it 5 persons', 'change to jan 2-5', 'no cottage'. "
         "Pass the FULL stay as you now understand it (CURRENT ENQUIRY plus what the guest just said), not only the change, "
-        "and leave out what is still unknown. It asks the guest for anything missing and checks the rooms, and the owner's "
-        "messages go out for you (see `sent`): never write those yourself.",
+        "and leave out what is still unknown. Give check_out OR nights: code works out the other. It asks the guest for "
+        "anything missing (place, dates, adults, name, mobile) with the owner's words and checks the rooms; those "
+        "messages go out for you (see `sent`): never write them yourself.",
         {"type": "object", "properties": {
             "place": {"type": "string", "description": "the resort or town the guest named, spelled however they wrote it"},
             "check_in": {"type": "string", "description": "YYYY-MM-DD; a date with no year is the next time it comes"},
+            "month_given": {"type": "boolean", "description": "false when the guest gave only a day with no month ('12 "
+                                                               "muthal 14'): code then moves a day already past to next "
+                                                               "month"},
             "check_out": {"type": "string", "description": "YYYY-MM-DD"},
             "nights": {"type": "integer", "description": "instead of check_out, if the guest gave nights"},
             "adults": {"type": "integer", "description": "total adults above 6 years as the guest said them (never assume); "
@@ -134,15 +150,17 @@ TOOL_SCHEMAS = [
          "required": ["name"]}),
     ToolSpec(
         "talk_to_owner",
-        "Use this when you do not know the answer or cannot do what the guest asks: they ask for the owner or a call, "
-        "complain, want a refund, a discount or an exception, or want to change a booking that is already paid. The owner "
-        "gets a short summary and the guest is told to contact the owner directly. Never promise a call back. When the guest "
-        "says they called, spoke to, tried calling, visited or paid the owner directly, use reason 'guest_called': the "
-        "guest gets a short thank-you, the team is not alerted, and any open booking step follows. When the guest wants "
-        "other payment terms (a smaller advance, cash, pay at the property, pay later instead of the online advance), use "
-        "reason 'pay_terms': the guest gets the owner's numbers.",
+        "Use this when you do not know the answer or cannot do what the guest asks. The guest gets the owner's fixed text "
+        "for the reason (sent for you): write nothing after it unless the guest also asked something else. Reasons: "
+        "pay_terms = other payment terms (a smaller advance, cash, pay at the property, pay later instead of the online "
+        "advance); guest_called = the guest says they called, spoke to, tried calling, visited or paid the owner directly "
+        "(a thank-you, no alert, the open booking step follows); cannot_answer = you do not know the answer, or 3+ "
+        "questions at once; call_request = they ask for the owner or a call; change_or_cancel_paid = change or cancel a "
+        "booking that is already paid; other = a complaint, a refund, a second discount request, an exception.",
         {"type": "object", "properties": {
-            "reason": {"type": "string", "description": "one short line for the owner, e.g. 'wants to cancel, asks full refund'"},
+            "reason": {"type": "string", "enum": list(OWNER_REASONS)},
+            "staff_note": {"type": "string", "description": "optional, only for the staff: one short line, e.g. 'asks "
+                                                            "full refund'"},
             "language": LANGUAGE_FIELD},
          "required": ["reason"]}),
     ToolSpec(
@@ -152,6 +170,20 @@ TOOL_SCHEMAS = [
         {"type": "object", "properties": {"query": {"type": "string", "description": "what you are looking for"}}}),
 ]
 TOOLS = TOOL_SCHEMAS  # the same list, under the name AI-2a used
+
+
+def pay_text(b: Any, lang: str, now: Any) -> str:
+    """The owner's payment-link text for a held booking."""
+    minutes = max(1, int((b.hold_expires_at - now).total_seconds() // 60))
+    return t("pay", lang, id=b.id, minutes=minutes, advance=f"{b.advance:,}", url=b.payment_link_url)
+
+
+def live_link(bot: Any, phone: str) -> Any:
+    """The guest's held booking whose payment link is still open, or None."""
+    now = bot.clock.now()
+    return next((b for b in bot.repo.list_bookings(phone=phone, status="hold", limit=5)
+                 if b.payment_link_url and b.hold_expires_at and b.hold_expires_at > now), None)
+
 
 def _int(args: dict[str, Any], key: str, default: int | None = None) -> int | None:
     """An integer argument; missing or null = `default` (the saved value)."""
@@ -174,6 +206,20 @@ def _day(value: Any) -> date | None:
     return date.fromisoformat(str(value)) if value else None
 
 
+def _next_month_day(d: date, today: date) -> date | None:
+    """The same day of the month in the next month after `today` that has that day ('31' skips a short month)."""
+    year, month = today.year, today.month
+    for _ in range(3):
+        month += 1
+        if month > 12:
+            year, month = year + 1, 1
+        try:
+            return date(year, month, d.day)
+        except ValueError:
+            continue
+    return None
+
+
 def _label(d: date) -> str:
     return f"{d.day} {d.strftime('%b')}"
 
@@ -187,7 +233,15 @@ class AgentTools:
     # ------------------------------------------------------------------ helpers
 
     def _result(self, ok: bool, facts: dict[str, Any], start: int, enq: Enquiry, note: str) -> dict[str, Any]:
-        return {"ok": ok, "facts": facts, "sent": self.out.keys[start:], "next_step": enq.next_step, "note": note}
+        sent = self.out.keys[start:]
+        if any(not k.startswith("staff:") and k != "confirmed" for k in sent) and not note.startswith(ALREADY_SENT):
+            note = f"{ALREADY_SENT} {note}"  # every tool that sent the guest something says so first
+        return {"ok": ok, "facts": facts, "sent": sent, "next_step": enq.next_step, "note": note}
+
+    def _only_resort(self) -> Property | None:
+        """The one open resort, when there is exactly one: then the place is never asked."""
+        places = [p for p in self.bot._places() if p.active]
+        return places[0] if len(places) == 1 else None
 
     def _send(self, key: str, lang: str, **values: Any) -> None:
         """An owner text from i18n.py, in the guest's language."""
@@ -304,6 +358,7 @@ class AgentTools:
         enq.booking_id, enq.link_open = (held[0].id, True) if held else (None, False)
 
         def done(ok: bool, facts: dict[str, Any], note: str) -> dict[str, Any]:
+            enq.started = True
             enq.save(repo, phone)
             return self._result(ok, facts, start, enq, note)
 
@@ -321,6 +376,8 @@ class AgentTools:
         if prop is None and held:
             prop = repo.get_property(held[0].property_id)
         if prop is None or not prop.active:
+            prop = self._only_resort()  # one resort only: the place is set and the location question never goes
+        if prop is None or not prop.active:
             enq.place = None
             self._send("ask_location", lang, towns=bot._towns_text())
             return done(True, {"known": enq.to_dict()["place"]}, SENT_NOTE)
@@ -333,6 +390,11 @@ class AgentTools:
         except ValueError:
             return done(False, {"problem": "check_in and check_out must be YYYY-MM-DD"}, "Fix the dates and call again.")
         nights = _int(args, "nights")
+        if ci and args.get("month_given") is False and ci < today:
+            # a day with no month that already passed this month is that day next month; the check-out moves with it
+            if (moved := _next_month_day(ci, today)) is not None:
+                co = co + (moved - ci) if co else co
+                ci = moved
         if ci and co is None:
             if nights:
                 co = ci + timedelta(days=nights)
@@ -594,9 +656,13 @@ class AgentTools:
         held = bot._open_hold(phone)
         if held:  # the payment link is out: that is the booking step (nothing is asked again after the photos)
             enq.booking_id, enq.link_open = held[0].id, True
+        enq.started = True
         prop = repo.get_property(enq.place) if enq.place else None
         if prop is None and held:
             prop = repo.get_property(held[0].property_id)
+        if prop is None or not prop.active:
+            if (prop := self._only_resort()) is not None:  # one resort only: never the location question
+                enq.place = prop.id
         if prop is None or not prop.active:  # no resort yet: the location question first, the request is kept (rule 6)
             enq.photo_wish = {"kind": kind, "room_type": room_type}
             self._send("ask_location", lang, towns=bot._towns_text())
@@ -888,7 +954,7 @@ class AgentTools:
         if reason == "hold":
             self.out.text("hold_pay", t("hold_pay", lang, url=b.payment_link_url))
         else:
-            self.out.text("pay", t("pay", lang, id=b.id, minutes=minutes, advance=f"{b.advance:,}", url=b.payment_link_url))
+            self.out.text("pay", pay_text(b, lang, now))
         enq.booking_id, enq.link_open = b.id, True
         return self._result(True, {"minutes_left": minutes}, start, enq,
                             SENT_NOTE + " Never explain the hold or when the link expires.")
@@ -970,7 +1036,11 @@ class AgentTools:
         keeps answering afterwards."""
         bot = self.bot
         start, enq, style, lang = self._ctx(args)
-        reason = (str(args.get("reason") or "").strip() or "the guest asked for the owner")[:200]
+        reason = str(args.get("reason") or "").strip()
+        note = str(args.get("staff_note") or "").strip()[:200]
+        if reason not in OWNER_REASONS:  # free text instead of a reason: it goes to the staff, the guest gets the handoff
+            reason, note = "other", (note or reason)[:200]
+        key, staff_line = OWNER_REASONS[reason]
         if reason == "guest_called":  # the guest already reached the owner: thank them, no staff alert, never deny it
             self._send("guest_called", lang)
             if enq.place or enq.check_in or bot._open_hold(self.phone):  # a booking under way: its open step follows
@@ -979,16 +1049,19 @@ class AgentTools:
                                 SENT_NOTE + " Never deny the call, never say there is no record, never promise a call back.")
         held = bot._open_hold(self.phone)
         prop = self._the_resort(enq, held)
-        if reason == "pay_terms":  # other payment terms than the online advance: the owner's text + numbers, team told
-            self._send("pay_terms", lang, numbers=bot._owner_numbers({"form_place": prop.id if prop else None}))
-            self._staff("guest wants other payment terms (smaller advance / cash / pay at the property / pay later)",
-                        prop.id if prop else None, lang)
-            return self._result(True, {"owner_told": True}, start, enq,
-                                SENT_NOTE + " Never agree to other terms yourself and never promise a call back.")
-        self.out.text("handoff", bot._owner_msg("handoff", {"lang": lang, "form_place": prop.id if prop else None}))
-        self._staff(reason, prop.id if prop else None, lang)
-        return self._result(True, {"owner_told": True}, start, enq,
-                            SENT_NOTE + " Never promise a call back or say the owner will contact them.")
+        where = {"form_place": prop.id if prop else None}
+        if key == "pay_terms":  # other payment terms than the online advance: the owner's text + numbers
+            self._send("pay_terms", lang, numbers=bot._owner_numbers(where))
+        else:
+            self.out.text("handoff", bot._owner_msg("handoff", {"lang": lang, **where}))
+        if reason == "other" and note:
+            staff_line = note  # the staff note says it all
+        elif note:
+            staff_line = f"{staff_line}: {note}"
+        self._staff(staff_line or reason, prop.id if prop else None, lang)
+        return self._result(True, {"owner_told": True, "reason": reason}, start, enq,
+                            SENT_NOTE + " Never agree to anything yourself, never promise a call back or say the owner "
+                            "will contact them.")
 
     # ------------------------------------------------------------------ recall_old_chat (read only)
 

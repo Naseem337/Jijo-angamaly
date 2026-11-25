@@ -147,7 +147,7 @@ def test_a_voice_note_becomes_text_for_the_ai(agent):
 def test_a_voice_hiccup_is_retried_once(agent):
     voice = Voice(RuntimeError("download timed out"), VoiceResult(text="price please"))
     agent.bot._voice_in = lambda: voice
-    assert send(agent, m(kind="audio", media_id="a1"), reply("Which dates?")) == "answered" and voice.calls == 2
+    assert send(agent, m(kind="audio", media_id="a1"), reply("Sure.")) == "answered" and voice.calls == 2
 
 
 def test_a_failed_voice_note_gets_voice_problem_and_no_ai(agent):
@@ -212,10 +212,10 @@ def test_a_swipe_reply_puts_the_note_line_before_the_guest_message(agent):
 
 def test_a_full_turn_gate_ai_tools_guard_outbox_in_order(agent):
     out = send(agent, m("Alleppey 10 nov to 12 nov 2 persons, is there a pool?"), tool("update_enquiry", **STAY),
-               tool("get_price"), reply("Yes, there is a pool. The total is ₹8,000."))
+               tool("get_price"), reply("Yes, there is a pool."))
     assert out == "answered"
     texts = agent.wa.texts()
-    assert texts[0] == "Yes, there is a pool. The total is ₹8,000."  # the AI's line first (₹8,000 came from get_price)
+    assert texts[0] == "Yes, there is a pool."  # the AI's line first
     assert texts[1:4] == ["Yes, rooms are available for your dates.", "For 2 persons: 1 room(s).",
                           "Please share your name and mobile number to proceed."]
     assert texts[4].startswith("Deluxe: ₹4,000 per room per night.")  # the tool messages in queue order

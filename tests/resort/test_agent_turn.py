@@ -236,7 +236,7 @@ def test_the_prompt_has_no_rupee_amount_and_all_its_blocks(world):
         for amount in ("4000", "4,000", "8000", "8,000", "9500"):
             assert amount not in system
         assert "Resort Booking Assistant" in system and "{brand}" not in system
-        for block in ("TRUTH", "BOOKING", "HOW YOU TALK", "OWNER RULES", "TODAY\nToday is 2026-11-02 (Monday)", "FACTS\n",
+        for block in ("TRUTH", "BOOKING", "HOW YOU TALK", "OWNER RULES", "TODAY\nToday is Mon 2 Nov 2026 (2026-11-02)", "FACTS\n",
                       "GUEST RECORDS", "CURRENT ENQUIRY"):
             assert block in system, block
     last = w.llm.calls[-1].system
@@ -248,7 +248,7 @@ def test_the_owner_rules_are_in_the_prompt(world):
     w = world
     go(w, "hi", reply("Hi, How may I assist you?"))
     system = w.llm.calls[0].system
-    for line in ("FIRST time the guest asks for a lower price", "SECOND time, call talk_to_owner", "3 or more separate questions",
+    for line in ("FIRST time the guest asks for a lower price", 'SECOND time, talk_to_owner(reason="other")', "3 or more separate questions",
                  "state only the charge in if_cancelled_today", "wants a NEW booking", "Please bring your ID proof while coming."):
         assert line in system, line
 

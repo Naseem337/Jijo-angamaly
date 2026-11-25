@@ -7,6 +7,7 @@ from test_bot import GUEST, STAFF, reply, tool, world  # noqa: F401  (world is a
 
 from app.resort.agent import guard
 from app.resort.agent.guard import Sources
+from app.resort.agent.state import Enquiry
 from app.resort.models import Booking
 
 
@@ -41,7 +42,11 @@ def test_still_wrong_after_the_retry_sends_the_handoff_and_alerts_the_staff(worl
 def test_an_amount_from_get_price_this_turn_is_allowed(world):
     res, box = go(world, "price for Alleppey 10 to 12 nov, 2 persons?", tool("update_enquiry", **STAY), tool("get_price"),
                   reply("The advance is ₹4,000 and the total ₹8,000."))
-    assert not res.retried and res.sent[0] == "ai" and "price_answer" in res.sent
+    assert not res.retried and "price_answer" in res.sent  # a) fine, but g) drops it: the tools already said it
+    assert "ai" not in res.sent
+    enq = Enquiry.load(world.repo, GUEST)
+    src = guard.sources(world.bot, GUEST, enq, res.calls, [], "price?")
+    assert guard.problems("The advance is ₹4,000 and the total ₹8,000.", src) == []
 
 
 def test_an_amount_the_guest_typed_is_allowed(world):
@@ -52,15 +57,18 @@ def test_an_amount_the_guest_typed_is_allowed(world):
 
 
 def test_a_date_or_a_room_count_nobody_gave_is_retried(world):
-    res, box = go(world, "rooms?", reply("We have 7 rooms free on 14 Dec."), reply("Which dates, sir?"))
+    res, box = go(world, "rooms?", reply("We have 7 rooms free on 14 Dec."), reply("We have rooms, sir."))
     assert res.retried and len(res.guard) == 2  # (3 rooms would pass: FACTS say the Family Suite has 3 rooms)
-    assert "14 Dec" in res.guard[0] and "7 room(s)" in res.guard[1] and texts(box)["ai"] == "Which dates, sir?"
+    assert "14 Dec" in res.guard[0] and "7 room(s)" in res.guard[1] and texts(box)["ai"] == "We have rooms, sir."
 
 
 def test_dates_and_rooms_from_the_enquiry_are_allowed(world):
-    res, box = go(world, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY),
-                  reply("Noted: 1 room from 10 Nov to 12 Nov."))
+    go(world, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
+    world.clock.advance(minutes=1)
+    res, box = go(world, "what did I ask for?", reply("Noted: 1 room from 10 Nov to 12 Nov."),  # no tool spoke this turn
+                  live=True)
     assert not res.retried and texts(box)["ai"] == "Noted: 1 room from 10 Nov to 12 Nov."
+    assert res.sent == ["ai", "ask_contact"]  # the open step closes the turn
 
 
 # --------------------------------------------------------------------------- b) booked / confirmed only when paid
@@ -142,7 +150,7 @@ def test_tool_messages_are_never_checked_stripped_or_dropped(world):
        live=True)
     w.clock.advance(minutes=1)
     res, box = go(w, "price again?", tool("get_price"), reply("[no reply]"), live=True)
-    assert res.sent == ["price_answer"] and not res.retried
+    assert res.sent == ["price_answer", "ask_contact"] and not res.retried  # + the open step, which code adds
     prices = [x for x in w.wa.texts(GUEST) if x.startswith("Deluxe: ₹4,000")]
     assert len(prices) == 2 and prices[0] == prices[1]  # the same tool text twice, amounts and all
 

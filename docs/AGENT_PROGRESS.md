@@ -43,6 +43,48 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
   Judge quirk: it sometimes asks an English guest for Manglish style (the language hint in JUDGE lists all styles).
 - `--pause N` adds N seconds between AI turns (default 0); a run where the AI was down is repeated once after 30 s.
 
+## Fix round 1 (2026-11-25): open step + no repeats + owner reasons + dates
+- OPEN STEP FROM CODE (turn.py `due_step`): at the end of every turn, while a booking is under way (`Enquiry.active`: a
+  tool set `started`, or place / dates / adults / a link / a photo wish), if next_step needs the guest (ask_location,
+  ask_details, ask_extra_bed, ask_contact, pay) and its owner text was not sent this turn (`STEP_KEYS`; pay = `pay` /
+  `hold_pay`, details = `form` / `past_date`), the outbox appends it, unless it is already the last message we sent.
+  Pay = the live link's `pay` text again. Never on a first message of a conversation with no tool call (a first "hi").
+- guard f) `drop_detail_asks`: a SENTENCE of the AI's own that asks (?, please, share ... , parayamo, tharamo ...) AND names
+  a booking detail (place / location / dates / check-in / adults / persons / rooms / name / mobile) is dropped; then the
+  code's step is added even if no tool started the enquiry (`asked=True`).
+- guard g) `repeats_tools`: when tools sent messages this turn, the AI's line is dropped (before the a/b/c checks, so no
+  retry) if it has ₹ / a link / a date / summary|payment|advance|link / more than 25 words.
+- Every tool note starts with "Already sent to the guest. Do not repeat it." when the tool sent the guest something
+  (`AgentTools._result`). SENT_NOTE now: write NOTHING unless the guest asked something else, then one short sentence.
+- talk_to_owner(reason) is an enum (`OWNER_REASONS`): pay_terms -> pay_terms text; guest_called -> thank-you, no alert, open
+  step; cannot_answer / call_request / change_or_cancel_paid / other -> handoff text + staff alert; optional `staff_note`
+  goes to the staff only. A free-text reason is taken as `other` with the text as the staff note.
+- Dates: update_enquiry `month_given` (bool). false + the day already passed this month -> the same day next month
+  (`_next_month_day`, a day the month lacks skips it), the check-out moves with it. TODAY block:
+  "Today is Wed 25 Nov 2026 (2026-11-25) ... (12 → 12 Dec); pass month_given=false then." (`prompt.today_block`).
+- One open resort only: update_enquiry and send_photos set the place themselves; ask_location is never sent. The eval DB
+  and the test world have 2 open resorts (Pozhiyoram/Alleppey + Kanthalloor), so the question is right there;
+  photos_resort now also expects update_enquiry(place=alleppey) + form on its first turn.
+- Guard sources now include the saved room counts ("N rooms") of the enquiry.
+- Judge: the language is judged against the guest message just before each line; turns with no own words are marked
+  "[no own words]" and not scored.
+- New evals: day_without_month, call_request, question_then_open_step, question_with_link_open; reason checks on
+  discount (other) and three_questions (cannot_answer). Tests: tests/resort/test_agent_fix_round1.py (50).
+- Diagnosis (not fixed yet): ten_adults_four_rooms_how_many: the AI's arguments and the code are right (adults 10,
+  rooms 4, then extra_beds 2; code sends `ask_extra_beds` "How many extra beds do you need?"); the scenario expects the key
+  `ask_extra_bed`, which is the yes/no text for ONE room, so the expectation is wrong. (Run 3: the AI greeted and called
+  no tool on the first message: an AI miss.) change_room_type_after_link: run 1 = the AI's arguments (room_picks [] +
+  exclude ["Standard Room"] instead of room_picks Family Suite, so the code correctly took the next room by priority,
+  Deluxe); run 3 args right, it failed on tone (the AI repeated the summary), which guard g) now drops.
+- Eval after round 1 (2026-11-25, sarvam_chat -> groq, 38 scenarios): 18/38 scenarios pass 3/3, 70/114 runs, 6.6 min
+  (before: 3/34, 26/102). Still failing: "Alleppey" alone gets no update_enquiry (happy_en, happy_manglish,
+  photos_resort); tanglish tagged manglish; day_without_month (the AI sends 20 Nov without month_given=false);
+  guest_called text missing; mid-chat "hi" still gets "How may I assist you"; change_dates_after_link sends pay without
+  a new summary; ten_adults (the scenario key, see the diagnosis below). Many tone fails blame the bot for the code's own open step / payment link
+  ("included a fixed payment link"): the judge needs to see which lines the code added.
+- Old-bot tests: 5 in test_never_silent.py (pay terms, expecting the pre-8330e2b text) fail since 8330e2b; the old
+  bot is not edited.
+
 ## Next
 - Fix the AI-5 eval failures with general rules (prompt / tool description / tool result), one at a time.
 - AI-6 is now the OWNER TESTING on a test WhatsApp number with `AGENT_MODE=agent` (shadow mode dropped: no live traffic).

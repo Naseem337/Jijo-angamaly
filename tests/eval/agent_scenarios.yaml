@@ -95,6 +95,13 @@
       expect_args: {update_enquiry: {check_in: "2027-01-03", check_out: "2027-01-05"}}
       expect_sent: [rooms_ok]
 
+- id: day_without_month  # fix round 1: 20 has passed in November -> 20 Dec (code moves it)
+  turns:
+    - guest: "Alleppey 20 to 22, 2 adults"
+      expect_tools: [update_enquiry]
+      expect_sent: [rooms_ok]
+      not_sent: [past_date]  # the AI may pass 2026-11-20 + month_given=false: the code moves it, so no date check
+
 - id: past_date
   turns:
     - guest: "Alleppey room for 2 on 20 Nov 2026, one night"
@@ -179,18 +186,31 @@
       must_not: ["no discount"]
     - guest: "please, give a lower rate"
       expect_tools: [talk_to_owner]
+      expect_args: {talk_to_owner: {reason: other}}
       expect_sent: [handoff]
 
 - id: three_questions_one_message
   turns:
     - guest: "Is there a pool? Do you allow pets? Is breakfast included? Can we have a campfire?"
       expect_tools: [talk_to_owner]
+      expect_args: {talk_to_owner: {reason: cannot_answer}}
       expect_sent: [handoff]
 
+- id: call_request  # fix round 1: the reason is an enum with its fixed text
+  turns:
+    - guest: "can I talk to the owner?"
+      expect_tools: [talk_to_owner]
+      expect_args: {talk_to_owner: {reason: call_request}}
+      expect_sent: [handoff]
+      must_not: ["call you back", "will contact you"]
+
 # ───────────────────────── photos ─────────────────────────
-- id: photos_resort
+- id: photos_resort  # the eval DB has 2 open resorts: naming one must set the place (the form follows)
   turns:
     - guest: "Alleppey"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {place: alleppey}}
+      expect_sent: [form]
     - guest: "send resort photos"
       expect_tools: [send_photos]
       expect_sent: [photos]
@@ -309,6 +329,20 @@
     - guest: "hi"
       expect_sent: [ask_contact]
       must_not: ["How may I assist you"]
+
+- id: question_then_open_step  # fix round 1: code closes the turn with the open step
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "is there parking?"
+      expect_sent: [ask_contact]
+
+- id: question_with_link_open  # fix round 1: the open payment link follows the answer
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "is check-in at 12?"
+      expect_sent: [pay]
+      not_sent: [summary]
 
 - id: thanks_with_link_open
   turns:

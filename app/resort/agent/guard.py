@@ -8,6 +8,10 @@
     d) stripped quietly: the payment provider's name, booking ids, non-Latin script, links not from this turn, the
        guest's name
     e) a text identical to one already sent in this conversation is dropped
+    f) a sentence where the AI asks for booking details (place, dates, persons, rooms, name, mobile) is dropped: the
+       code's open step asks with the owner's words (turn.py)
+    g) when a tool sent messages this turn, the AI's line is dropped if it has an amount, a link, a date, the words
+       summary / payment / advance / link, or more than 25 words (it would repeat the tools' messages)
 
 Regex here only reads the AI's own reply and code-made facts; nothing here decides what the GUEST meant (the guest's
 messages are only searched for the same numbers and dates the AI wrote).
@@ -45,6 +49,18 @@ PROMISE = re.compile(r"\b(?:will (?:contact|call|reach|get in touch with|message
                      r"|please wait|let me check)\b", re.IGNORECASE)
 PROVIDER = re.compile(r"[ \t]*\b(?:(?:via|through|using|on|by)[ \t]+)?(?:razor[ \t]?pay|rzp)\b", re.IGNORECASE)
 LINK = re.compile(r"https?://\S+")
+# f) the AI asking for booking details itself (the code's open step asks with the owner's words): a sentence that asks
+# (a question mark or a request word) AND names a booking detail. Only the AI's own reply is read here.
+ASKING = re.compile(r"\?|\b(?:please|pls|plz|kindly|share|send|tell me|let me know|provide|confirm|could you|can you|"
+                    r"may i (?:know|have)|need your|parayamo|parayu|tharamo|tharu|ayakkamo|ayakku|ariyikkamo|sollunga|"
+                    r"batao|bataiye)\b", re.IGNORECASE)
+DETAIL = re.compile(r"\b(?:(?:which|what|preferred)\s+(?:resort|place|location|property)|locations?|where\b.{0,30}\b(?:stay"
+                    r"|looking)|evide|dates?|check[- ]?(?:in|out)|how many (?:nights|days|persons|people|adults|guests|pax"
+                    r"|rooms)|(?:number|no\.?) of (?:nights|persons|people|adults|guests|rooms)|adults|persons|guests|pax|"
+                    r"ethra (?:per|peru|aal|rooms?|divasam)|(?:your|the|full) name|name and|mobile|phone number|contact "
+                    r"(?:number|details)|whatsapp number)\b", re.IGNORECASE)
+TOOL_WORDS = re.compile(r"\b(?:summary|payment|advance|link)\b", re.IGNORECASE)
+REPEAT_MAX_WORDS = 25
 
 
 @dataclass
@@ -177,11 +193,36 @@ def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_te
     today = bot._today()
     days = "\n".join((today + timedelta(days=i)).isoformat() for i in range(2))
     prop = bot.repo.get_property(enq.place) if enq.place else None
-    facts = "\n".join([bot._facts(), enq.render(bot._place_label(prop) if prop else ""), days])
+    rooms = [f"{n} rooms" for n in {enq.rooms, (enq.checked or {}).get("rooms")} if n]  # the saved room counts
+    facts = "\n".join([bot._facts(), enq.render(bot._place_label(prop) if prop else ""), days, *rooms])
     tools = "\n".join([json.dumps(c.get("result"), ensure_ascii=False, default=str) for c in calls] + tool_texts)
     paid = enq.paid or any(b.status == "paid" for b in bot.repo.list_bookings(phone=phone, limit=20))
     return Sources(tools=tools, facts=facts, guest="\n".join([*said, guest_text]), paid=paid,
                    names=guest_names(bot, phone, enq))
+
+
+def asks_details(sentence: str) -> bool:
+    """f) The AI's sentence asks the guest for a booking detail (place, dates, persons, rooms, name, mobile)."""
+    return bool(ASKING.search(sentence) and DETAIL.search(sentence))
+
+
+def drop_detail_asks(reply: str) -> str:
+    """f) Remove the AI's own sentences that ask for booking details: the code's open step asks with the owner's words.
+    '' when nothing is left."""
+    lines = []
+    for line in reply.split("\n"):
+        kept = [s for s in re.split(r"(?<=[.!?])\s+", line) if s.strip() and not asks_details(s)]
+        if kept:
+            lines.append(" ".join(kept))
+    text = "\n".join(lines).strip()
+    return text if re.search(r"[A-Za-z0-9]", text) else ""
+
+
+def repeats_tools(reply: str) -> bool:
+    """g) Tools sent messages this turn and the AI's line looks like a copy of them: an amount, a link, a date, the words
+    summary / payment / advance / link, or more than 25 words."""
+    return bool(AMOUNT.search(reply) or LINK.search(reply) or dates_in(reply) or TOOL_WORDS.search(reply)
+                or len(reply.split()) > REPEAT_MAX_WORDS)
 
 
 def is_repeat(bot: Any, phone: str, text: str) -> bool:
