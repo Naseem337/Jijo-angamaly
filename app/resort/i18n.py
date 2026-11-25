@@ -43,6 +43,9 @@ S: dict[str, dict[str, str]] = {
     "ask_location": _t(*["Sure, Kindly confirm the Location 📍\n{towns} ?"] * 4),
     # the client's booking form (2026-11-17), always this English template
     "form": _t(*["Please share these details:\n\nCheck in :\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"] * 4),
+    # the form's first line by what the guest asked (owner, 2026-11-26); the rest of the form stays the same
+    "form_head_price": _t(*["To check the price, please share these details:"] * 4),
+    "form_head_availability": _t(*["To check availability, please share these details:"] * 4),
     # asked once, only when a room will hold 3 adults (owner, 2026-11-24); the extra bed is never added by itself
     "ask_extra_bed": _t(*["Do you need an extra bed?"] * 4),
     # 2 or more rooms will hold 3 adults (owner, 2026-11-25): how many beds, 0 up to that number

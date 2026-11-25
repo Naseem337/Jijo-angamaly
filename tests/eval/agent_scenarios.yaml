@@ -665,3 +665,13 @@
       not_sent: [ask_contact]
     - guest: "English please"
       not_sent: [ask_contact]
+
+# ───────────────────────── form with a reason (owner, 2026-11-26) ─────────────────────────
+- id: price_ask_sends_price_form  # place known, no dates: get_price / update_enquiry(reason=price) send the form
+  turns:
+    - guest: "Alleppey"
+      expect_sent: [form]
+      expect_text: "Please share these details:"
+    - guest: "let me know the price"
+      expect_text: "To check the price, please share these details:"
+      must_not: ["₹"]

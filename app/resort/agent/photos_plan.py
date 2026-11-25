@@ -282,7 +282,20 @@ def queue_steps(out: Outbox, steps: list[tuple[RoomType | None, list[str]]], bot
     return count
 
 
-def open_step(bot: Any, enq: Enquiry, lang: str) -> tuple[str, str] | None:
+FORM_REASONS = ("booking", "price", "availability")
+
+
+def form_text(bot: Any, lang: str, got: dict[str, Any], reason: str = "booking") -> str:
+    """The owner's form with only the missing lines. Its first line says why it is asked (owner, 2026-11-26):
+    price -> 'To check the price, ...', availability -> 'To check availability, ...', booking -> unchanged."""
+    text = bot._missing_form(lang, got)
+    if reason in ("price", "availability"):
+        head = t("form", lang).split("\n", 1)[0]
+        text = text.replace(head, t(f"form_head_{reason}", lang), 1)
+    return text
+
+
+def open_step(bot: Any, enq: Enquiry, lang: str, reason: str = "booking") -> tuple[str, str] | None:
     """The booking step still open, as the owner's text: the location question, the form with the missing lines, or the
     name and mobile ask. None when nothing is waiting for the guest."""
     step = enq.next_step
@@ -291,7 +304,7 @@ def open_step(bot: Any, enq: Enquiry, lang: str) -> tuple[str, str] | None:
     if step == "ask_details" and enq.missing:
         got = {"check_in": bool(enq.check_in), "check_out": bool(enq.check_out), "persons": bool(enq.adults),
                "rooms": enq.rooms or 0}
-        return "form", bot._missing_form(lang, got)
+        return "form", form_text(bot, lang, got, reason)
     if step == "ask_extra_bed":
         key = "ask_extra_beds" if int((enq.checked or {}).get("extra_bed_max") or 1) > 1 else "ask_extra_bed"
         return key, t(key, lang)
@@ -305,9 +318,9 @@ STEP_LANGS = ("en", "mn", "tn", "hn")  # the i18n codes of the 4 reply languages
 
 def step_said(bot: Any, phone: str, enq: Enquiry, out: Outbox) -> bool:
     """The open step's owner text already went in this conversation, in ANY language (eval 2026-11-25: the name ask
-    went in Manglish, then again in English after 'Can u speak in english')."""
-    return any((s := open_step(bot, enq, code)) is not None and already_said(bot, phone, out, s[1])
-               for code in STEP_LANGS)
+    went in Manglish, then again in English after 'Can u speak in english'), and a form counts with any first line (price / availability / booking)."""
+    return any((s := open_step(bot, enq, code, why)) is not None and already_said(bot, phone, out, s[1])
+               for code in STEP_LANGS for why in FORM_REASONS)
 
 
 def queue_open_step(bot: Any, phone: str, enq: Enquiry, lang: str, out: Outbox, *, dates_line: bool = True) -> None:

@@ -67,7 +67,7 @@ def test_a_tool_call_is_run_its_result_is_fed_back_and_the_final_text_is_the_ans
 
 def test_a_failed_tool_result_is_fed_back_as_an_error(world):
     w = world
-    res, _ = go(w, "price?", tool("get_price"), reply("Which dates, sir?"))
+    res, _ = go(w, "where is it?", tool("send_map"), reply("Which resort, sir?"))  # no resort known: it fails
     assert w.llm.calls[1].messages[-1].is_error and json.loads(w.llm.calls[1].messages[-1].content)["ok"] is False
 
 
@@ -82,8 +82,8 @@ def test_several_tool_calls_in_one_reply_all_run_in_order(world):
 
 def test_at_most_4_rounds_of_tool_calls_run(world):
     w = world
-    script = [tool("get_price", call_id=f"c{i}") for i in range(MAX_ROUNDS + 1)]  # the AI never stops asking
-    res, box = go(w, "price?", *script)
+    script = [tool("send_map", call_id=f"c{i}") for i in range(MAX_ROUNDS + 1)]  # the AI never stops asking
+    res, box = go(w, "where is it?", *script)
     assert MAX_ROUNDS == 4 and res.rounds == 4 and res.hit_limit
     assert len(res.calls) == 4 and w.llm.script == []  # the 5th reply's call is not run
     assert len(w.llm.calls) == 6  # 5 + the never-silent second ask (live test 2026-11-25)

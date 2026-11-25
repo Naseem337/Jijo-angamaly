@@ -111,11 +111,14 @@ TOOL_SCHEMAS = [
             "extra_beds": {"type": "integer", "description": "only the guest's answer to the extra-bed question (0 = "
                                                              "no) or an extra bed they ask for themselves"},
             "early_checkin": {"type": "boolean", "description": "true only if the guest asked for early check-in"},
+            "reason": {"type": "string", "enum": list(pp.FORM_REASONS),
+                       "description": "what the guest asked: price (a rate or cost), availability (are rooms free), "
+                                      "booking (anything else; the default). Sets the form's first line."},
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "get_price",
         "Every question about price, rate, cost, total or advance (e.g. 'cost of the cottage'). Answers for the stay "
-        "already given (or on the open link) and sends the price message. No stay known yet → update_enquiry instead.",
+        "already given (or on the open link) and sends the price message. No stay known yet: it sends the form for the price itself.",
         {"type": "object", "properties": {
             "room_type": {"type": "string", "description": "only if the guest named a room type"},
             "language": LANGUAGE_FIELD}}),
@@ -678,7 +681,8 @@ class AgentTools:
                 if len(self.out.keys) > start:
                     return done(True, {"missing": enq.missing, **facts}, SENT_NOTE)
             got = {"check_in": bool(ci), "check_out": bool(co), "persons": bool(adults), "rooms": wanted}
-            self.out.text("form", bot._missing_form(lang, got))
+            reason = str(args.get("reason") or "booking")
+            self.out.text("form", pp.form_text(bot, lang, got, reason if reason in pp.FORM_REASONS else "booking"))
             return done(True, {"missing": enq.missing}, SENT_NOTE)
 
         # 4. everything is known: the room check
@@ -1032,9 +1036,10 @@ class AgentTools:
             adults, children, wanted = held["adults"], 0, int(held.get("rooms") or 0)
             pref = held["room_type_ids"][0] if len(set(held["room_type_ids"])) == 1 else ""
             early = any("Early check-in" in (b.notes or "") for b in bot._open_hold(phone))
-        else:
-            return self._result(False, {"problem": "no stay is known yet"}, start, enq,
-                                "Ask for the missing details with update_enquiry (the owner's form is sent for you).")
+        else:  # no stay yet: the form goes at once, headed 'To check the price' (owner, 2026-11-26)
+            result = self.update_enquiry({"language": style, "reason": "price"})
+            result["sent"] = self.out.keys[start:]
+            return result
         if prop is None:
             return self._result(False, {"problem": "unknown resort"}, start, enq, "Call update_enquiry first.")
         named = str(args.get("room_type") or "").strip()

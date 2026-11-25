@@ -380,9 +380,8 @@ def test_get_price_on_a_room_that_is_not_free_says_so(world):
 
 
 def test_get_price_with_no_stay_known_asks_for_the_details(world):
-    result, texts = price(world)
-    assert not result["ok"] and texts == {} and "update_enquiry" in result["note"]
-    assert result["next_step"] == "ask_location"
+    result, texts = price(world)  # no place yet: the location question goes at once (owner, 2026-11-26)
+    assert result["sent"] == ["ask_location"] and result["next_step"] == "ask_location"
 
 
 def test_get_price_after_the_link_uses_the_stay_on_the_link_and_changes_nothing(world):
