@@ -188,7 +188,48 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             return [guard.BOOKING_RETRY]
         return []
 
-    reply, src, blocked = "", None, False
+    def polish(reply: str, src: Any) -> tuple[str, bool]:
+        """The AI's own line through the quiet guards; (line, the AI asked for booking details itself)."""
+        if reply and src is not None:
+            reply = guard.clean(reply, src)  # d) provider name, booking ids, other scripts, old links, the name
+        asked = False  # the AI asked for booking details itself: the code's open step takes its place
+        if reply:
+            kept = guard.drop_detail_asks(reply)  # f) the code's open step asks for the details, not the AI
+            asked, reply = kept != reply, kept
+        if reply:  # h) i) j) fix round 2
+            reply = guard.drop_hold_talk(reply)  # never explain the hold or when the link expires
+            if not tools.sending_ran:
+                reply = guard.drop_false_sent(reply)  # "sent again" / "informed the team" with nothing sent
+            if not fresh:
+                reply = guard.mid_chat_greeting(reply)  # "How may I assist you?" only as the first greeting
+                reply = guard.drop_sir(reply)  # live test: 'sir' / 'madam' only in the first reply of a chat
+        if reply and guard.is_repeat(bot, phone, reply) and not guard.LINK.search(reply):
+            log.info("Guard: the AI's line was already sent to %s; dropped", phone[-4:])  # e)
+            reply = ""
+        return reply, asked
+
+    def second_chance() -> str:
+        """Nothing would go out: the AI is asked once more (never shown to the guest). Its tools run as usual; its line
+        passes every guard (a line that still fails is dropped, never retried)."""
+        if llm is None or failure is not None:
+            return ""
+        try:
+            if messages and messages[-1].role == "user":
+                messages[-1].content += "\n\n" + SECOND_CHANCE
+            else:
+                messages.append(ChatMessage("user", SECOND_CHANCE))
+            line = own(ask())
+            found, src2 = check(line)
+            if found or booking(line):
+                return ""
+            if guard.style_problems(line):
+                line = guard.fix_style(line)
+            return polish(line, src2)[0]
+        except Exception as exc:  # the AI failing here: the code's fallback still answers
+            log.warning("Second chance failed for %s: %s", phone[-4:], exc)
+            return ""
+
+    reply, src, blocked, booking_dropped = "", None, False, False
     try:
         if llm is None:
             raise RuntimeError("no LLM configured")
@@ -210,7 +251,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
                 result.guard = result.guard + found
             elif booking(reply):  # still answering booking information itself: dropped, the code's open step goes
                 log.info("Guard: booking talk without update_enquiry for %s; dropped", phone[-4:])
-                reply = ""
+                reply, booking_dropped = "", True
             elif guard.style_problems(reply):  # still too long or banned: cut, never a handoff
                 reply = guard.fix_style(reply)
     except Exception as exc:  # an LLM outage or a crash must never leave the guest unanswered
@@ -233,32 +274,29 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             outbox.staff("staff:guard", bot.handoff_summary(
                 phone, {"lang": lang}, "the bot's reply failed its checks twice: " + " | ".join(result.guard)[:600]),
                 bot.staff_numbers(enq.place))
-        if reply and src is not None:
-            reply = guard.clean(reply, src)  # d) provider name, booking ids, other scripts, old links, the name
-        asked = False  # the AI asked for booking details itself: the code's open step takes its place
-        if reply:
-            kept = guard.drop_detail_asks(reply)  # f) the code's open step asks for the details, not the AI
-            asked, reply = kept != reply, kept
-        if reply:  # h) i) j) fix round 2
-            reply = guard.drop_hold_talk(reply)  # never explain the hold or when the link expires
-            if not tools.sending_ran:
-                reply = guard.drop_false_sent(reply)  # "sent again" / "informed the team" with nothing sent
-            if not fresh:
-                reply = guard.mid_chat_greeting(reply)  # "How may I assist you?" only as the first greeting
-        if reply and guard.is_repeat(bot, phone, reply) and not guard.LINK.search(reply):
-            log.info("Guard: the AI's line was already sent to %s; dropped", phone[-4:])  # e)
-            reply = ""
+        reply, asked = polish(reply, src)
         result.reply = reply
         if reply:  # design section 4: the AI's own line first, then the tools' messages in their order
             outbox.prepend_text("ai", reply)
         if outbox.spoke and not tools.no_step and (step := due_step(bot, phone, enq, lang, outbox,
                                                                     fresh=fresh and not result.calls, asked=asked)):
             outbox.text(*step)  # the open booking step always closes the turn (fix round 1)
-        if not outbox.spoke:  # never silent: see quiet_reply (fix round 5: no step re-sent after 'ok' / 'thanks')
-            if step := quiet_reply(bot, phone, enq, lang):
-                outbox.text(*step)
+        if not outbox.spoke:  # NEVER SILENT (live test 2026-11-25): every guest message gets at least one reply
             result.outcome = "never_silent"
+            wanted = asked or booking_dropped  # the AI's own booking ask / answer was taken out: the step IS wanted
+            if step := quiet_reply(bot, phone, enq, lang, wanted=wanted):  # a pay nudge / a step not sent lately / 'Sure.'
+                outbox.text(*step)
+            else:
+                second = second_chance()  # a) the AI once more (internal: the guest never sees the ask)
+                if second:
+                    result.reply = second
+                    outbox.prepend_text("ai", second)
+                if not outbox.spoke:  # b) still nothing: the open step again (a repeat is allowed), else say again
+                    enq = Enquiry.load(bot.repo, phone)
+                    outbox.text(*(open_step_now(bot, phone, enq, lang, wanted=wanted)
+                                  or ("say_again_short", t("say_again_short", lang))))
     outbox.dedupe()  # never the same (or nearly the same) text twice in one turn
+    outbox.move_last(STEP_TEXT_KEYS)  # the open step (name ask, form, link) is always the LAST message of the turn
     outbox.flush()
     result.sent = outbox.keys
     return result
@@ -268,6 +306,12 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
 STEP_KEYS = {"ask_location": ("ask_location",), "ask_details": ("form", "past_date"),
              "ask_extra_bed": ("ask_extra_bed", "ask_extra_beds"), "ask_contact": ("ask_contact",),
              "pay": ("pay", "hold_pay")}
+# the step texts that always close a turn (moved after the photos / labels / price: live test 2026-11-25)
+STEP_TEXT_KEYS = ("ask_location", "form", "ask_extra_bed", "ask_extra_beds", "ask_contact", "pay", "hold_pay",
+                  "pay_nudge")
+SECOND_CHANCE = ("[SYSTEM] You sent nothing and the guest is waiting. Reply to the guest's last message in one short "
+                 "sentence. Call a tool ONLY if their message clearly needs one (e.g. they gave details or asked for "
+                 "photos/link).")
 
 
 def due_step(bot: Any, phone: str, enq: Enquiry, lang: str, outbox: Outbox, *, fresh: bool = False,
@@ -303,24 +347,33 @@ def _recent(bot: Any, phone: str, text: str, link: Any = None) -> bool:
     return any(near_same(text, x) or (url and url in x) for x in recent)
 
 
-def quiet_reply(bot: Any, phone: str, enq: Enquiry, lang: str) -> tuple[str, str] | None:
-    """Nothing at all went out this turn (the AI wrote nothing, no tool spoke: an 'ok' / 'thanks'). Fix round 5:
-    - an open unpaid link: pay_nudge once; when pay_nudge or the link is among the last 2 messages, a short 'Sure sir.'
-    - else the open step, when it is not among the last 2 messages
-    - else 'Sure sir.' (nothing when that was the last message); a first message with nothing known: say_again."""
+def quiet_reply(bot: Any, phone: str, enq: Enquiry, lang: str, *, wanted: bool = False) -> tuple[str, str] | None:
+    """Nothing at all went out this turn (the AI wrote nothing, no tool spoke). The code's own short answer, or None
+    (then run_turn asks the AI once more, then re-sends the open step / says 'say again': never silent):
+    - an open unpaid link: pay_nudge once (not when pay_nudge or the link is among the last 2 messages)
+    - an open step not among the last 2 messages: that step
+    - NO step open: 'Sure.' (not when 'Sure.' was the last message); a first message: None
+    'Sure.' never answers while a step is open (live test 2026-11-25: 'what sure' / 'send' got 'Sure' or nothing)."""
     recent = pp.recent_texts(bot, phone, 2)
-    sure = ("sure", t("sure", lang))
     if (link := live_link(bot, phone)) is not None and enq.next_step == "pay":
         nudge = t("pay_nudge", lang)
-        if _recent(bot, phone, nudge, link):
-            return None if recent and near_same(recent[-1], sure[1]) else sure
-        return "pay_nudge", nudge
-    step = pp.open_step(bot, enq, lang)
-    if step is not None and not _recent(bot, phone, step[1]):
-        return step
+        return None if _recent(bot, phone, nudge, link) else ("pay_nudge", nudge)
+    # a step is open while a booking is under way, or when this turn's own booking ask / answer was taken out (`wanted`)
+    step = pp.open_step(bot, enq, lang) if (enq.active or wanted) else None
+    if step is not None:
+        return None if _recent(bot, phone, step[1]) else step
     if not greeted(bot, phone):
-        return "say_again", t("say_again", lang)
+        return None
+    sure = ("sure", t("sure", lang))
     return None if recent and near_same(recent[-1], sure[1]) else sure
+
+
+def open_step_now(bot: Any, phone: str, enq: Enquiry, lang: str, *, wanted: bool = False) -> tuple[str, str] | None:
+    """The open step as it is now, even if it was just sent (never silent): the live link's pay text, else the form /
+    name ask / location question / extra-bed question; None when nothing is open."""
+    if (b := live_link(bot, phone)) is not None:
+        return "pay", pay_text(b, lang, bot.clock.now())
+    return pp.open_step(bot, enq, lang) if (enq.active or wanted) else None
 
 
 def _alert_ai_down(bot: Any, outbox: Outbox, phone: str, text: str, enq: Enquiry) -> None:

@@ -21,6 +21,7 @@ def _ignore_local_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TRUECHOICE_INVENTORY_ADAPTER", "")  # tests use the mock stock
     monkeypatch.setenv("AGENT_TEST_PHONES", "")  # the owner-test allowlist and staff override never leak into tests
     monkeypatch.setenv("STAFF_ALERT_PHONES", "")
+    monkeypatch.setenv("AGENT_PHOTO_GAP_S", "0")  # no 1 s wait after photos in tests
 
 
 @pytest.fixture

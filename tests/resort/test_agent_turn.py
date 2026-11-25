@@ -85,8 +85,9 @@ def test_at_most_6_rounds_of_tool_calls_run(world):
     script = [tool("get_price", call_id=f"c{i}") for i in range(MAX_ROUNDS + 1)]  # the AI never stops asking
     res, box = go(w, "price?", *script)
     assert MAX_ROUNDS == 6 and res.rounds == 6 and res.hit_limit
-    assert len(res.calls) == 6 and len(w.llm.calls) == 7 and w.llm.script == []  # the 7th reply's call is not run
-    assert len([m for m in w.llm.calls[-1].messages if m.role == "tool"]) == 6
+    assert len(res.calls) == 6 and w.llm.script == []  # the 7th reply's call is not run
+    assert len(w.llm.calls) == 8  # 7 + the never-silent second ask (live test 2026-11-25)
+    assert len([m for m in w.llm.calls[6].messages if m.role == "tool"]) == 6
     assert res.outcome == "never_silent"  # nothing was said: the open step goes
 
 
@@ -134,9 +135,8 @@ def test_no_reply_marker_from_the_ai_is_not_sent(world):
 
 def test_nothing_sent_means_the_open_step_goes(world):
     w = world
-    res, box = go(w, "hmm", reply("[no reply]"))
-    assert res.outcome == "never_silent" and res.sent == ["ask_location"]
-    assert texts(box)["ask_location"] == "Sure, Kindly confirm the Location 📍\nAlleppey or Munnar ?"
+    res, box = go(w, "hmm", reply("[no reply]"))  # nothing is open (live test 2026-11-25): never silent -> say again
+    assert res.outcome == "never_silent" and res.sent == ["say_again_short"]
     Enquiry(place=w.p1.id).save(w.repo, GUEST)
     again, box = go(w, "hmm", reply(""))
     assert again.outcome == "never_silent" and again.sent == ["form"]
@@ -148,7 +148,8 @@ def test_nothing_sent_and_nothing_open_asks_to_say_it_again(world):
     Enquiry(place=w.p1.id, check_in=date(2026, 11, 10), check_out=date(2026, 11, 12), adults=2, booking_id="x",
             paid=True, checked={"available": True}).save(w.repo, GUEST)
     res, box = go(w, "hmm", reply(""))
-    assert res.outcome == "never_silent" and res.sent == ["say_again"] and texts(box)["say_again"].startswith("Sorry")
+    assert res.outcome == "never_silent" and res.sent == ["say_again_short"]
+    assert texts(box)["say_again_short"] == "Sorry, could you say that again?"
 
 
 def test_an_answer_alone_is_enough_no_extra_step(world):
@@ -194,7 +195,7 @@ def test_no_llm_at_all_is_ai_down(world):
 def test_the_llm_failing_after_a_tool_already_spoke_does_not_add_ai_down_text(world):
     w = world
     res, box = go(w, ASK, tool("update_enquiry", **STAY), LLMError("mock", "down"))
-    assert res.outcome == "ai_down" and res.sent == ["rooms_ok", "rooms_plain", "room_label", "ask_contact", "staff:ai_down"]
+    assert res.outcome == "ai_down" and res.sent == ["rooms_ok", "rooms_plain", "room_label", "staff:ai_down", "ask_contact"]
 
 
 # --------------------------------------------------------------------------- what the AI sees
@@ -253,12 +254,12 @@ def test_the_owner_rules_are_in_the_prompt(world):
         assert line in system, line
 
 
-def test_every_call_offers_the_11_tools_at_low_temperature(world):
+def test_every_call_offers_the_12_tools_at_low_temperature(world):
     w = world
     go(w, ASK, tool("update_enquiry", **STAY), reply("Done."))
     assert len(w.llm.calls) == 2
     for call in w.llm.calls:
-        assert call.tools == TOOL_SCHEMAS and len(call.tools) == 11
+        assert call.tools == TOOL_SCHEMAS and len(call.tools) == 12
         assert call.temperature == 0.3 and call.temperature <= 0.3 and call.max_tokens == 700
 
 

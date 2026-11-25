@@ -216,9 +216,9 @@ def test_a_full_turn_gate_ai_tools_guard_outbox_in_order(agent):
     assert out == "answered"
     texts = agent.wa.texts()
     assert texts[0] == "Yes, there is a pool."  # the AI's line first
-    assert texts[1:5] == ["Yes, rooms are available for your dates.", "For 2 persons: 1 room(s).", "*Deluxe*",
-                          "Please share your name and mobile number to proceed."]
-    assert texts[5].startswith("Deluxe: ₹4,000 per room per night.")  # the tool messages in queue order
+    assert texts[1:4] == ["Yes, rooms are available for your dates.", "For 2 persons: 1 room(s).", "*Deluxe*"]
+    assert texts[4].startswith("Deluxe: ₹4,000 per room per night.")  # the tool messages in queue order
+    assert texts[5] == "Please share your name and mobile number to proceed."  # the open step always goes last
     assert agent.wa.texts(STAFF) == []
     stored = [r.text for r in agent.repo.list_chat(GUEST) if r.direction == "out"]
     assert stored == texts

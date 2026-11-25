@@ -182,7 +182,7 @@ def test_a_greeting_the_ai_repeats_after_restart_is_never_sent_again(world):
     world.repo.add_chat(ChatMessage(GUEST, "in", "restart", world.clock.now(), "text"))
     _restart(world.bot, GUEST, bot_outbox(world.bot, GUEST))
     res, _ = go(world, "I need a room", reply("Hi, How may I assist you?"), live=True)
-    assert res.reply == "Hi sir."  # not a first greeting any more: the mid-chat rule applies
+    assert res.reply == "Hi."  # not a first greeting any more: the mid-chat rule applies
     assert world.wa.texts(GUEST).count("Hi, How may I assist you?") == 1
 
 
@@ -223,15 +223,13 @@ def test_the_policy_rule_is_in_the_prompt():
 # --------------------------------------------------------------------------- 0g) sir
 
 
-def test_the_ais_sir_is_never_taken_out_mid_chat(world):
-    go(world, "Alleppey 10 to 12 nov 2 adults", tool("update_enquiry", **STAY), reply("Yes sir, rooms are free."),
-       live=True)
+def test_the_old_send_paths_sir_filter_never_touches_the_first_reply(world):  # 'sir' stays in the FIRST reply
     go(world, "is there a pool?", reply("Yes sir, there is a pool."), live=True)
-    assert "Yes sir, there is a pool." in world.wa.texts(GUEST)
+    assert world.wa.texts(GUEST) == ["Yes sir, there is a pool."]
 
 
-def test_the_prompt_says_sir_at_the_start_and_in_short_greetings():
-    assert '"sir" once at the start of a chat and in short greetings.' in SYSTEM
+def test_the_prompt_says_sir_only_in_the_very_first_reply():
+    assert "Say 'sir' (or 'madam') only in your very first reply of the chat. Never again after that." in SYSTEM
 
 
 # --------------------------------------------------------------------------- 0h) the judge
@@ -298,7 +296,7 @@ def test_a_short_fine_reply_is_not_retried(world):
 
 def test_the_new_talk_rules_are_in_the_prompt():
     assert "Reply like a busy, warm front-desk person on WhatsApp, not a bot." in SYSTEM
-    assert "Guest: is there a pool? (FACTS says yes) → Yes sir, there is a pool." in SYSTEM
+    assert "Guest: is there a pool? (FACTS says yes) → Yes, there is a pool." in SYSTEM
 
 
 # --------------------------------------------------------------------------- Part 2: rooms, labels, photos

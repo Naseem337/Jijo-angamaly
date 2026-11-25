@@ -458,10 +458,11 @@ def test_recall_old_chat_with_nothing_earlier(world):
 # --------------------------------------------------------------------------- the schemas and the dispatcher
 
 
-def test_there_are_11_schemas_that_say_when_to_use_each_tool():
+def test_there_are_12_schemas_that_say_when_to_use_each_tool():
     names = [x.name for x in TOOL_SCHEMAS]
     assert names == ["update_enquiry", "get_price", "send_photos", "send_map", "create_booking", "check_payment",
-                     "send_payment_link", "my_bookings", "change_name", "talk_to_owner", "recall_old_chat"]
+                     "send_payment_link", "my_bookings", "change_name", "talk_to_owner", "repeat_step",
+                     "recall_old_chat"]
     assert tools_module.TOOLS is TOOL_SCHEMAS
     for spec in TOOL_SCHEMAS:
         assert spec.description.startswith("Use this") and len(spec.description) > 60, spec.name  # WHEN, not how

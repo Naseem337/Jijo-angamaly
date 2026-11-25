@@ -121,7 +121,7 @@ def test_a_link_not_from_this_turn_is_stripped(world):
 
 def test_a_reply_in_another_script_only_is_dropped_and_the_open_step_goes(world):
     res, box = go(world, "hmm", reply("നന്ദി"))
-    assert res.outcome == "never_silent" and res.sent == ["ask_location"]
+    assert res.outcome == "never_silent" and res.sent == ["say_again_short"]  # nothing open: never silent
 
 
 def test_clean_keeps_a_link_that_this_turns_tools_gave():

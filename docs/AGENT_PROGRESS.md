@@ -250,6 +250,31 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
 - tests/conftest.py blanks AGENT_TEST_PHONES and STAFF_ALERT_PHONES (a local .env never leaks into tests). Tests:
   tests/resort/test_agent_tester_switch.py.
 
+## Live-test fixes (2026-11-25, owner test on the test number)
+- Why "What sure" / "Send" got nothing (from the code; no Railway CLI here to read the logs): round 5's `quiet_reply`
+  returned NOTHING when the last bot message was already "Sure sir." and the open step was among the last 2 messages,
+  and the AI had written nothing (or a guard dropped its line). The turn then ended with an empty outbox. Log lines
+  to confirm on Railway: `Resort message wamid...: never_silent` with no send after it, `Guard: ... dropped`.
+- NEVER SILENT: when a turn would send nothing, (`turn.quiet_reply` first: pay_nudge / a step not sent lately / "Sure."
+  only when NO step is open) -> a) the AI is asked once more (internal `SECOND_CHANCE` message, never shown; its tools run,
+  its line passes every guard) -> b) still nothing: the open step again (`open_step_now`, a repeat is allowed; the live
+  link's pay text first) or "Sorry, could you say that again?" (`say_again_short`). An open step = a booking under way
+  (`Enquiry.active`) or this turn's own booking ask / answer was dropped by the guard.
+- Unclear asks: new tool `repeat_step` (12 tools now; ONCE): the open step again (link / form / name ask / location /
+  extra bed), repeat allowed; the AI decides ("ok send me", "send", "what", "what sure"); NOT for a plain ok / thanks.
+  Prompt: "... → repeat_step. Never just "Sure"."
+- Photo order: `Outbox.flush` sends one item after the other (each send returns first; photos go one by one in
+  `bot._send_photos`) and a text right after photos waits `AGENT_PHOTO_GAP_S` (default 1 s; tests 0). The open-step
+  texts (`STEP_TEXT_KEYS`: ask_location, form, extra bed, ask_contact, pay, hold_pay, pay_nudge) are moved to the END of
+  every turn (`Outbox.move_last`), so ask_contact is always the last message of the room-check flow.
+- "sir" only in the first reply: after the first reply of a conversation (`fresh`) the guard removes sir / madam from the
+  AI's line and fixes the sentence (`guard.drop_sir`); MID_CHAT_HI = "Hi."; fallbacks "Sure." / "Sorry, could you say that
+  again?" (all 4 languages); the prompt has one rule ("Say 'sir' (or 'madam') only in your very first reply of the chat.
+  Never again after that."); the owner's fixed texts in i18n.py are untouched (guest_called keeps its "sir").
+- No offers: banned phrases + "let me know if", "if you want to see", "I can also", "would you like".
+- Tests: tests/resort/test_agent_live_fixes.py; earlier tests moved to the new rules (Sure. / Hi. / say_again_short,
+  the open step last, 12 tools, never silent instead of nothing).
+
 ## Next
 - AI-6: the owner tests on the test number (Railway: AGENT_MODE=agent + AGENT_TEST_PHONES + STAFF_ALERT_PHONES).
 - Run the real-AI eval (the user runs `scripts\eval_agent.py`), then fix what fails with general rules.

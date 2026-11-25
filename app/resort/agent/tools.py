@@ -68,7 +68,8 @@ DATE_FIELD = {"type": "object",
               "required": ["day"]}
 
 # the tools that send something to the guest or the team: each runs at most ONCE per turn (fix round 2)
-ONCE_TOOLS = ("send_payment_link", "send_photos", "create_booking", "check_payment", "talk_to_owner", "send_map")
+ONCE_TOOLS = ("send_payment_link", "send_photos", "create_booking", "check_payment", "talk_to_owner", "send_map",
+              "repeat_step")
 ONCE_NOTE = "Already done this turn: nothing more was sent. Do not call it again and do not repeat it."
 # talk_to_owner reasons after which the guest gets ONLY the fixed text: the AI's own line and the open step are dropped
 QUIET_REASONS = ("cannot_answer", "call_request", "other", "guest_called")
@@ -202,6 +203,13 @@ TOOL_SCHEMAS = [
                                                             "full refund'"},
             "language": LANGUAGE_FIELD},
          "required": ["reason"]}),
+    ToolSpec(
+        "repeat_step",
+        "Use this when a booking step is open (CURRENT ENQUIRY next step: the form, the name and mobile ask, or the "
+        "payment link) and the guest asks for it again or writes something unclear about it ('ok send me', 'send', "
+        "'what', 'what sure', 'send again', 'where?'): that step is sent again with the owner's words (a repeat is "
+        "allowed here). NOT for a plain 'ok' / 'thanks' that only acknowledges.",
+        {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "recall_old_chat",
         "Use this only when the guest refers to something said or sent in an EARLIER conversation ('as I told you', 'the "
@@ -1349,6 +1357,27 @@ class AgentTools:
                             + " Never agree to anything yourself, never promise a call back or say the team will "
                             "contact them.")
 
+    # ------------------------------------------------------------------ repeat_step
+
+    def repeat_step(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The open booking step again (live test 2026-11-25: 'ok send me' / 'send' / 'what sure' got nothing or 'Sure'):
+        the live payment link, else the location question / form / extra-bed question / name and mobile ask. A repeat is
+        allowed here: the guest asked for it."""
+        bot = self.bot
+        start, enq, style, lang = self._ctx(args)
+        now = bot.clock.now()
+        if (b := live_link(bot, self.phone)) is not None:
+            self.out.text("pay", pay_text(b, lang, now))
+            enq.booking_id, enq.link_open = b.id, True
+            enq.save(bot.repo, self.phone)
+            return self._result(True, {"step": "pay"}, start, enq, SENT_NOTE)
+        step = pp.open_step(bot, enq, lang) if enq.active else None  # only while a booking is under way
+        if step is None:
+            return self._result(False, {"problem": "no booking step is open"}, start, enq,
+                                "Nothing is waiting for the guest: answer their message in one short sentence.")
+        self.out.text(*step)
+        return self._result(True, {"step": step[0]}, start, enq, SENT_NOTE)
+
     # ------------------------------------------------------------------ recall_old_chat (read only)
 
     def recall_old_chat(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -1377,7 +1406,8 @@ class AgentTools:
                     "send_map": self.send_map, "create_booking": self.create_booking,
                     "check_payment": self.check_payment, "send_payment_link": self.send_payment_link,
                     "my_bookings": self.my_bookings, "change_name": self.change_name,
-                    "talk_to_owner": self.talk_to_owner, "recall_old_chat": self.recall_old_chat}
+                    "talk_to_owner": self.talk_to_owner, "recall_old_chat": self.recall_old_chat,
+                    "repeat_step": self.repeat_step}
         start, enq = len(self.out.keys), Enquiry.load(self.bot.repo, self.phone)
         handler = handlers.get(name)
         if handler is None:

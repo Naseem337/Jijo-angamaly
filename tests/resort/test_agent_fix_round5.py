@@ -106,20 +106,25 @@ def test_the_prompt_says_answer_only_what_was_asked():
 # --------------------------------------------------------------------------- 3. no re-sent steps after ok / thanks
 
 
-def test_ok_after_the_name_ask_gets_sure_sir_then_nothing(world):
+def test_ok_after_the_name_ask_gets_the_ais_second_short_line(world):  # live test: never silent, never 'Sure.'
     go(world, ASK, tool("update_enquiry", **STAY), reply(""), live=True)
     world.clock.advance(minutes=1)
-    res, _ = go(world, "ok", reply(""), live=True)
-    assert res.sent == ["sure"] and world.wa.texts(GUEST)[-1] == "Sure sir."
-    world.clock.advance(minutes=1)
-    res, _ = go(world, "ok", reply(""), live=True)
-    assert res.sent == [] and world.wa.texts(GUEST).count(t("ask_contact", "en")) == 1
+    res, _ = go(world, "ok", reply(""), reply("Great, waiting for your details."), live=True)
+    assert res.sent == ["ai"] and "sure" not in res.sent
 
 
-def test_thanks_right_after_the_link_gets_only_sure_sir(world):
+def test_ok_with_no_step_open_gets_sure_then_the_ais_second_line(world):
+    go(world, "is there a pool?", reply("Yes, there is a pool."), live=True)
+    res, _ = go(world, "ok", reply(""), live=True)
+    assert res.sent == ["sure"] and world.wa.texts(GUEST)[-1] == "Sure."
+    res, _ = go(world, "ok", reply(""), reply("You're welcome."), live=True)
+    assert res.sent == ["ai"]
+
+
+def test_thanks_right_after_the_link_resends_the_link_when_the_ai_says_nothing(world):
     book_live(world)
-    res, _ = go(world, "thanks", reply(""), live=True)
-    assert res.sent == ["sure"]
+    res, _ = go(world, "thanks", reply(""), live=True)  # the second ask finds no scripted reply: still never silent
+    assert res.sent == ["pay"]
 
 
 def test_thanks_later_with_an_open_link_gets_the_pay_nudge_once(world):
@@ -129,10 +134,8 @@ def test_thanks_later_with_an_open_link_gets_the_pay_nudge_once(world):
     res, _ = go(world, "ok thanks", reply(""), live=True)
     assert res.sent == ["pay_nudge"]
     assert world.wa.texts(GUEST)[-1] == "Please complete the advance payment to confirm your booking."
-    res, _ = go(world, "ok", reply(""), live=True)
-    assert res.sent == ["sure"]
-    res, _ = go(world, "ok", reply(""), live=True)
-    assert res.sent == []
+    res, _ = go(world, "ok", reply(""), reply("Thank you."), live=True)  # the nudge just went: the AI's own short line
+    assert res.sent == ["ai"]
 
 
 def test_an_answer_does_not_resend_a_step_among_the_last_two_messages(world):

@@ -14,7 +14,9 @@
        summary / payment / advance / link, or more than 25 words (it would repeat the tools' messages)
     fix round 2 (sentences dropped from the AI's own line): the hold or the link's expiry explained; "sent / shared /
        resent / passed your question / informed the team" when no sending tool ran; "How may I assist you" anywhere
-       but the first greeting (nothing left -> "Hi sir."); "owner" is said as "team"
+       but the first greeting (nothing left -> "Hi."); "owner" is said as "team"
+    live test 2026-11-25: "sir" / "madam" only in the first reply of a conversation (`drop_sir` after it); more banned
+       offers ("let me know if", "if you want to see", "I can also", "would you like")
     fix round 3 (short, human replies): more than 2 sentences / 30 words, or a banned phrase ("anything else", "feel
        free", "system", "owner" ...) -> ONE retry (too long: "Too long. Say the same in under 20 words ..."); still bad ->
        the banned sentences are dropped and a reply still too long keeps its first sentence (never a handoff)
@@ -69,7 +71,7 @@ TOOL_WORDS = re.compile(r"\b(?:summary|payment|advance|link)\b", re.IGNORECASE)
 REPEAT_MAX_WORDS = 25
 # fix round 2 (all read the AI's own reply only)
 GREETING_ASK = re.compile(r"\bhow (?:may|can|could) i (?:assist|help)(?: you)?\b", re.IGNORECASE)
-MID_CHAT_HI = "Hi sir."
+MID_CHAT_HI = "Hi."  # live test 2026-11-25: 'sir' only in the first reply of a chat
 SENT_CLAIM = re.compile(r"\b(?:sent|re-?sent|shared|forwarded|passed (?:on )?(?:it|your|the|this)\b|passed it on|"
                         r"informed the (?:owner|team|manager|staff))", re.IGNORECASE)
 HOLD_TALK = re.compile(r"\b(?:expir\w*|valid (?:for|till|until)|time limit|hold (?:is|will|ends|runs)|"
@@ -252,7 +254,7 @@ def drop_false_sent(reply: str) -> str:
 
 def mid_chat_greeting(reply: str) -> str:
     """'How may I assist you?' is only the first greeting of a conversation: anywhere else that sentence is dropped, and
-    a reply left empty by it becomes a short 'Hi sir.' (the code's open step follows)."""
+    a reply left empty by it becomes a short 'Hi.' (the code's open step follows)."""
     if not GREETING_ASK.search(reply):
         return reply
     return drop_sentences(reply, lambda s: bool(GREETING_ASK.search(s))) or MID_CHAT_HI
@@ -281,7 +283,9 @@ MAX_SENTENCES, MAX_WORDS = 1, 20  # fix round 5 (was 2 / 30)
 TOO_LONG = "Say it in one short sentence, under 15 words."
 BANNED_PHRASES = ("anything else", "is there anything", "other listings", "other hotels", "other options", "feel free",
                   "don't hesitate", "I'm sorry, I only", "I don't have details", "as an AI", "please note that",
-                  "I can help you with", "system", "automatically", "the tool", "owner")
+                  "I can help you with", "system", "automatically", "the tool", "owner",
+                  # live test 2026-11-25: no offers nobody asked for
+                  "let me know if", "if you want to see", "I can also", "would you like")
 BANNED = re.compile(r"\b(?:" + "|".join(re.escape(p).replace("'", "['’]") for p in BANNED_PHRASES) + r")\b", re.IGNORECASE)
 
 
@@ -356,6 +360,29 @@ def restates_tools(reply: str, tool_texts: list[str]) -> bool:
         return True
     mine = _content(reply)
     return bool(mine) and len(mine & _content(" ".join(tool_texts))) * 2 >= len(mine)
+
+
+# ------------------------------------------------------------------ live test 2026-11-25: 'sir' only at the start
+
+SIR = re.compile(r"[ \t]*,?[ \t]*\b(?:sir|madam|ma'am|maam)\b", re.IGNORECASE)
+
+
+def drop_sir(reply: str) -> str:
+    """'sir' / 'madam' removed from a later reply, the sentence fixed: 'Yes sir, there is a pool.' -> 'Yes, there is a
+    pool.'; 'Thank you, sir.' -> 'Thank you.'; 'Sir, the pool is open.' -> 'The pool is open.'"""
+    lines = []
+    for line in reply.split("\n"):
+        if not SIR.search(line):
+            lines.append(line)
+            continue
+        line = SIR.sub("", line)
+        line = re.sub(r"^[\s,;:.!-]+", "", line)  # a sentence that began with 'Sir,'
+        line = re.sub(r"([.!?])\s*[,;]\s*", r"\1 ", line)
+        line = re.sub(r"[ \t]+([.,!?])", r"\1", line).strip()
+        line = re.sub(r"(^|[.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), line)
+        if re.search(r"[A-Za-z0-9]", line):
+            lines.append(line)
+    return "\n".join(lines).strip()
 
 
 def is_repeat(bot: Any, phone: str, text: str) -> bool:

@@ -13,7 +13,9 @@ dropped when the same text already went out in this conversation (guard.py e); t
 from __future__ import annotations
 
 import logging
+import os
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -54,11 +56,14 @@ class Outbox:
     def __init__(self, phone: str, send_text: Callable[[str, str], object] | None = None,
                  send_photos: Callable[[str, list[str]], object] | None = None, *, dry_run: bool = False,
                  send_staff: Callable[[str, str], object] | None = None,
-                 send_exact: Callable[[str, str], object] | None = None) -> None:
+                 send_exact: Callable[[str, str], object] | None = None, photo_gap_s: float = 0.0,
+                 sleep: Callable[[float], object] = time.sleep) -> None:
         self.phone = phone
         self.dry_run = dry_run
         self._send_text, self._send_photos, self._send_staff = send_text, send_photos, send_staff
         self._send_exact = send_exact
+        self.photo_gap_s = photo_gap_s
+        self._sleep = sleep
         self.queue: list[Item] = []
         self.sent: list[Item] = []  # what went out (dry run: what WOULD have gone out), in order
 
@@ -116,10 +121,19 @@ class Outbox:
             log.info("Outbox: %d repeated text(s) dropped for %s", len(dropped), self.phone[-4:])
         return dropped
 
+    def move_last(self, keys: tuple[str, ...]) -> None:
+        """Texts with these keys (the open booking step) go after everything else queued, in their own order."""
+        self.queue = [i for i in self.queue if i.key not in keys] + [i for i in self.queue if i.key in keys]
+
     def flush(self) -> list[Item]:
-        """Send the queue in order. A dry-run outbox only records. Returns what was sent (or would have been)."""
+        """Send the queue in order. A dry-run outbox only records. Returns what was sent (or would have been). Each send
+        returns before the next one starts (photos one by one); after photos, the next text waits `photo_gap_s` so it
+        reaches the guest after them (live test 2026-11-25: labels and the name ask arrived before the photos)."""
         done: list[Item] = []
-        for item in self.queue:
+        for n, item in enumerate(self.queue):
+            if not self.dry_run and n and self.queue[n - 1].kind == "photos" and item.kind == "text" \
+                    and self.photo_gap_s > 0:
+                self._sleep(self.photo_gap_s)
             if not self.dry_run:
                 if item.kind == "text" and item.key in EXACT_KEYS and self._send_exact is not None:
                     self._send_exact(self.phone, item.text)
@@ -146,7 +160,16 @@ def bot_outbox(bot: Any, phone: str, *, dry_run: bool = False) -> Outbox:
     # the AI's line or the owner's texts
     exact = lambda to, text: _send_exact(bot, to, text)  # noqa: E731
     return Outbox(phone, exact, lambda to, refs: bot._send_photos(to, refs),
-                  dry_run=dry_run, send_staff=lambda to, text: bot.wa.send_text(to, text), send_exact=exact)
+                  dry_run=dry_run, send_staff=lambda to, text: bot.wa.send_text(to, text), send_exact=exact,
+                  photo_gap_s=photo_gap())
+
+
+def photo_gap() -> float:
+    """Seconds a text waits after photos (AGENT_PHOTO_GAP_S, default 1; tests set 0)."""
+    try:
+        return max(0.0, float(os.environ.get("AGENT_PHOTO_GAP_S") or 1.0))
+    except ValueError:
+        return 1.0
 
 
 def _send_exact(bot: Any, phone: str, text: str) -> bool:

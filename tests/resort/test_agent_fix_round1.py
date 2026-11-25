@@ -74,7 +74,8 @@ def test_a_mid_chat_hi_gets_a_short_line_and_the_open_step_from_code(world):
     w.clock.advance(minutes=1)
     res, box = go(w, "hi", reply("Hi sir! To proceed, please share your name and mobile number."),
                   reply("Hi sir! Please share your name and mobile number."), live=True)
-    assert res.sent == ["ai"] and texts(box)["ai"] == "Hi sir!"  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
+    # 'sir' only in the first reply (live test 2026-11-25); the step was the last message and only the AI spoke
+    assert res.sent == ["ai"] and texts(box)["ai"] == "Hi!"
     assert w.wa.texts(GUEST)[-2] == t("ask_contact", "en")
 
 

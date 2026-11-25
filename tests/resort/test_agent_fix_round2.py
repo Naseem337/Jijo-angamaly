@@ -107,10 +107,10 @@ def test_how_may_i_assist_you_only_as_the_first_greeting(world):
     go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
     w.clock.advance(minutes=1)
     res, box = go(w, "hi", reply("Hi, How may I assist you?"))
-    assert res.sent == ["ai"] and texts(box)["ai"] == "Hi sir."  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
+    assert res.sent == ["ai"] and texts(box)["ai"] == "Hi."  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
 
 
-@pytest.mark.parametrize("line,kept", [("Hi sir! How can I help you?", "Hi sir!"), ("How may I assist you?", "Hi sir."),
+@pytest.mark.parametrize("line,kept", [("Hi sir! How can I help you?", "Hi sir!"), ("How may I assist you?", "Hi."),
                                        ("Yes, there is a pool.", "Yes, there is a pool.")])
 def test_the_greeting_question_is_dropped_mid_chat(line, kept):
     assert guard.mid_chat_greeting(line) == kept
@@ -253,7 +253,7 @@ def test_a_sent_claim_with_no_sending_tool_is_dropped_in_the_turn(world):
     go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
     w.clock.advance(minutes=1)
     res, _ = go(w, "did you send it?", reply("Yes, I have sent it again."), live=True)
-    assert "ai" not in res.sent and res.sent == ["sure"]  # fix round 5: the step was just sent -> "Sure sir."
+    assert "ai" not in res.sent and res.sent == ["ask_contact"]  # never silent: the open step again (never "Sure.")
 
 
 @pytest.mark.parametrize("line", ["Your link is open for 10 more minutes.", "Please pay within 15 minutes.",
@@ -317,7 +317,7 @@ def test_the_prompt_has_the_policy_team_and_greeting_rules(world):
     assert ("If the answer is not written in FACTS, you do NOT know it. Call talk_to_owner(cannot_answer). Never answer "
             "policy\n  questions") in system
     assert 'Say "team", never "owner".' in system
-    assert 'A later "hi": only "Hi sir."' in system
+    assert 'A later "hi": only "Hi."' in system
     assert "Never explain the hold or when a link expires." in system
     assert "Never fill month or year yourself" in system
 
