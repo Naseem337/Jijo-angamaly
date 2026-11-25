@@ -847,13 +847,13 @@ def test_a_new_name_after_restart_wins_and_a_15_digit_number_is_refused(world):
     say(w, "Alleppey, 12 dec to 14 dec, 2 people", GUEST,
         tool("check_availability", place="Alleppey", check_in="2026-12-12", check_out="2026-12-14", adults=2),
         reply("[no reply]"))
-    say(w, "Shibil 859002727", GUEST, reply("That mobile number does not look right. Please send it again."))
+    say(w, "Demo Guest 900000002", GUEST, reply("That mobile number does not look right. Please send it again."))
     assert w.repo.list_bookings(phone=GUEST) == []  # 9 digits: no booking
     say(w, "637737289202029", GUEST, reply("Please send a 10 digit mobile number."))
     assert w.repo.list_bookings(phone=GUEST) == []  # 15 digits: never the last 10 of it
     say(w, "9846012345", GUEST, reply("[no reply]"))
     summary = next(x for x in w.wa.texts() if x.startswith("Following are the glimpse of your enquiry"))
-    assert "Guest - Shibil" in summary and "98460 12345" in summary and "Pay - " in summary and "Ie - " not in summary
+    assert "Guest - Demo Guest" in summary and "98460 12345" in summary and "Pay - " in summary and "Ie - " not in summary
 
 
 def test_a_badly_spelt_or_unclear_location_answer_is_never_left_silent(world):
@@ -1517,13 +1517,13 @@ def test_the_summary_is_built_in_english_laid_out_line_by_line_and_sent_before_t
     # (never silent, 2026-11-21)
     assert w.wa.texts()[-1] == "Booking munnott pokan ningalude name-um mobile number-um ivide ayakkamo?"
     assert w.repo.list_bookings(phone=GUEST) == []
-    say(w, "Kavana Priya, 80886 78167", GUEST,
-        tool("create_booking", guest_name="Kavana Priya", mobile="80886 78167", language="manglish"), reply("[no reply]"))
+    say(w, "Sample Guest, 90000 00003", GUEST,
+        tool("create_booking", guest_name="Sample Guest", mobile="90000 00003", language="manglish"), reply("[no reply]"))
     texts = w.wa.texts()
     assert texts[-2] == "\n".join([
         "Following are the glimpse of your enquiry,", "",
-        "Guest - Kavana Priya",
-        "80886 78167",
+        "Guest - Sample Guest",
+        "90000 00003",
         "Check in - 10th Nov 26",
         "*Early Check-in @ 6am*",
         "Check out - 12th Nov 26",
@@ -1540,7 +1540,7 @@ def test_the_summary_is_built_in_english_laid_out_line_by_line_and_sent_before_t
         "Balance can be paid during the time of check in."])
     assert texts[-1].startswith("Please pay") or texts[-1].startswith("Ee link")
     b = w.repo.list_bookings(phone=GUEST)[0]
-    assert (b.total, b.advance) == (9000, 4500) and "Mobile: 8088678167" in b.notes and "Early check-in" in b.notes
+    assert (b.total, b.advance) == (9000, 4500) and "Mobile: 9000000003" in b.notes and "Early check-in" in b.notes
     assert w.pay.created[0]["amount"] == 4500
 
 

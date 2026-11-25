@@ -409,11 +409,11 @@ def test_my_bookings_for_a_booking_on_hold_and_for_a_new_guest(world):
 
 def test_change_name_updates_the_bookings_and_tells_the_guest(world):
     w = world
-    book(w, name="Naseem")
-    result, texts, _ = run(w, "change_name", {"name": "shibil k"})
-    assert result["ok"] and result["facts"] == {"bookings_changed": 1} and texts == {"name_changed": "Done, the name is changed to Shibil K."}
-    assert w.repo.list_bookings(phone=GUEST)[0].guest_name == "Shibil K"
-    assert w.repo.get_guest(GUEST).name == "Shibil K"
+    book(w, name="Test Guest")
+    result, texts, _ = run(w, "change_name", {"name": "demo guest k"})
+    assert result["ok"] and result["facts"] == {"bookings_changed": 1} and texts == {"name_changed": "Done, the name is changed to Demo Guest K."}
+    assert w.repo.list_bookings(phone=GUEST)[0].guest_name == "Demo Guest K"
+    assert w.repo.get_guest(GUEST).name == "Demo Guest K"
     bad, texts, _ = run(w, "change_name", {"name": "12345"})
     assert not bad["ok"] and texts == {}
 

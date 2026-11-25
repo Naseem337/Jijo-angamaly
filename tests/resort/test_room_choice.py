@@ -48,7 +48,7 @@ def summary(w):
                                   "I don't want standard rooms"])
 def test_after_the_payment_link_a_picked_room_gives_a_new_summary_never_the_form(resort, text):
     w = resort
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     assert "Beach View Standard Rooms at First Floor" in summary(w)
     w.wa.sent.clear()
@@ -56,7 +56,7 @@ def test_after_the_payment_link_a_picked_room_gives_a_new_summary_never_the_form
     texts = w.wa.texts()
     assert not any(x.startswith(FORM) for x in texts), texts
     assert "2 Bedroom Tiny Kerala Cottage" in summary(w)
-    assert "Check in - 13th Jan 27" in summary(w) and "Naseem" in summary(w)
+    assert "Check in - 13th Jan 27" in summary(w) and "Test Guest" in summary(w)
     assert "https://rzp.io/" in texts[-1]  # the new link (in the guest's language)
     if text != "cottage mathi":  # English in, English out (strict rule); 'cottage mathi' is Manglish
         assert texts[-1].startswith("Please pay the advance using this link:"), texts[-1]
@@ -71,7 +71,7 @@ def test_before_the_name_a_picked_room_is_checked_and_used(resort, text):
     assert not any(x.startswith(FORM) for x in texts), texts
     assert "Sure, 2 Bedroom Tiny Kerala Cottage is free for your dates." in texts
     assert texts[-1] == "Please share your name and mobile number to proceed."
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     assert booked(w) == ["2 Bedroom Tiny Kerala Cottage"]
 
@@ -92,7 +92,7 @@ def test_any_other_rooms_says_which_one_is_free_even_without_photos(resort):
 
 def test_four_persons_who_only_want_the_cottage_get_two_cottages(resort):
     w = resort
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     say(w, "I only need cottage")
     w.wa.sent.clear()
@@ -125,7 +125,7 @@ def test_is_there_any_other_room_available_names_the_free_one(resort):
 
 def test_asking_again_for_the_room_already_in_the_link_sends_no_new_link(resort):
     w = resort
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     say(w, "I only need cottage")
     w.wa.sent.clear()
@@ -136,7 +136,7 @@ def test_asking_again_for_the_room_already_in_the_link_sends_no_new_link(resort)
 
 def test_a_room_choice_question_is_answered_in_code_only(resort):
     w = resort
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     calls = len(w.llm.calls)
     w.wa.sent.clear()
@@ -162,14 +162,14 @@ def test_a_room_choice_question_is_answered_in_code_only(resort):
 ])
 def test_the_ai_can_make_any_change_after_the_link_and_a_new_link_goes(resort, change, room, rooms, nights):
     w = resort
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     w.wa.sent.clear()
     say(w, "pls change it like I said", GUEST, tool("change_enquiry", **change), reply("[no reply]"))
     texts = w.wa.texts()
     assert not any(x.startswith(FORM) for x in texts), texts
     s = summary(w)
-    assert f"*{room}*" in s and rooms in s and nights in s and "Naseem" in s, s
+    assert f"*{room}*" in s and rooms in s and nights in s and "Test Guest" in s, s
     assert texts[-1].startswith("Please pay the advance using this link:")
     assert len({b.payment_link_id for b in w.repo.list_bookings(phone=GUEST, status="hold")}) == 1  # old link closed
 
@@ -178,14 +178,14 @@ def test_the_ai_can_change_the_room_before_the_name(resort):
     w = resort
     say(w, "the bigger one with 2 bedrooms", GUEST, tool("change_enquiry", room_type="cottage"), reply("[no reply]"))
     assert "Sure, 2 Bedroom Tiny Kerala Cottage is free for your dates." in w.wa.texts()
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     assert booked(w) == ["2 Bedroom Tiny Kerala Cottage"]
 
 
 def test_the_prompt_lets_guests_choose_and_remembers_the_enquiry(resort):
     w = resort
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     say(w, "what is the check-in time?", GUEST, reply("From 12 PM."))
     system = w.llm.calls[-1].system
@@ -221,7 +221,7 @@ def test_is_there_2_rooms_in_the_cottage_gives_the_cottage_and_no_room_numbers(r
     assert any("2 Bedroom Tiny Kerala Cottage" in x for x in texts), texts
     assert sum(x in texts for x in ("For 3 persons: 2 room(s).", "3 perkku 2 room.")) == 1, texts
     w.llm.script.clear()
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"), reply("[no reply]"))
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"), reply("[no reply]"))
     holds = w.repo.list_bookings(phone=GUEST, status="hold")
     assert {w.repo.get_room_type(b.room_type_id).name for b in holds} == {"2 Bedroom Tiny Kerala Cottage"}
 
@@ -256,7 +256,7 @@ def test_after_the_payment_link_a_price_question_gets_the_price_never_the_form_o
     """Live chat 2026-11-22: with the cottage link out, 'whats the cost for standard room' got 'switch?' three times,
     then the dates form, then 'same date' / 'same persons and rooms' got the form again."""
     w = resort
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     links = [b.payment_link_url for b in w.repo.list_bookings(phone=GUEST, status="hold")]
     w.wa.sent.clear()
@@ -276,7 +276,7 @@ def test_after_the_payment_link_a_price_question_gets_the_price_never_the_form_o
 
 def test_after_the_payment_link_the_form_is_never_sent_again(resort):
     w = resort
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     w.wa.sent.clear()
     say(w, "Yes", GUEST, tool("ask_stay_details", place="Alleppey"), reply("[no reply]"))
@@ -292,7 +292,7 @@ def test_guest_picks_two_different_room_types_one_each(resort):
     """Live chat 2026-11-23: '1 standard + 1 cottage' / 'I need 109 and 103' replaced the first room, then refused."""
     w = resort
     say(w, "I need 109 and 103", GUEST, tool("change_enquiry", room_picks=["109", "103"]), reply("[no reply]"))
-    say(w, "Naseem, same number", GUEST, tool("create_booking", guest_name="Naseem", mobile="same"),
+    say(w, "Test Guest, same number", GUEST, tool("create_booking", guest_name="Test Guest", mobile="same"),
         reply("[no reply]"))
     assert sorted(booked(w)) == sorted(["Beach View Standard Rooms at First Floor", "2 Bedroom Tiny Kerala Cottage"])
 

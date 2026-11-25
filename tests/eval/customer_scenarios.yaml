@@ -104,7 +104,7 @@
 
 # ---- visit / test drive / location
 - id: test_drive
-  say: ["Swift undo 7 lakhinu thazhe?", "naale 11 manikku test drive cheyyan varam, ente peru Naseem"]
+  say: ["Swift undo 7 lakhinu thazhe?", "naale 11 manikku test drive cheyyan varam, ente peru Test Guest"]
   tools: [save_enquiry]
   avoid: "(phone number|number tharamo|mobile number)"
 - id: location

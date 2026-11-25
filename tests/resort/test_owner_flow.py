@@ -18,7 +18,7 @@ from app.resort.models import Booking, Property, RoomType
 from app.resort.payments import MockPayments
 from test_bot import STAFF, FakeWA, msg
 
-PHONE = "+918136931505"
+PHONE = "+919000000001"
 PNG = b"\x89PNG\r\n\x1a\n" + b"x" * 50
 
 
@@ -91,10 +91,10 @@ def test_the_whole_flow_exactly_as_the_owner_said(live):
                        "BOT: For 2 persons: 1 room(s).", "BOT: Your Beachfront Hideout Awaits!"]
     assert photos(lines) == ["general"] * 12 + ["Basic"] * 9  # ALL general, then ONLY the free top-priority room
     assert lines[-1] == "BOT: Please share your name and mobile number to proceed."
-    chat(w, "Naseem", "8136931505")
+    chat(w, "Test Guest", "9000000001")
     texts = w.wa.texts(PHONE)
     summary = next(x for x in texts if x.startswith("Following are the glimpse of your enquiry"))
-    assert "Guest - Naseem" in summary and "*Beach View Basic Room*" in summary and "Pay - 3,000" in summary
+    assert "Guest - Test Guest" in summary and "*Beach View Basic Room*" in summary and "Pay - 3,000" in summary
     assert texts[-1].startswith("Please pay the advance using this link:")
     assert not any("RB-" in x for x in texts)  # no booking id to the guest
     b = w.repo.list_bookings(phone=PHONE)[0]
@@ -367,17 +367,17 @@ def test_form_with_bare_checkout_day_and_ok_never_asks_location_again(live):
 
 
 def test_an_old_unpaid_enquiry_never_gets_a_reminder_after_a_new_booking(live):
-    """Live chat 2026-11-19: Shibil left a 23-25 Dec enquiry unpaid, booked and paid 25-27 Dec, then got 'Your payment
+    """Live chat 2026-11-19: Demo Guest left a 23-25 Dec enquiry unpaid, booked and paid 25-27 Dec, then got 'Your payment
     link is still open for 4 more minutes'. A new booking closes the old enquiry and its link."""
     from datetime import timedelta
     w = live
     _live_setup(w)
     chat(w, "Rooms", "Alleppey", "dec 23 to dec 25, 1 person")
-    chat(w, "Shibil 8590629268")
+    chat(w, "Demo Guest 9000000002")
     old = w.repo.list_bookings(phone=PHONE)[0]
     assert old.status == "hold"
     chat(w, "restart", "Rooms", "Alleppey", "dec 25 to dec 27, 2 people")
-    chat(w, "Shibil 8590629268")
+    chat(w, "Demo Guest 9000000002")
     new = next(b for b in w.repo.list_bookings(phone=PHONE) if b.id != old.id)
     assert w.repo.get_booking(old.id).status == "expired"  # closed when the new enquiry was made
     assert old.payment_link_id in w.bot.payments.cancelled  # its link can no longer be paid
@@ -697,15 +697,15 @@ def test_add_a_room_after_a_paid_booking_uses_the_same_dates(live):
 
 
 def test_a_name_correction_after_the_summary_changes_only_the_name(live):
-    # live chat 2026-11-21: 'my name is not Naseem, it is Shibil' (voice) started the booking again (dates form)
+    # live chat 2026-11-21: 'my name is not Test Guest, it is Demo Guest' (voice) started the booking again (dates form)
     w = live
     _live_setup(w)
-    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people", "Naseem 9847012345")
-    w.llm.script[:0] = [MockLLM.tool("change_name", name="Shibil"), MockLLM.text("[no reply]")]
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 2 people", "Test Guest 9847012345")
+    w.llm.script[:0] = [MockLLM.tool("change_name", name="Demo Guest"), MockLLM.text("[no reply]")]
     n = len(w.wa.texts(PHONE))
     chat(w, "ആ ചെറിയൊരു കറക്ഷൻ ഉണ്ട് കേട്ടോ. എൻ്റെ പേര് നസീം അല്ല, എൻ്റെ പേര് ഷിബിൽ.")
-    assert w.wa.texts(PHONE)[n:] == ["Sheri, peru Shibil ennu maatti."]
-    assert [b.guest_name for b in w.repo.list_bookings(phone=PHONE)] == ["Shibil"]
+    assert w.wa.texts(PHONE)[n:] == ["Sheri, peru Demo Guest ennu maatti."]
+    assert [b.guest_name for b in w.repo.list_bookings(phone=PHONE)] == ["Demo Guest"]
     w.llm.script[:0] = [MockLLM.text("Please share your check-in and check-out dates.")] * 2
     n = len(w.wa.texts(PHONE))
     chat(w, "Already sent")
@@ -719,7 +719,7 @@ def test_a_change_before_payment_gives_a_new_summary_and_link(live):
     w = live
     w.repo.save_property(Property(**{**w.repo.get_property(w.prop.id).__dict__, "extra_bed_rate": 500}))
     _live_setup(w)
-    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 4 people", "Shibil 9847012345")
+    chat(w, "Rooms", "Alleppey", "dec 12 to dec 14, 4 people", "Demo Guest 9847012345")
     old_link = w.repo.list_bookings(phone=PHONE)[0].payment_link_url
     for text, rooms in (("add 1 room also", 3), ("1 room venda", 2), ("6 per aayi", 2)):
         n = len(w.wa.texts(PHONE))
@@ -727,7 +727,7 @@ def test_a_change_before_payment_gives_a_new_summary_and_link(live):
         new = w.wa.texts(PHONE)[n:]
         held = [b for b in w.repo.list_bookings(phone=PHONE) if b.status == "hold"]
         assert sum(b.rooms for b in held) == rooms, (text, held)
-        assert any(x.startswith("Following are the glimpse of your enquiry") and "Shibil" in x for x in new), new
+        assert any(x.startswith("Following are the glimpse of your enquiry") and "Demo Guest" in x for x in new), new
         assert any("rzp.io" in x for x in new) and not any("Check in :" in x or "name and mobile" in x for x in new)
     assert all(b.payment_link_url != old_link for b in w.repo.list_bookings(phone=PHONE) if b.status == "hold")
 

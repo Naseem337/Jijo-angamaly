@@ -142,10 +142,10 @@ def test_a_name_sent_alone_then_the_number_is_used_not_an_old_saved_name(world):
     say(w, "Allepey")
     say(w, "i am coming dec 20 and i will be there for 2 days. we were 2 people")
     assert w.wa.texts()[-1] == "Please share your name and mobile number to proceed."
-    say(w, "Naseem", GUEST, reply("[no reply]"))
-    say(w, "8136931505.", GUEST, reply("[no reply]"))
+    say(w, "Test Guest", GUEST, reply("[no reply]"))
+    say(w, "9000000001.", GUEST, reply("[no reply]"))
     summary = next(x for x in w.wa.texts() if x.startswith("Following are the glimpse of your enquiry"))
-    assert "Guest - Naseem" in summary and "Kochu" not in summary
+    assert "Guest - Test Guest" in summary and "Kochu" not in summary
 
 
 def test_a_child_mentioned_after_the_check_is_not_counted_and_repeats_nothing(world):
