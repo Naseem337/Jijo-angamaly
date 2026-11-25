@@ -23,6 +23,7 @@ from typing import Any
 
 from app.providers.llm import ChatMessage
 from app.resort.agent import conversation, guard
+from app.resort.agent import language as turn_language
 from app.resort.agent import photos_plan as pp
 from app.resort.agent import usage
 from app.resort.agent.outbox import Outbox, near_same
@@ -204,12 +205,13 @@ def _own_text(response: Any) -> str:
 
 def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe: str = "") -> TurnResult:
     """Answer one guest message. The outbox is flushed at the end (a dry-run outbox only records)."""
-    conversation.remember(bot, phone)  # where this guest's conversation began (restart / confirmed booking / 12 h gap)
+    conv = conversation.remember(bot, phone)  # where this conversation began (restart / confirmed booking / 12 h gap)
+    words = turn_language.load(bot, phone, conv["started_at"])  # never a language from another conversation
     enq = Enquiry.load(bot.repo, phone)
     messages = _with_guest_message(history(bot, phone), text, swipe)
     fresh = len(messages) <= 1 and not greeted(bot, phone)
-    system = build_system_prompt(bot, phone, enq, fresh=fresh)
-    tools = AgentTools(bot, phone, outbox, guest_text=text)
+    system = build_system_prompt(bot, phone, enq, fresh=fresh, lock=words.lock)
+    tools = AgentTools(bot, phone, outbox, guest_text=text, lang=words)
     result = TurnResult("answered")
     response = None
     failure: Exception | None = None
@@ -343,7 +345,9 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         log.warning("AI turn failed: %s", exc)
 
     enq = Enquiry.load(bot.repo, phone)  # the tools may have changed it
+    enq.language = words.now  # this turn's language (the AI's, else this conversation's last, else en)
     lang = I18N_LANG[enq.language]
+    turn_language.save(bot, phone, words)
     if failure is not None:
         result.outcome, result.error = "ai_down", f"{type(failure).__name__}: {failure}"
         if not outbox.spoke:

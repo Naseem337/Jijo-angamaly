@@ -24,6 +24,7 @@ from app.providers.llm import ToolSpec
 from app.resort import availability as av
 from app.resort.agent import conversation
 from app.resort.agent import photos_plan as pp
+from app.resort.agent.language import TurnLanguage
 from app.resort.agent.outbox import Outbox, near_same
 from app.resort.agent.state import LANGUAGES, Enquiry, _day
 from app.resort.chat import _Turn, _count_name, _money, close_word
@@ -53,7 +54,8 @@ OWNER_REASONS: dict[str, tuple[str, str | None]] = {
 }
 
 LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
-                  "description": "the language style of the guest's latest message: en = English; manglish = Malayalam "
+                  "description": "language = the language of the guest's LATEST message only, never an earlier one "
+                                 "(plain English → en): en = English; manglish = Malayalam "
                                  "words in English letters (venam, undo, aano, alle); tanglish = Tamil words in English "
                                  "letters (venum, irukka, irukkom, vanakkam, la); hinglish = Hindi words in English "
                                  "letters (chahiye, hai, kya)"}
@@ -192,6 +194,11 @@ TOOL_SCHEMAS = [
         "The guest greets, in any words or language ('hi', 'hello', 'hai', 'vanakkam', 'namaste', 'good morning'). Code "
         "sends the right greeting: the owner's welcome for a new conversation, else 'Hi' with their open enquiry and its "
         "step, or their confirmed booking. Write nothing after it unless the guest also asked something.",
+        {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
+    ToolSpec(
+        "set_language",
+        "The guest asks you to use a language ('English please', 'speak in English', 'Malayalam il parayamo'). That "
+        "language then holds for the rest of this conversation. Sends nothing.",
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "recall_old_chat",
@@ -393,8 +400,12 @@ def towns_and(bot: Any) -> str:
 class AgentTools:
     """The tools of one guest turn. `bot` is the BookingBot: its repository, clock, payments and existing helpers."""
 
-    def __init__(self, bot: Any, phone: str, outbox: Outbox, guest_text: str | None = None) -> None:
+    def __init__(self, bot: Any, phone: str, outbox: Outbox, guest_text: str | None = None,
+                 lang: TurnLanguage | None = None) -> None:
         self.bot, self.phone, self.out = bot, phone, outbox
+        # this turn's language (language.py; run_turn passes it): every call's `language` goes through it, so a missing
+        # value never falls back to another conversation's language; None = outside a guest turn (the saved one)
+        self.lang = lang
         # the guest's message of this turn (run_turn passes it); None = a call outside a guest turn: places not checked
         self.guest_text = guest_text
         self.ran: list[str] = []  # the tools that ran this turn (ONCE_TOOLS run at most once)
@@ -1439,6 +1450,18 @@ class AgentTools:
                             "Earlier chat, oldest first, links hidden. Never paste a link: use send_payment_link (only "
                             "while the hold is live). Answer only what the guest asked.")
 
+    # ------------------------------------------------------------------ set_language
+
+    def set_language(self, args: dict[str, Any]) -> dict[str, Any]:
+        """'English please': that language is locked for the rest of the conversation (a restart clears it)."""
+        start, enq, style, lang = self._ctx(args)
+        if self.lang is not None:
+            style = self.lang.set_lock(style)
+        enq.language = style
+        enq.save(self.bot.repo, self.phone)
+        return self._result(True, {"language": style}, start, enq,
+                            f"From now on reply in {style} only, for the rest of this conversation.")
+
     # ------------------------------------------------------------------ calling a tool by name
 
     def call(self, name: str, args: dict[str, Any] | None) -> dict[str, Any]:
@@ -1448,8 +1471,10 @@ class AgentTools:
                     "check_payment": self.check_payment, "send_payment_link": self.send_payment_link,
                     "my_bookings": self.my_bookings, "change_name": self.change_name,
                     "talk_to_owner": self.talk_to_owner, "recall_old_chat": self.recall_old_chat,
-                    "repeat_step": self.repeat_step, "greet": self.greet}
+                    "repeat_step": self.repeat_step, "greet": self.greet, "set_language": self.set_language}
         start, enq = len(self.out.keys), Enquiry.load(self.bot.repo, self.phone)
+        if self.lang is not None:  # the AI's language for this call, else this turn's (never an older conversation's)
+            args = {**(args or {}), "language": self.lang.take((args or {}).get("language"))}
         handler = handlers.get(name)
         if handler is None:
             return self._result(False, {"problem": f"unknown tool {name}"}, start, enq, "Use one of the listed tools.")

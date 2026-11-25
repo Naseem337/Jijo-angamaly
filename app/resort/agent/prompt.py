@@ -87,8 +87,9 @@ Guest: what's the weather in december? → December is cool and dry, a good time
   greeting yourself: greet sends the right one. After greet write nothing unless the guest also asked something.
 - Say 'sir' (or 'madam') only in your very first reply of the chat. Never again after that.
 - Never the guest's name. No sales talk.
-- Reply language = the guest's latest message: English → English, Malayalam → Manglish, Tamil → Tanglish,
-  Hindi → Hinglish. Always English letters. Pass the same language to every tool.
+- Reply language = the language of the guest's LATEST message only, never an earlier one: English → English (plain
+  English → "en"), Malayalam → Manglish, Tamil → Tanglish, Hindi → Hinglish. Always English letters. Pass that
+  language on every tool call. The guest asks for a language ('English please') → set_language.
 - Every real message gets an answer. Only emoji/reactions/stickers get none.
 - If the answer is not written in FACTS, you do NOT know it. Call talk_to_owner(cannot_answer). Never answer policy
   questions (pets, alcohol, couples, smoking, visitors, food, parking, timings ...) from general knowledge. Places
@@ -164,16 +165,21 @@ def static_prompt(bot: Any) -> str:
     ])
 
 
-def dynamic_prompt(bot: Any, phone: str, enq: Enquiry, *, fresh: bool = False) -> str:
-    """The per-turn part, after the cache breakpoint: TODAY, GUEST RECORDS and CURRENT ENQUIRY."""
+LANG_NAMES = {"en": "English", "manglish": "Manglish", "tanglish": "Tanglish", "hinglish": "Hinglish"}
+
+
+def dynamic_prompt(bot: Any, phone: str, enq: Enquiry, *, fresh: bool = False, lock: str | None = None) -> str:
+    """The per-turn part, after the cache breakpoint: TODAY, GUEST RECORDS, CURRENT ENQUIRY and, when the guest asked
+    for a language in this conversation, LANGUAGE."""
     prop = bot.repo.get_property(enq.place) if enq.place else None
-    return "\n\n".join([
-        today_block(bot._today()),
-        guest_records(bot, phone, fresh),
-        enq.render(bot._place_label(prop) if prop else ""),
-    ])
+    blocks = [today_block(bot._today()), guest_records(bot, phone, fresh),
+              enq.render(bot._place_label(prop) if prop else "")]
+    if lock:
+        blocks.append(f"LANGUAGE\nThe guest asked for {LANG_NAMES.get(lock, lock)}: reply in it and pass "
+                      f'language="{lock}" for the rest of this conversation.')
+    return "\n\n".join(blocks)
 
 
-def build_system_prompt(bot: Any, phone: str, enq: Enquiry, *, fresh: bool = False) -> str:
+def build_system_prompt(bot: Any, phone: str, enq: Enquiry, *, fresh: bool = False, lock: str | None = None) -> str:
     """static_prompt, CACHE_SPLIT (the cache breakpoint), dynamic_prompt. Providers without caching join the two."""
-    return static_prompt(bot) + CACHE_SPLIT + dynamic_prompt(bot, phone, enq, fresh=fresh)
+    return static_prompt(bot) + CACHE_SPLIT + dynamic_prompt(bot, phone, enq, fresh=fresh, lock=lock)

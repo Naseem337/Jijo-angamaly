@@ -607,3 +607,27 @@
       expect_tools: [greet]
       expect_sent: [hello_back]
       not_sent: [sure, greet]
+
+# ───────────────────────── language (live bug 2026-11-25) ─────────────────────────
+- id: lang_restart_back_to_english  # Manglish chat, restart, then only English: every owner text in English
+  turns:
+    - guest: "alleppey il room undo? dec 10 muthal 12 vare, 2 per"
+      expect_tools: [update_enquiry]
+    - guest: "restart"
+      outcome: restart
+      expect_text: "Hi, How may I assist you?"
+    - guest: "I need a room in Alleppey from Dec 10 to Dec 12 for 2 adults"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {language: en}}
+      expect_sent: [rooms_ok, ask_contact]
+      expect_text: "Please share your name and mobile number to proceed."
+
+- id: lang_switch_to_english_mid_chat  # Manglish first, then English: the next owner texts are in English
+  turns:
+    - guest: "alleppey il room undo? dec 10 muthal 12 vare, 2 per"
+      expect_tools: [update_enquiry]
+    - guest: "Can you check Dec 11 to Dec 13 instead?"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {language: en}}
+      expect_sent: [rooms_ok, ask_contact]
+      expect_text: "Yes, rooms are available for your dates."
