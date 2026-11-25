@@ -42,7 +42,7 @@ def test_the_cache_breakpoints_are_after_the_tools_and_after_the_static_system(w
     assert today in dynamic["text"]
     assert dynamic["text"].startswith("TODAY") and "CURRENT ENQUIRY" in dynamic["text"]
     assert [t.get("cache_control") for t in kw["tools"]] == [None] * (len(TOOL_SCHEMAS) - 1) + [{"type": "ephemeral"}]
-    assert kw["temperature"] == 0.2 and kw["max_tokens"] == 300 and "thinking" not in kw
+    assert "temperature" not in kw and kw["max_tokens"] == 300  # Claude's API (2026-10-21) rejects sampling params
     assert CACHE_SPLIT not in static["text"] + dynamic["text"]
 
 
@@ -129,6 +129,45 @@ def test_an_anthropic_error_falls_back_to_sarvam_then_groq():
         assert sarvam.calls[0].temperature == 0.2
 
 
+class Broken:
+    """A provider with a bug: it raises a plain TypeError, not an LLMError."""
+    name = "anthropic"
+
+    def complete(self, *a, **k):
+        raise TypeError("Messages.create() got an unexpected keyword argument 'temperature'")
+
+
+def test_a_provider_that_raises_typeerror_hands_the_turn_to_the_next_provider(world, caplog):
+    w = world
+    w.llm.script.extend([tool("update_enquiry", **STAY), reply("Sure.")])
+    chain = FallbackLLM([Broken(), w.llm])
+    from app.resort.agent.outbox import bot_outbox
+    from app.resort.agent.turn import run_turn
+    from app.resort.models import ChatMessage as Row
+    w.repo.add_chat(Row(GUEST, "in", ASK, w.clock.now(), "text"))
+    with caplog.at_level(logging.WARNING):
+        res = run_turn(w.bot, chain, GUEST, ASK, bot_outbox(w.bot, GUEST, dry_run=True))
+    assert res.outcome != "ai_down" and [c["name"] for c in res.calls] == ["update_enquiry"]
+    crashed = [r.getMessage() for r in caplog.records if "crashed, trying next" in r.getMessage()]
+    assert crashed and all("\n" not in m for m in crashed) and "TypeError" in crashed[0]
+
+
+def test_any_sdk_exception_becomes_an_llm_error_for_the_chain():
+    from app.providers.llm import LLMError
+    llm, _ = claude(ValueError("odd SDK change"))
+    try:
+        llm.complete("s", [ChatMessage("user", "hi")], None, 300)
+    except LLMError as exc:
+        assert "ValueError" in str(exc) and not exc.retryable
+    else:
+        raise AssertionError("expected LLMError")
+
+
+def test_the_resort_config_turns_extended_thinking_off_for_claude(monkeypatch):
+    monkeypatch.setenv("LLM_CHAIN", "anthropic")
+    assert load_resort_config().providers.llm["anthropic"].extra == {"thinking": {"type": "disabled"}}
+
+
 def test_anthropic_reports_cache_reads_and_writes():
     response = SimpleNamespace(content=[SimpleNamespace(type="text", text="Hi.")], stop_reason="end_turn",
                                model="model-from-env", usage=SimpleNamespace(input_tokens=50, output_tokens=7,
@@ -138,6 +177,7 @@ def test_anthropic_reports_cache_reads_and_writes():
     out = llm.complete("s" + CACHE_SPLIT + "d", [ChatMessage("user", "hi")], TOOL_SCHEMAS, 300, temperature=0.2)
     assert out.usage == Usage(4350, 7, 4000, 300) and out.text == "Hi."
     assert fake.kwargs["model"] == "model-from-env" and fake.kwargs["system"][0]["text"] == "s"
+    assert "temperature" not in fake.kwargs  # asked for 0.2, never sent to Claude
 
 
 def test_a_missing_key_skips_anthropic_with_a_clear_log_line(monkeypatch, caplog):

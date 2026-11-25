@@ -373,3 +373,9 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
   12-char hash). `scripts/token_report.py` prints averages per turn / per booking chat and the cache hit rate. The eval
   prints tokens per scenario and in SUMMARY.
 - Tests: tests/resort/test_agent_haiku_tokens.py (fake clients only).
+- Fix (same day): anthropic SDK 1.15 sends API version 2026-10-21, which removed `temperature` / `top_p` / `top_k`
+  (Claude Haiku 5.5 accepts only the default sampling anyway). The Claude request no longer sends temperature (the
+  other providers still get 0.2); resort.yaml sends `thinking: {type: disabled}` for Claude. FallbackLLM now moves on
+  after ANY exception from a provider (one log line "LLM provider X crashed, trying next"), and AnthropicLLM wraps any
+  SDK exception in LLMError. Live: 3 scenarios x 3 runs on Haiku, cache hit 92%, ~17k tokens per AI turn (2-3 calls).
+  photos_after_link fails: the room photos were already sent in turn 1, so 'send room pics' gets photos_sent (code rule).

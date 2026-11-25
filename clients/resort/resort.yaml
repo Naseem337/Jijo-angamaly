@@ -36,7 +36,8 @@ providers:
       model: "${AGENT_MODEL:-}"     # never hard-coded: empty -> skipped with a log line, the next provider answers
       api_key_secret: anthropic_api_key
       timeout_s: 20
-    deepseek:                      # paid, cheap; the go-live brain (owner, 2026-11-18). Key: DEEPSEEK_API_KEY
+      extra: {thinking: {type: disabled}}   # no extended thinking (temperature is not accepted by Claude's API)
+    deepseek:                     # paid, cheap; the go-live brain (owner, 2026-11-18). Key: DEEPSEEK_API_KEY
       kind: openai_compatible
       base_url: https://api.deepseek.com
       model: "${DEEPSEEK_MODEL:-deepseek-chat}"

@@ -141,7 +141,8 @@ def test_anthropic_request_shape_caching_and_merged_tool_results() -> None:
     kw = fake.kwargs
     assert kw["model"] == "claude-test" and kw["max_tokens"] == 500
     assert kw["system"] == [{"type": "text", "text": "SYSTEM", "cache_control": {"type": "ephemeral"}}]
-    assert kw["tools"] == [{"name": "search_cars", "description": "Search stock", "input_schema": SEARCH.parameters}]
+    assert kw["tools"] == [{"name": "search_cars", "description": "Search stock", "input_schema": SEARCH.parameters,
+                            "cache_control": {"type": "ephemeral"}}]  # the last tool carries the tools' cache mark
     assistant, results = kw["messages"][1], kw["messages"][2]
     assert assistant["content"][0] == {"type": "tool_use", "id": "c1", "name": "search_cars", "input": {"model": "swift"}}
     assert len(kw["messages"]) == 3  # both tool results share one user turn

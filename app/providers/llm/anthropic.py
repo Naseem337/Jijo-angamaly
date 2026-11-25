@@ -71,15 +71,17 @@ def request(model: str, system: str, messages: list[ChatMessage], tools: list[To
             temperature: float | None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
     """The Messages API request. Claude reads tools -> system -> messages, so the order of the cached prefix is:
     tool definitions [breakpoint 1: shared by every guest] -> the static system part [breakpoint 2] -> the dynamic
-    system part (after CACHE_SPLIT: changes every turn, never cached) -> the chat. No extended thinking is asked for."""
+    system part (after CACHE_SPLIT: changes every turn, never cached) -> the chat.
+
+    `temperature` is never sent: the API version this SDK uses (2026-10-21) rejects sampling parameters on every model;
+    the other providers in the chain still get it. Thinking is set per client in client.yaml `extra` (the resort agent
+    sends thinking disabled: no extended thinking)."""
     static, dynamic = split_system(system)
     blocks: list[dict[str, Any]] = [{"type": "text", "text": static, "cache_control": CACHE}]
     if dynamic.strip():
         blocks.append({"type": "text", "text": dynamic})
     kwargs: dict[str, Any] = {"model": model, "max_tokens": max_tokens, "system": blocks,
                               "messages": _to_wire(messages), **(extra or {})}
-    if temperature is not None:
-        kwargs["temperature"] = temperature
     if tools:
         kwargs["tools"] = [{"name": t.name, "description": t.description, "input_schema": t.parameters} for t in tools]
         kwargs["tools"][-1]["cache_control"] = CACHE
@@ -122,6 +124,9 @@ class AnthropicLLM:
                            retryable=exc.status_code >= 500) from exc
         except anthropic.APIConnectionError as exc:
             raise LLMError(self.name, f"connection failed: {type(exc).__name__}") from exc
+        except Exception as exc:  # anything else (a bad request field, an SDK change): the next provider answers
+            raise LLMError(self.name, f"request failed: {type(exc).__name__}: {str(exc)[:200]}",
+                           retryable=False) from exc
 
         texts: list[str] = []
         calls: list[ToolCall] = []

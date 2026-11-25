@@ -75,6 +75,11 @@ class FallbackLLM:
                     if exc.retry_after is not None:
                         waits.append(exc.retry_after)
                     continue
+                except Exception as exc:  # a provider bug (TypeError, a bad field, an SDK change) never fails the turn
+                    log.warning("LLM provider %s crashed, trying next: %s: %s", provider.name, type(exc).__name__,
+                                str(exc)[:200])
+                    failures.append(f"[{provider.name}] {type(exc).__name__}")
+                    continue
                 self._resting_until.pop(provider.name, None)
                 if response.stop_reason == "refusal":
                     log.warning("LLM provider %s refused, trying next", provider.name)
