@@ -181,11 +181,33 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
 - New evals: not_our_place, place_never_guessed, check_out_next_month, room_labels_each_room,
   other_room_shown_not_switched, short_human_reply; day_without_month checks the built dates; restart turn 3 expects
   update_enquiry and no "How may I assist" (47 scenarios). Tests: tests/resort/test_agent_fix_round3.py.
-- NOT done yet: Part 2 c) "Guest CHOOSES ..." (the instructions were cut off there).
+- Part 2 c) "Guest CHOOSES ..." was cut off in the round-3 message: done in round 4.
+
+## Fix round 4 (2026-11-25): room choice, photos anytime, recent past dates, eval scenarios
+- Room choice: prompt + room_picks description: the guest CHOOSES a room (this one, take it, change to X, 'cottage venam',
+  'room 103', a swipe-reply 'this one venam' on a room's photo or label) -> update_enquiry with room_picks; only asking
+  about / seeing another room -> send_photos. The code already did the rest: room_picked + the new rooms sentence; with a
+  link open the old link is closed, then room_picked, rooms sentence, new summary + new link (`_relink`). A room number
+  pick maps to its room type (as in the old bot; the exact number is allocated by priority at payment).
+- Photos at any stage: prompt + send_photos description: "Guest asks to see rooms or the resort in any words -> call
+  send_photos. Never refuse, never ask for dates first." After payment (Enquiry.paid or a paid booking for the stay,
+  `_paid_stay`) photos are planned without dates, so the guest's own paid booking never makes their room "not free".
+  default / more after the offered room was shown: the next free room type, then the next free room NUMBER of the same
+  types with its own photos (`pp.more_numbers`, labelled "*Room 109 - ...*"), then the resort's general photos, then
+  photos_sent. `queue_room` keeps a room number's own label.
+- Dates (owner rule): a date WITHOUT a year that passed up to 30 days ago (`RECENT_PAST_DAYS`) -> past_date ("20 Nov has
+  already passed. ..."); more than 30 days ago -> next year (25 Nov: "10 Jan" -> 10 Jan 2027). Works over the new year
+  (5 Jan: "28 Dec" -> past_date). A day alone still means the next time it comes.
+- Eval checks (scripts/eval_agent.py, documented at the top of the scenarios file): max_words (the AI's own line),
+  ai_empty, ai_required, in_order ("a|b" = either), only_sent, no_duplicates; scenario `closed: [name]` switches a resort
+  off. 15 new scenarios (62 in all); not_our_place got its must_not. Differences from the request: scenarios with no
+  place in the message got "Alleppey" (two open resorts in the eval, so the location question would come first);
+  not_our_place_2 uses Ooty, because Munnar is Kanthalloor's own town in the dashboard ("Kanthalloor, Munnar") - a new
+  munnar_is_kanthalloor scenario checks it counts as ours.
+- Tests: tests/resort/test_agent_fix_round4.py.
 
 ## Next
 - Run the real-AI eval (the user runs `scripts\eval_agent.py`), then fix what fails with general rules.
-- Part 2 c) "Guest CHOOSES ..." and the rest of the round-3 list (cut off in the message).
 - AI-6 is now the OWNER TESTING on a test WhatsApp number with `AGENT_MODE=agent` (shadow mode dropped: no live traffic).
 - Then AI-7 switch, AI-8 cleanup.
 

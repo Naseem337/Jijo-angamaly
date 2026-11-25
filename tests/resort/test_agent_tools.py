@@ -132,8 +132,8 @@ def test_a_date_that_just_passed_is_told_and_not_saved(world):
 
 
 def test_a_date_without_a_year_means_the_next_time_it_comes(world):
-    result, _, _ = update(world, {"place": "Alleppey", "check_in": {"day": 25, "month": 10}, "nights": 2, "adults": 2})
-    assert (result["facts"]["check_in"], result["facts"]["check_out"]) == ("2027-10-25", "2027-10-27")
+    result, _, _ = update(world, {"place": "Alleppey", "check_in": {"day": 25, "month": 9}, "nights": 2, "adults": 2})
+    assert (result["facts"]["check_in"], result["facts"]["check_out"]) == ("2027-09-25", "2027-09-27")  # 38 days ago
 
 
 def test_a_full_date_months_ago_is_told_as_past(world):

@@ -53,7 +53,8 @@ def spec(name):
     ((25, None, None), date(2026, 11, 25)),  # today
     ((28, None, None), date(2026, 11, 28)),
     ((31, None, None), date(2026, 12, 31)),  # November has no 31st
-    ((20, 11, None), date(2027, 11, 20)),  # no year: the next time that date comes
+    ((20, 11, None), date(2026, 11, 20)),  # no year, passed 5 days ago: that past date (past_date is told)
+    ((10, 1, None), date(2027, 1, 10)),  # no year, more than 30 days ago: next year
     ((12, 12, None), date(2026, 12, 12)),
     ((20, 11, 2026), date(2026, 11, 20)),  # a full date stays as given (past_date is told)
 ])
@@ -354,7 +355,7 @@ def test_another_room_is_shown_never_switched(pw):  # noqa: F811
 
 def test_the_room_picks_description_keeps_asking_apart_from_choosing():
     desc = spec("update_enquiry").parameters["properties"]["room_picks"]["description"]
-    assert "rooms the guest chose THEMSELVES" in desc and "send_photos, not room_picks" in desc
+    assert "rooms the guest CHOSE themselves" in desc and "send_photos, not room_picks" in desc
     assert "never switches their room" in spec("send_photos").description
 
 

@@ -214,12 +214,27 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
             # another room IS free, its photos already went (or it has none): never 'no other room is free'
             return Plan(problem="other_free", room=other_free[0].name)
         return Plan(problem=none_left)
-    # default / more: the offered room, else the next free room not shown yet
+    # default / more: the offered room, else the next free room not shown yet, else (fix round 4: photos are always
+    # allowed) another free room NUMBER of the same types with its own photos, else the resort's photos
     if unsent(refs_of[current.id]):
         return Plan([(current, unsent(refs_of[current.id]))])
     if others:
         return Plan([(others[0], unsent(refs_of[others[0].id]))])
+    for rt in [current, *other_free]:
+        if refs := more_numbers(bot, rt, enq, sent, phone):
+            return Plan([(rt, refs)])
+    if general := unsent(prop.photo_urls):
+        return Plan([(None, general)])
     return Plan(problem="photos_sent")
+
+
+def more_numbers(bot: Any, rt: RoomType, enq: Enquiry, sent: set[str], phone: str = "") -> list[str]:
+    """The own photos (not sent yet) of the next room of this type that is free on the guest's dates (any room before
+    dates), in the owner's order: 'more photos' after the offered room was shown."""
+    for number in next_numbers(bot, rt, enq, len(rt.room_list), phone):
+        if refs := [r for r in dict.fromkeys(rt.number_photos.get(number, [])) if r not in sent]:
+            return refs
+    return []
 
 
 # ------------------------------------------------------------------ queueing
@@ -230,7 +245,7 @@ def queue_room(out: Outbox, rt: RoomType, refs: list[str], number: str = "") -> 
     and number they are). The label names the room the guest would get (`number`); photos of several room numbers are
     split under each number's own label. A label goes even with no photo. Returns the number of photos queued."""
     sets = label_sets(rt, refs)
-    if len(sets) <= 1:
+    if len(sets) <= 1 and not (sets and sets[0][0].startswith("*Room ")):  # one room's own photos keep their number
         sets = [(room_label(rt, number), list(refs))]
     count = 0
     for label, part in sets:

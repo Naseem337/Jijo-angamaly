@@ -94,7 +94,9 @@ TOOL_SCHEMAS = [
             "adults": {"type": "integer", "description": "total adults above 6 years as the guest said them (never assume); "
                                                          "children are not asked or counted"},
             "rooms": {"type": "integer", "description": "only if the guest said a number of rooms; 0 = let the code pick"},
-            "room_picks": {"type": "array", "description": "rooms the guest chose THEMSELVES, one entry per kind; [] "
+            "room_picks": {"type": "array", "description": "rooms the guest CHOSE themselves ('this one', 'take it', "
+                                                         "'change to X', 'cottage venam', 'room 103', a swipe-reply 'this "
+                                                         "one' on a room's photo or label), one entry per kind; [] "
                                                          "clears the choice. Guest wants a room type → room_picks=[that "
                                                          "type]. Guest only asks about or wants to see another room → "
                                                          "send_photos, not room_picks. No choice → leave it out: code "
@@ -123,7 +125,9 @@ TOOL_SCHEMAS = [
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_photos",
-        "Use this when the guest asks to see photos or pictures of the resort or its rooms. Say only WHAT they asked for "
+        "Use this whenever the guest asks to see rooms or the resort in any words ('pics?', 'how does it look', 'photo "
+        "undo?'). Never refuse, never ask for dates first. Photos are allowed at any stage (before dates, after the "
+        "room check, after the link, after payment). Say only WHAT they asked for "
         "with `kind`: room_type (a named room: also pass room_type), resort (outside, beach, common areas), other_room "
         "(another room than the one offered), all_rooms (every room), default (room photos, no room named), more (they want "
         "more photos). The guest asks about ANOTHER room in any words ('any other room?', 'is the cottage free?') → "
@@ -303,13 +307,32 @@ def _date_from(day: int, month: int, earliest: date, strictly_after: bool = Fals
     return None
 
 
+RECENT_PAST_DAYS = 30  # owner rule (fix round 4): a date without a year that passed up to 30 days ago is told past_date
+
+
+def _last_time(day: int, month: int, today: date) -> date | None:
+    """The latest date with this day and month on or before today (this year or an earlier one)."""
+    for year in range(today.year, today.year - 9, -1):
+        try:
+            d = date(year, month, day)
+        except ValueError:
+            continue
+        if d <= today:
+            return d
+    return None
+
+
 def build_check_in(parts: tuple[int, int | None, int | None], today: date) -> tuple[date | None, bool]:
-    """(check-in, full): no month -> the next time that day comes; no year -> the next time that date comes; a full
-    date stays as given (full=True: if it has passed, the guest is told past_date)."""
+    """(check-in, told): no month -> the next time that day comes; no year -> a date that passed only days ago (up to
+    30) is that past date (told=True: the guest gets past_date), else the next time it comes (10 Jan on 25 Nov -> next
+    January); a full date stays as given (told=True: past_date if it has passed)."""
     day, month, year = parts
     if month is None:
         return _day_from(day, today.year, today.month, today), False
     if year is None:
+        last = _last_time(day, month, today)
+        if last is not None and 0 < (today - last).days <= RECENT_PAST_DAYS:
+            return last, True
         return _date_from(day, month, today), False
     return date(year, month, day), True
 
@@ -618,8 +641,8 @@ class AgentTools:
         if problem:
             return done(False, {"problem": problem}, "Tell the guest nothing invented; ask which room they mean.")
 
-        # 3. a full date (day, month and year) that has passed is told; a date without month or year never is
-        if ci and full and ci < today:
+        # 3. a full date that has passed, or a date without a year that passed only days ago (up to 30), is told
+        if ci and full and ci < today:  # full = told by build_check_in
             self._send("past_date", lang, day=_label(ci))
             enq.check_in = enq.check_out = None
             return done(True, {"problem": "the check-in date has passed"}, SENT_NOTE)
@@ -882,11 +905,27 @@ class AgentTools:
             enq.save(repo, phone)
             return self._result(True, {"photos": 0, "waiting_for": "location"}, start, enq,
                                 SENT_NOTE + " The photos follow once the guest names the resort.")
-        facts = self._photos(enq, prop, kind, room_type, lang)
+        if enq.paid or self._paid_stay(enq):
+            # after payment photos are still always allowed: planned without dates, so the guest's own paid booking
+            # never makes their room look 'not free' (fix round 4)
+            view = Enquiry(place=enq.place, room_picks=enq.room_picks, language=enq.language)
+            facts = self._photos(view, prop, kind, room_type, lang)
+        else:
+            facts = self._photos(enq, prop, kind, room_type, lang)
         enq.save(repo, phone)
         return self._result("problem" not in facts, facts, start, enq,
                             SENT_NOTE if len(self.out.keys) > start else
                             "Nothing was sent. Answer in one short line (no photos are uploaded yet).")
+
+    def _paid_stay(self, enq: Enquiry) -> bool:
+        """The guest has a PAID booking for the enquiry's dates (or any upcoming one when no dates are known)."""
+        today = self.bot._today()
+        for b in self.bot.repo.list_bookings(phone=self.phone, limit=10):
+            if b.status == "paid" and b.check_out >= today and (
+                    not enq.check_in or (b.check_in < (enq.check_out or enq.check_in) and b.check_out > enq.check_in)
+                    or b.check_in == enq.check_in):
+                return True
+        return False
 
     def _relink(self, enq: Enquiry, prop: Property, bk: dict[str, Any], parts: list[dict[str, Any]], mix: Any,
                 held: list[Any], lang: str, rooms_line: tuple[str, str], same_dates: bool, picked_now: bool,

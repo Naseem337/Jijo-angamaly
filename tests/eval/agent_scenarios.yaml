@@ -15,6 +15,12 @@
 #   must_not:     words that must not appear in anything the guest got this turn (case-insensitive).
 #   expect_text:  text that must appear (exactly, case-sensitive) in what the guest got.
 #   outcome:      the gate's outcome (opt_out, opt_in, restart, silent, ...).
+#   max_words:    the AI's OWN line has at most this many words (an empty line passes).
+#   ai_empty:     true = the AI wrote no line of its own.   ai_required: true = it did write one.
+#   in_order:     these keys went out in this order, others may come between ("a|b" = either).
+#   only_sent:    the guest got exactly these keys (staff alerts aside).
+#   no_duplicates: true = no text went twice in this turn.
+# Scenario level: closed: [name, ...] = those resorts are switched OFF in the dashboard for this scenario.
 # Tone (AI judge, 1-5, fail below 4): short, polite, the guest's language, answers what was asked.
 
 # ───────────────────────── happy paths ─────────────────────────
@@ -412,6 +418,7 @@
       expect_tools: [update_enquiry]
       expect_sent: [not_our_place]
       expect_text: "Sorry, we have properties only in Alleppey and Kanthalloor."
+      must_not: ["listings", "anything else"]
 
 - id: place_never_guessed  # the AI may not fill a place the guest did not write: the location question goes
   turns:
@@ -448,3 +455,133 @@
     - guest: "how is the weather in december?"
       not_sent: [handoff, staff]
       must_not: ["anything else", "feel free", "as an AI", "owner", "don't hesitate", "please note"]
+
+# ───────────────────────── fix round 4 ─────────────────────────
+- id: closed_place_then_yes  # Kanthalloor switched off: closed_place; "yes" -> the form (AI asks nothing itself)
+  closed: [Kanthalloor]
+  turns:
+    - guest: "Vibes Kanthalloor"
+      expect_sent: [closed_place]
+    - guest: "yes"
+      expect_sent: [form]
+      must_not: ["check-in", "check-out", "adults", "dates"]
+    - guest: "ok"
+      not_sent: [form]
+      max_words: 10
+
+- id: not_our_place_2  # Munnar is NOT used here: in the dashboard Munnar is Kanthalloor's own town (see the next one)
+  turns:
+    - guest: "do you have rooms in ooty?"
+      expect_tools: [update_enquiry]
+      expect_sent: [not_our_place]
+      must_not: ["listings", "anything else"]
+
+- id: munnar_is_kanthalloor  # Kanthalloor's place is "Kanthalloor, Munnar": munnar is ours, never not_our_place
+  turns:
+    - guest: "do you have rooms in munnar?"
+      expect_tools: [update_enquiry]
+      expect_sent: [form]
+      not_sent: [not_our_place, ask_location]
+
+- id: short_answer
+  turns:
+    - guest: "is there a pool?"
+      max_words: 20
+
+- id: rooms_check_labels  # the owner's order after a room check, a label per room, never room_picked
+  turns:
+    - guest: "Alleppey"
+      expect_sent: [form]
+    - guest: "12 dec to 15 dec, 4 ppl"
+      in_order: [rooms_ok, rooms_plain|rooms_note|rooms_beds, glimpse, room_label, photos, room_label, photos, ask_contact]
+      expect_text: "*Room 102 - Beach View AC Room*"
+      not_sent: [room_picked]
+
+- id: one_room_for_four  # 1 room for 4 adults: the owner's min-rooms text, 2 rooms checked
+  turns:
+    - guest: "Alleppey"
+    - guest: "12 dec to 15 dec, 4 ppl, 1 bedroom enough"
+      expect_sent: [min_rooms, rooms_ok]
+      expect_text: "2 room(s)"
+      must_not: ["₹", "advance"]
+
+- id: ok_after_contact_ask  # "ok" right after the name ask: no repeat, a tiny line or nothing
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+      expect_sent: [ask_contact]
+    - guest: "ok"
+      not_sent: [ask_contact]
+      max_words: 10
+
+- id: photos_after_link  # photos are always allowed, also with a link open for 2 rooms
+  turns:
+    - guest: "Alleppey dec 10 to 12, 4 adults"
+    - guest: "Meera 9847044444"
+      expect_sent: [summary, pay]
+    - guest: "send room pics"
+      expect_tools: [send_photos]
+      in_order: [room_label, photos]
+      must_not: ["not free", "can't share"]
+
+- id: other_room_then_choose  # 'any other room?' only shows it; 'take that one' switches, closes the link, new link
+  turns:
+    - guest: "Kanthalloor dec 12 to 14, 2 adults"
+      expect_sent: [rooms_ok]
+    - guest: "Meera 9847044444"
+      expect_sent: [summary, pay]
+    - guest: "any other room?"
+      expect_tools: [send_photos]
+      in_order: [other_room_free, room_label, photos]
+      not_sent: [room_picked, summary]
+    - guest: "ok take that one"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {room_picks: deluxe}}
+      in_order: [room_picked, summary, pay]
+
+- id: casual_photos
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "pics?"
+      expect_tools: [send_photos]
+      must_not: ["can't share"]
+
+- id: no_expiry_talk
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+      expect_tools: [create_booking]
+      expect_sent: [summary, pay]
+      must_not: ["minutes", "expire"]
+
+- id: paid_not_paid  # the guest says paid, the provider says not yet: the owner's text only
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "paid"
+      expect_tools: [check_payment]
+      expect_sent: [pay_wait]
+      ai_empty: true
+
+- id: is_it_secure
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+    - guest: "is it secure"
+      ai_required: true
+      max_words: 15
+      no_duplicates: true
+
+- id: pets_no_policy  # not in FACTS: only the handoff text (team), nothing of the AI's own
+  turns:
+    - guest: "is pets allowed"
+      only_sent: [handoff]
+      expect_text: "team"
+      must_not: ["owner", "passed", "link"]
+
+- id: recent_past_date  # owner rule: a date without a year that passed only days ago -> past_date
+  turns:
+    - guest: "Alleppey 20 Nov to 22 Nov, 2 adults"
+      expect_tools: [update_enquiry]
+      expect_sent: [past_date]
+      not_sent: [rooms_ok]

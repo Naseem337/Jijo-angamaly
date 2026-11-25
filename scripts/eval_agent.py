@@ -177,6 +177,30 @@ def check_turn(turn: dict[str, Any], outcome: str, calls: list[dict[str, Any]], 
     for word in turn.get("must_not") or []:  # the AI's OWN words only: the owner's fixed texts are his exact wording
         if word.lower() in ai.lower():
             bad.append(f"forbidden '{word}' in the AI's reply")
+    if (most := turn.get("max_words")) is not None and len(ai.split()) > int(most):
+        bad.append(f"the AI's own line has {len(ai.split())} words (max {most}): {ai[:80]!r}")
+    if turn.get("ai_empty") and ai:
+        bad.append(f"the AI wrote its own line, expected nothing: {ai[:80]!r}")
+    if turn.get("ai_required") and not ai:
+        bad.append("the AI wrote no line of its own")
+    if want_order := turn.get("in_order"):  # these keys, in this order (other keys may come between)
+        at = 0
+        for want in want_order:
+            hit = next((i for i in range(at, len(keys)) if any(key_hit(w, [keys[i]]) for w in str(want).split("|"))),
+                       None)
+            if hit is None:
+                bad.append(f"'{want}' not sent in order (sent: {keys})")
+                break
+            at = hit + 1
+    if (only := turn.get("only_sent")) is not None:  # the guest got exactly these keys (staff alerts aside)
+        got = [k for k in keys if not k.startswith("staff:")]
+        if sorted(got) != sorted(only):
+            bad.append(f"sent {got}, expected only {only}")
+    if turn.get("no_duplicates"):
+        for i, a in enumerate(texts):
+            if any(near_same(a, b) for b in texts[i + 1:]):
+                bad.append(f"the same text went twice: {a[:60]!r}")
+                break
     if (want := turn.get("expect_text")) and want not in blob:
         bad.append(f"text missing: {want!r}")
     if (want := turn.get("outcome")) and outcome != want:
@@ -191,6 +215,11 @@ def check_turn(turn: dict[str, Any], outcome: str, calls: list[dict[str, Any]], 
 
 def run_scenario(sc: dict[str, Any], llm: Any) -> dict[str, Any]:
     w = scratch_world(llm)
+    for name in sc.get("closed") or []:  # resorts switched OFF in the dashboard for this scenario
+        for p in w.repo.list_properties(active_only=False):
+            if name.lower() in p.name.lower():
+                p.active = False
+                w.repo.save_property(p)
     real_turn = gate.run_turn
 
     def capture(*a, **k):
