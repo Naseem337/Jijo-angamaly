@@ -19,6 +19,8 @@ def _ignore_local_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     (An empty value wins over .env, because load_dotenv never overwrites existing vars.)"""
     monkeypatch.setenv("LLM_CHAIN", "")
     monkeypatch.setenv("TRUECHOICE_INVENTORY_ADAPTER", "")  # tests use the mock stock
+    monkeypatch.setenv("AGENT_TEST_PHONES", "")  # the owner-test allowlist and staff override never leak into tests
+    monkeypatch.setenv("STAFF_ALERT_PHONES", "")
 
 
 @pytest.fixture

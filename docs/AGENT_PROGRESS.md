@@ -236,7 +236,22 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
 - Tests: tests/resort/test_agent_fix_round5.py; earlier tests moved to the new rules (no step re-sent right after it went,
   one-sentence replies, language required, no Kochi example).
 
+## AI-6 setup (2026-11-25): tester allowlist for the test WhatsApp number
+- `AGENT_TEST_PHONES` (config `agent_test_phones`, comma-separated, normalized to E.164): with AGENT_MODE=agent only these
+  guest phones get the agent; any other phone -> no reply, the message is only de-duplicated, and a log line "Agent:
+  <masked> is not a tester: no reply" (`gate.is_tester`, outcome `not_a_tester`). Empty = the agent answers everyone.
+  AGENT_MODE stays global (one switch for the whole service); the allowlist narrows it per phone. AGENT_MODE=old ignores it.
+- `STAFF_ALERT_PHONES` (config `staff_alert_phones`): when set, EVERY staff alert (agent and old code, payment webhook,
+  sweeper) goes only to these numbers: `gate.staff_override` replaces `staff_numbers()` on the one bot object built in
+  `services.ResortServices.bot`. Empty = as before (RESORT_STAFF_NUMBERS + each resort's dashboard staff numbers).
+- Payments: RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET (test keys start with rzp_test_; both .env and data/railway_resort.env
+  already hold test-mode keys), RAZORPAY_WEBHOOK_SECRET for /resort/razorpay/webhook (empty today: only check_payment's
+  polling confirms payments until it is set).
+- tests/conftest.py blanks AGENT_TEST_PHONES and STAFF_ALERT_PHONES (a local .env never leaks into tests). Tests:
+  tests/resort/test_agent_tester_switch.py.
+
 ## Next
+- AI-6: the owner tests on the test number (Railway: AGENT_MODE=agent + AGENT_TEST_PHONES + STAFF_ALERT_PHONES).
 - Run the real-AI eval (the user runs `scripts\eval_agent.py`), then fix what fails with general rules.
 - AI-6 is now the OWNER TESTING on a test WhatsApp number with `AGENT_MODE=agent` (shadow mode dropped: no live traffic).
 - Then AI-7 switch, AI-8 cleanup.

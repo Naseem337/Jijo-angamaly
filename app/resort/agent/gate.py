@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.core.phone import mask_phone
+from app.core.phone import mask_phone, try_normalize_phone
 from app.resort.agent.outbox import Outbox, bot_outbox
 from app.resort.agent.state import Enquiry
 from app.resort.agent.tools import I18N_LANG
@@ -40,6 +40,9 @@ def handle(bot: Any, msg: Any, *, dry_run: bool = False) -> str:
     now, phone = bot.clock.now(), msg.phone
     if not bot.repo.mark_event_processed(msg.id, now):
         return "duplicate"
+    if not is_tester(bot, phone):  # AI-6: the owner's test runs only for the listed phones
+        log.info("Agent: %s is not a tester: no reply", mask_phone(phone))
+        return "not_a_tester"
     bot.repo.touch_guest(phone, now, name=profile_name(msg.profile_name))
     box = bot_outbox(bot, phone, dry_run=dry_run)
     lang = I18N_LANG[Enquiry.load(bot.repo, phone).language]
@@ -85,6 +88,20 @@ def handle(bot: Any, msg: Any, *, dry_run: bool = False) -> str:
         llm = bot._llm() if bot._llm else None
         result = run_turn(bot, llm, phone, text, box, swipe=swipe_note(bot, phone, msg.context_id))
         return result.outcome
+
+
+def is_tester(bot: Any, phone: str) -> bool:
+    """AGENT_TEST_PHONES lists the phones the agent answers during the owner's test; empty = everyone."""
+    testers = list(getattr(bot.config, "agent_test_phones", []) or [])
+    return not testers or (try_normalize_phone(phone) or phone) in testers
+
+
+def staff_override(bot: Any) -> None:
+    """Test setup: STAFF_ALERT_PHONES set -> every staff alert of this bot goes only to those numbers (the old code and
+    the agent both ask bot.staff_numbers(), so it is replaced on this bot object; nothing else changes)."""
+    only = list(getattr(bot.config, "staff_alert_phones", []) or [])
+    if only:
+        bot.staff_numbers = lambda property_id=None: list(only)
 
 
 def _mark_read(bot: Any, msg: Any) -> None:

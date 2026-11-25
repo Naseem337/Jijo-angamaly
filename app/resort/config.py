@@ -34,6 +34,11 @@ class ResortConfig(BaseModel):
     # Which brain answers guests (docs/AI_AGENT_DESIGN.md): old = today's bot, shadow = old answers and the AI-first
     # agent runs dry on the same message, agent = the AI-first agent answers. Set with AGENT_MODE.
     agent_mode: str = "old"
+    # AI-6 owner test: with agent_mode=agent only these guest phones get the agent (AGENT_TEST_PHONES); any other phone
+    # gets no reply. Empty = the agent answers everyone.
+    agent_test_phones: list[str] = []
+    # test setup: when set (STAFF_ALERT_PHONES), every staff alert goes ONLY to these numbers (not the dashboard ones)
+    staff_alert_phones: list[str] = []
     staff_numbers: list[str] = []
     templates: ResortTemplates = ResortTemplates()
     speaking_style: str = ""
@@ -47,7 +52,7 @@ class ResortConfig(BaseModel):
             raise ValueError(f"agent_mode must be one of {', '.join(AGENT_MODES)} (got {v!r})")
         return mode
 
-    @field_validator("staff_numbers", mode="before")
+    @field_validator("staff_numbers", "agent_test_phones", "staff_alert_phones", mode="before")
     @classmethod
     def _split(cls, v: Any) -> list[str]:
         if not v:

@@ -53,9 +53,13 @@ class ResortServices:
 
     @cached_property
     def bot(self) -> BookingBot:
-        return BookingBot(self.config, self.repo, self.whatsapp, self.payments, self.clock,
-                          llm=lambda: self.llm, voice_in=self._voice_in, debounce_s=2.0, patience_s=5.0,
-                          followup_s=10.0)
+        from app.resort.agent.gate import staff_override
+
+        bot = BookingBot(self.config, self.repo, self.whatsapp, self.payments, self.clock,
+                         llm=lambda: self.llm, voice_in=self._voice_in, debounce_s=2.0, patience_s=5.0,
+                         followup_s=10.0)
+        staff_override(bot)  # STAFF_ALERT_PHONES (test setup): staff alerts only to those numbers
+        return bot
 
 
 def build_resort_services(settings: Settings | None = None) -> ResortServices:
