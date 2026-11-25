@@ -1,3 +1,8 @@
+## Tests
+- While working: run only the test files for the current change, with -q -x.
+- Full tests/resort: once per prompt, at the end. Show ONLY the final summary line and the names of failing tests, never the full output.
+
+
 # CLAUDE.md: handoff notes for Claude Code
 
 Multi-client WhatsApp AI agent for pre-owned car dealers. First client: **True Choice** (Kerala),
@@ -20,6 +25,12 @@ everything above it. Build order is PLAN.md §6.
   is filled in and its length.
 - Run tests with `.venv\Scripts\python.exe -m pytest -q`. Code must stay 3.12-compatible, because
   Lambda runs 3.12 and the local machine has 3.13.
+
+## Secrets
+
+Secrets live only in .env (local) and Railway variables. Never hard-code, print, log or commit them.
+`.githooks/pre-commit` blocks key-like strings and `.env` / database files (turn it on once with
+`.venv\Scripts\python.exe scripts\install_hooks.py`). `tests/unit/test_secret_check.py` runs the same check on all tracked files.
 
 ## Resort bot → AI-first agent: the one rule (2026-11-24)
 

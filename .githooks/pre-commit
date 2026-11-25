@@ -1,0 +1,7 @@
+#!/bin/sh
+# Blocks commits that contain API keys/tokens or .env / database files.
+# Installed by: python scripts/install_hooks.py
+if [ -x ".venv/Scripts/python.exe" ]; then PY=".venv/Scripts/python.exe";
+elif [ -x ".venv/bin/python" ]; then PY=".venv/bin/python";
+else PY="python"; fi
+exec "$PY" scripts/secret_check.py --staged
