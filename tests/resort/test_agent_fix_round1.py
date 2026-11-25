@@ -39,9 +39,12 @@ def test_a_wish_to_book_with_no_details_gets_the_owners_location_question(world)
 
 
 def test_the_ais_own_question_for_the_place_is_dropped_and_the_owner_text_goes(world):
-    res, box = go(world, "I need a room", reply("Sure! Which resort or place are you looking for?"))
-    assert res.sent == ["ai", "ask_location"] and texts(box)["ai"] == "Sure!"  # even before any tool started the enquiry
-    res, box = go(world, "I need a room", reply("Which resort or place are you looking for?"))
+    # fix round 5: asking which place is booking talk -> one retry, still no update_enquiry -> dropped, the code asks
+    res, box = go(world, "I need a room", reply("Sure! Which resort or place are you looking for?"),
+                  reply("Sure! Which resort or place are you looking for?"))
+    assert res.sent == ["ask_location"] and res.retried
+    res, box = go(world, "I need a room", reply("Which resort or place are you looking for?"),
+                  reply("Which resort or place are you looking for?"))
     assert res.sent == ["ask_location"] and res.outcome == "never_silent"
 
 
@@ -69,9 +72,10 @@ def test_a_mid_chat_hi_gets_a_short_line_and_the_open_step_from_code(world):
     w = world
     go(w, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
     w.clock.advance(minutes=1)
-    res, box = go(w, "hi", reply("Hi sir! To proceed, please share your name and mobile number."), live=True)
-    assert res.sent == ["ai", "ask_contact"] and texts(box)["ai"] == "Hi sir!"
-    assert w.wa.texts(GUEST)[-1] == t("ask_contact", "en")
+    res, box = go(w, "hi", reply("Hi sir! To proceed, please share your name and mobile number."),
+                  reply("Hi sir! Please share your name and mobile number."), live=True)
+    assert res.sent == ["ai"] and texts(box)["ai"] == "Hi sir!"  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
+    assert w.wa.texts(GUEST)[-2] == t("ask_contact", "en")
 
 
 def test_the_open_step_follows_an_answer_but_never_twice_in_a_row(world):
@@ -79,7 +83,7 @@ def test_the_open_step_follows_an_answer_but_never_twice_in_a_row(world):
     go(w, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
     w.clock.advance(minutes=1)
     res, _ = go(w, "is there a pool?", reply("Yes, there is a pool."), live=True)
-    assert res.sent == ["ai", "ask_contact"]
+    assert res.sent == ["ai"]  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
     enq = Enquiry.load(w.repo, GUEST)
     box = bot_outbox(w.bot, GUEST, dry_run=True)
     assert due_step(w.bot, GUEST, enq, "en", box) is None  # ask_contact is already the last message in the chat
@@ -104,7 +108,7 @@ def test_an_open_payment_link_is_sent_again_after_an_answer(world):
     assert "http" in link
     w.clock.advance(minutes=1)
     res, _ = go(w, "is there wifi?", reply("Yes, there is wifi."), live=True)
-    assert res.sent == ["ai", "pay"] and w.wa.texts(GUEST)[-1] == link
+    assert res.sent == ["ai"]  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
     w.clock.advance(minutes=1)
     res, _ = go(w, "hold it, I pay tonight", tool("send_payment_link", reason="hold"), reply("[no reply]"), live=True)
     assert res.sent == ["hold_pay"]  # the hold text IS the payment step: no second link
@@ -166,7 +170,7 @@ def test_talk_to_owner_takes_only_the_six_reasons():
     spec = next(s for s in TOOL_SCHEMAS if s.name == "talk_to_owner")
     assert spec.parameters["properties"]["reason"]["enum"] == ["pay_terms", "guest_called", "cannot_answer",
                                                                "call_request", "change_or_cancel_paid", "other"]
-    assert "staff_note" in spec.parameters["properties"] and spec.parameters["required"] == ["reason"]
+    assert "staff_note" in spec.parameters["properties"] and spec.parameters["required"] == ["reason", "language"]
     assert list(OWNER_REASONS) == spec.parameters["properties"]["reason"]["enum"]
 
 

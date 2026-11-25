@@ -107,7 +107,7 @@ def test_how_may_i_assist_you_only_as_the_first_greeting(world):
     go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
     w.clock.advance(minutes=1)
     res, box = go(w, "hi", reply("Hi, How may I assist you?"))
-    assert res.sent == ["ai", "ask_contact"] and texts(box)["ai"] == "Hi sir."
+    assert res.sent == ["ai"] and texts(box)["ai"] == "Hi sir."  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
 
 
 @pytest.mark.parametrize("line,kept", [("Hi sir! How can I help you?", "Hi sir!"), ("How may I assist you?", "Hi sir."),
@@ -253,7 +253,7 @@ def test_a_sent_claim_with_no_sending_tool_is_dropped_in_the_turn(world):
     go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
     w.clock.advance(minutes=1)
     res, _ = go(w, "did you send it?", reply("Yes, I have sent it again."), live=True)
-    assert "ai" not in res.sent and res.sent == ["ask_contact"]  # the open step still answers (never silent)
+    assert "ai" not in res.sent and res.sent == ["sure"]  # fix round 5: the step was just sent -> "Sure sir."
 
 
 @pytest.mark.parametrize("line", ["Your link is open for 10 more minutes.", "Please pay within 15 minutes.",

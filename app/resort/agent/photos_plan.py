@@ -64,6 +64,13 @@ def last_text(bot: Any, phone: str, out: Outbox) -> str:
     return bot.repo.last_outbound_text(phone) or ""
 
 
+def recent_texts(bot: Any, phone: str, n: int = 2) -> list[str]:
+    """The last `n` texts we sent this guest BEFORE this turn (photos and log marks are not messages)."""
+    rows = [m.text for m in bot.repo.list_chat(phone, limit=40)
+            if m.direction == "out" and not m.text.startswith("[") and m.text.strip()]
+    return rows[-n:]
+
+
 def already_said(bot: Any, phone: str, out: Outbox, text: str) -> bool:
     return any(i.kind == "text" and i.text == text for i in (*out.sent, *out.queue)) or bot._already_sent(phone, text)
 
@@ -203,9 +210,13 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
         todo = [rt for rt in [current, *others] if unsent(refs_of[rt.id])]
         if todo:
             return Plan([(rt, unsent(refs_of[rt.id])) for rt in todo])
-        if dated and other_free:
-            return Plan(problem="other_free", room=other_free[0].name)  # 'any other room available?': it IS free
-        return Plan(problem=none_left)
+        # everything was shown (fix round 5): the same fallback as default / more, never 'no other room is free'
+        for rt in [current, *other_free]:
+            if refs := more_numbers(bot, rt, enq, sent, phone):
+                return Plan([(rt, refs)])
+        if general := unsent(prop.photo_urls):
+            return Plan([(None, general)])
+        return Plan(problem="photos_sent")
     if kind == "other_room":
         if others:
             return Plan([(others[0], unsent(refs_of[others[0].id]))],

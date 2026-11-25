@@ -469,7 +469,7 @@ def test_there_are_11_schemas_that_say_when_to_use_each_tool():
         assert set(spec.parameters.get("required", [])) <= set(spec.parameters["properties"]), spec.name
     by = {x.name: x for x in TOOL_SCHEMAS}
     assert by["send_payment_link"].parameters["properties"]["reason"]["enum"] == ["lost", "hold", "not_paid_yet"]
-    assert by["create_booking"].parameters["required"] == ["mobile"]  # the name may be empty
+    assert by["create_booking"].parameters["required"] == ["mobile", "language"]  # the name may be empty
 
 
 def test_every_tool_has_a_handler_and_an_unknown_one_is_a_normal_result(world):

@@ -160,10 +160,8 @@ def test_not_our_place_lists_only_the_open_resorts_from_the_dashboard(world):
     assert Enquiry.load(world.repo, GUEST).place == world.p1.id
 
 
-def test_the_prompt_example_names_the_dashboard_towns(world):
-    go(world, "hi", reply("Hi, How may I assist you?"))
-    assert "we have properties only in Alleppey and Munnar." in world.llm.calls[-1].system
-    assert "{towns}" in SYSTEM
+def test_the_prompt_has_no_place_example_any_more():  # fix round 5: the AI copied it instead of calling the tool
+    assert "kochi" not in SYSTEM.lower() and "we have properties" not in SYSTEM
 
 
 # --------------------------------------------------------------------------- 0c) restart
@@ -300,7 +298,7 @@ def test_a_short_fine_reply_is_not_retried(world):
 
 def test_the_new_talk_rules_are_in_the_prompt():
     assert "Reply like a busy, warm front-desk person on WhatsApp, not a bot." in SYSTEM
-    assert "Guest: is there a pool? → Yes sir, there is a pool." in SYSTEM
+    assert "Guest: is there a pool? (FACTS says yes) → Yes sir, there is a pool." in SYSTEM
 
 
 # --------------------------------------------------------------------------- Part 2: rooms, labels, photos

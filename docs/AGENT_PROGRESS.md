@@ -206,6 +206,36 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
   munnar_is_kanthalloor scenario checks it counts as ours.
 - Tests: tests/resort/test_agent_fix_round4.py.
 
+## Fix round 5 (2026-11-25): from the round-4 eval root causes (36/62 scenarios, 133/186 runs)
+- Booking talk to tools: HOW YOU TALK keeps only non-booking examples (pool, parking, is it secure, weather; the Kochi
+  example was copied word for word by the AI). New prompt lines: place / resort / dates / persons / rooms = booking
+  information -> update_enquiry; "ok" / "thanks" with nothing to answer -> write nothing. Guard (`guard.booking_talk`, AI
+  text only): the line names a dashboard resort / town (`place_names`, aliases included) together with rooms / property /
+  available / a question, or says "we have properties", or asks which place / resort, and neither update_enquiry nor a
+  sending tool ran -> ONE retry ("This is booking information. Call update_enquiry instead of answering yourself."); still
+  no call -> the line is dropped and the code's open step / quiet reply goes. "December in Alleppey is cool" is not caught.
+- Shorter lines: guard limit 1 sentence / 20 words (retry "Say it in one short sentence, under 15 words.", then the first
+  sentence). When tools sent messages this turn, the AI's line is dropped if it only talks about them
+  (`guard.restates_tools`: photos / map / form / link / here are / below / sent ..., or half its words are in the tools'
+  texts). Prompt: "Answer only what was asked. No extra selling points unless the guest asks about the resort."
+- No re-sent steps: `due_step` skips a step among the last 2 messages we sent (`pp.recent_texts`; for pay: any text with
+  the same link) when only the AI spoke this turn; when a fixed text spoke (a handoff, photos) the step still follows
+  (round-3 rule e). Nothing at all went out (`turn.quiet_reply`): open unpaid link -> `pay_nudge` once ("Please complete
+  the advance payment to confirm your booking."), when pay_nudge or the link is among the last 2 -> "Sure sir." (`sure`);
+  else the open step when it is not among the last 2; else "Sure sir.", nothing when that was the last message; a first
+  message with nothing known still gets say_again. New i18n keys pay_nudge, sure (4 variants each).
+- Language: `language` is REQUIRED in every tool schema that has it (all but my_bookings / recall_old_chat); code still
+  falls back to the last language.
+- Dates: check_in / check_out description: "'20 Nov' → {day: 20, month: 11}. A month word the guest wrote is ALWAYS copied.
+  Only leave month null if the guest wrote no month."
+- send_photos(all_rooms) with everything shown: the default / more fallback (next room number, then general photos, then
+  photos_sent), never no_other_room.
+- Owner rules in tool descriptions: talk_to_owner "NOT for the first discount ask ..."; send_payment_link "hold, reserve,
+  pay later/tonight/tomorrow with an open enquiry -> reason hold". update_enquiry facts carry `resort` (the resort code
+  resolved); the eval checks `place` against it (free_text_one_message: 'kanthaloor' is right).
+- Tests: tests/resort/test_agent_fix_round5.py; earlier tests moved to the new rules (no step re-sent right after it went,
+  one-sentence replies, language required, no Kochi example).
+
 ## Next
 - Run the real-AI eval (the user runs `scripts\eval_agent.py`), then fix what fails with general rules.
 - AI-6 is now the OWNER TESTING on a test WhatsApp number with `AGENT_MODE=agent` (shadow mode dropped: no live traffic).

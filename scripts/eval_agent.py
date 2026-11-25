@@ -161,6 +161,8 @@ def check_turn(turn: dict[str, Any], outcome: str, calls: list[dict[str, Any]], 
             continue
         got = dict(mine[-1]["args"] or {})
         facts = (mine[-1].get("result") or {}).get("facts") or {}
+        if "place" in got and (facts.get("resort") or facts.get("place")):
+            got["place"] = facts.get("resort") or facts.get("place")  # the resort CODE resolved, not the AI's spelling
         for k in ("check_in", "check_out"):  # the AI passes {day, month, year}: the DATE CODE BUILT is what is checked
             if isinstance(got.get(k), dict) or (k == "check_out" and k not in got and facts.get(k)):
                 got[k] = facts.get(k, got.get(k))

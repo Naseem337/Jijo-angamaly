@@ -21,7 +21,7 @@ from typing import Any
 from app.providers.llm import ChatMessage
 from app.resort.agent import guard
 from app.resort.agent import photos_plan as pp
-from app.resort.agent.outbox import Outbox
+from app.resort.agent.outbox import Outbox, near_same
 from app.resort.agent.prompt import build_system_prompt
 from app.resort.agent.state import Enquiry
 from app.resort.agent.tools import I18N_LANG, STEP_SHOWN, TOOL_SCHEMAS, AgentTools, live_link, pay_text
@@ -173,10 +173,20 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         reply = _own_text(response)
         if tools.quiet:  # talk_to_owner(cannot_answer / call_request / other / guest_called): only the fixed text goes
             return ""
-        if reply and outbox.spoke and guard.repeats_tools(reply):  # g) the tools already said it
+        if reply and outbox.spoke and (guard.repeats_tools(reply) or guard.restates_tools(reply, outbox.texts)):
+            # g) the tools already said it; fix round 5: a line that only talks about what the tools sent goes too
             log.info("Guard: the AI's line repeats the tools' messages for %s; dropped", phone[-4:])
             return ""
         return reply
+
+    names = guard.place_names(bot)
+
+    def booking(reply: str) -> list[str]:
+        """Fix round 5: the AI answered booking information itself (a resort / town with rooms or availability, 'we
+        have properties', which place?) and update_enquiry did not run: it must call the tool instead."""
+        if reply and "update_enquiry" not in tools.ran and not tools.sending_ran and guard.booking_talk(reply, names):
+            return [guard.BOOKING_RETRY]
+        return []
 
     reply, src, blocked = "", None, False
     try:
@@ -186,17 +196,21 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         reply = own(response)
         found, src = check(reply)
         style = guard.style_problems(reply)  # too long / a banned phrase (fix round 3)
-        if found or style:  # design section 6: ONE retry, the AI is told exactly what was wrong
-            result.guard, result.retried = found + style, True
-            log.info("Guard: retry for %s: %s", phone[-4:], found + style)
+        wrong = found + style + booking(reply)
+        if wrong:  # design section 6: ONE retry, the AI is told exactly what was wrong
+            result.guard, result.retried = wrong, True
+            log.info("Guard: retry for %s: %s", phone[-4:], wrong)
             messages.append(ChatMessage("assistant", reply))
-            messages.append(ChatMessage("user", guard.retry_message(found + style)))
+            messages.append(ChatMessage("user", guard.retry_message(wrong)))
             response = ask()
             reply = own(response)
             found, src = check(reply)
             if found:
                 blocked, reply = True, ""
                 result.guard = result.guard + found
+            elif booking(reply):  # still answering booking information itself: dropped, the code's open step goes
+                log.info("Guard: booking talk without update_enquiry for %s; dropped", phone[-4:])
+                reply = ""
             elif guard.style_problems(reply):  # still too long or banned: cut, never a handoff
                 reply = guard.fix_style(reply)
     except Exception as exc:  # an LLM outage or a crash must never leave the guest unanswered
@@ -240,9 +254,9 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         if outbox.spoke and not tools.no_step and (step := due_step(bot, phone, enq, lang, outbox,
                                                                     fresh=fresh and not result.calls, asked=asked)):
             outbox.text(*step)  # the open booking step always closes the turn (fix round 1)
-        if not outbox.spoke:  # never silent: the booking step still open, else a short ask to say it again
-            step = pp.open_step(bot, enq, lang)
-            outbox.text(*(step or ("say_again", t("say_again", lang))))
+        if not outbox.spoke:  # never silent: see quiet_reply (fix round 5: no step re-sent after 'ok' / 'thanks')
+            if step := quiet_reply(bot, phone, enq, lang):
+                outbox.text(*step)
             result.outcome = "never_silent"
     outbox.dedupe()  # never the same (or nearly the same) text twice in one turn
     outbox.flush()
@@ -276,7 +290,37 @@ def due_step(bot: Any, phone: str, enq: Enquiry, lang: str, outbox: Outbox, *, f
         found = pp.open_step(bot, enq, lang)
     if found is None or found[1] == pp.last_text(bot, phone, outbox):
         return None
+    tool_spoke = any(i.kind == "photos" or (i.kind == "text" and i.key != "ai") for i in (*outbox.sent, *outbox.queue))
+    if not tool_spoke and _recent(bot, phone, found[1], live_link(bot, phone) if step == "pay" else None):
+        return None  # fix round 5: only the AI spoke ('ok' / 'thanks') and the step is among the last 2 messages
     return found
+
+
+def _recent(bot: Any, phone: str, text: str, link: Any = None) -> bool:
+    """This text (or, for the payment step, any text with the same link) is among the last 2 messages we sent."""
+    recent = pp.recent_texts(bot, phone, 2)
+    url = getattr(link, "payment_link_url", "") or ""
+    return any(near_same(text, x) or (url and url in x) for x in recent)
+
+
+def quiet_reply(bot: Any, phone: str, enq: Enquiry, lang: str) -> tuple[str, str] | None:
+    """Nothing at all went out this turn (the AI wrote nothing, no tool spoke: an 'ok' / 'thanks'). Fix round 5:
+    - an open unpaid link: pay_nudge once; when pay_nudge or the link is among the last 2 messages, a short 'Sure sir.'
+    - else the open step, when it is not among the last 2 messages
+    - else 'Sure sir.' (nothing when that was the last message); a first message with nothing known: say_again."""
+    recent = pp.recent_texts(bot, phone, 2)
+    sure = ("sure", t("sure", lang))
+    if (link := live_link(bot, phone)) is not None and enq.next_step == "pay":
+        nudge = t("pay_nudge", lang)
+        if _recent(bot, phone, nudge, link):
+            return None if recent and near_same(recent[-1], sure[1]) else sure
+        return "pay_nudge", nudge
+    step = pp.open_step(bot, enq, lang)
+    if step is not None and not _recent(bot, phone, step[1]):
+        return step
+    if not greeted(bot, phone):
+        return "say_again", t("say_again", lang)
+    return None if recent and near_same(recent[-1], sure[1]) else sure
 
 
 def _alert_ai_down(bot: Any, outbox: Outbox, phone: str, text: str, enq: Enquiry) -> None:

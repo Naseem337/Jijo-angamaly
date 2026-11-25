@@ -277,8 +277,8 @@ def repeats_tools(reply: str) -> bool:
 
 # ------------------------------------------------------------------ fix round 3: short, human replies (the AI's line only)
 
-MAX_SENTENCES, MAX_WORDS = 2, 30
-TOO_LONG = "Too long. Say the same in under 20 words, one sentence if possible."
+MAX_SENTENCES, MAX_WORDS = 1, 20  # fix round 5 (was 2 / 30)
+TOO_LONG = "Say it in one short sentence, under 15 words."
 BANNED_PHRASES = ("anything else", "is there anything", "other listings", "other hotels", "other options", "feel free",
                   "don't hesitate", "I'm sorry, I only", "I don't have details", "as an AI", "please note that",
                   "I can help you with", "system", "automatically", "the tool", "owner")
@@ -290,7 +290,7 @@ def sentences(reply: str) -> list[str]:
 
 
 def too_long(reply: str) -> bool:
-    """More than 2 sentences or 30 words."""
+    """More than 1 sentence or 20 words."""
     return len(sentences(reply)) > MAX_SENTENCES or len(reply.split()) > MAX_WORDS
 
 
@@ -312,6 +312,50 @@ def fix_style(reply: str) -> str:
     if reply and too_long(reply):
         reply = sentences(reply)[0].strip()
     return reply
+
+
+# ------------------------------------------------------------------ fix round 5: booking talk goes to update_enquiry
+
+BOOKING_RETRY = "This is booking information. Call update_enquiry instead of answering yourself."
+BOOKING_WORDS = re.compile(r"\b(?:propert(?:y|ies)|resorts?|rooms?|available|availability|located|book\w*|stay)\b",
+                           re.IGNORECASE)
+WE_HAVE_PROPERTIES = re.compile(r"\bwe (?:only )?have (?:\w+ ){0,3}?(?:propert(?:y|ies)|resorts?)\b", re.IGNORECASE)
+WHICH_PLACE = re.compile(r"\b(?:which|what|ethu|evide|enga)\b.{0,40}\b(?:place|resort|property|location|town)|"
+                         r"\bwhere\b.{0,30}\b(?:stay|looking|go)\b", re.IGNORECASE)
+
+
+def place_names(bot: Any) -> list[str]:
+    """Every resort and town name of the dashboard (and their aliases), switched on or off."""
+    names: set[str] = set()
+    for p in bot.repo.list_properties(active_only=False):
+        names |= {n for n in bot._place_words(p) if len(n) >= 4}
+    return sorted(names, key=len, reverse=True)
+
+
+def booking_talk(reply: str, names: list[str]) -> bool:
+    """The AI's own line answers booking information itself: it says 'we have properties', asks which place / resort,
+    or names a dashboard resort / town together with rooms, a property, availability or a question."""
+    if WE_HAVE_PROPERTIES.search(reply) or WHICH_PLACE.search(reply):
+        return True
+    named = any(re.search(rf"\b{re.escape(n)}\b", reply, re.IGNORECASE) for n in names)
+    return named and bool(BOOKING_WORDS.search(reply) or "?" in reply)
+
+
+TOOL_REF = re.compile(r"\b(?:photos?|pics?|pictures?|images?|map|here (?:is|are)|below|above|form|details|summary|"
+                      r"link|sent|shared)\b", re.IGNORECASE)
+
+
+def _content(text: str) -> set[str]:
+    return set(re.findall(r"[a-z]{4,}", text.lower()))
+
+
+def restates_tools(reply: str, tool_texts: list[str]) -> bool:
+    """Tools sent messages this turn and the AI's line only talks about them: it points at what was sent (photos, the
+    map, the form, the link, 'here are', 'below') or half of its words are in those messages."""
+    if TOOL_REF.search(reply):
+        return True
+    mine = _content(reply)
+    return bool(mine) and len(mine & _content(" ".join(tool_texts))) * 2 >= len(mine)
 
 
 def is_repeat(bot: Any, phone: str, text: str) -> bool:

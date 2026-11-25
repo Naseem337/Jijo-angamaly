@@ -58,6 +58,8 @@ LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
 
 DATE_FIELD = {"type": "object",
               "description": "Copy only what the guest said. Never fill month or year yourself. '12' -> {day: 12}; "
+                             "'20 Nov' → {day: 20, month: 11}. A month word the guest wrote is ALWAYS copied. Only "
+                             "leave month null if the guest wrote no month. "
                              "'dec 12' -> {day: 12, month: 12}; '12/12/2026' -> {day: 12, month: 12, year: 2026}. Code "
                              "works out the date (a day alone = the next time it comes).",
               "properties": {"day": {"type": "integer", "description": "1-31"},
@@ -162,8 +164,8 @@ TOOL_SCHEMAS = [
     ToolSpec(
         "send_payment_link",
         "Use this when the link is not working, the guest asks to send the link again or lost the link (reason lost), "
-        "wants to hold or reserve the room or pay later (reason hold), or says they have not paid yet (reason "
-        "not_paid_yet). If the old link ran out, code checks the same stay again and sends a new summary and link (or "
+        "or the guest wants to hold the room, reserve, or pay later/tonight/tomorrow with an open enquiry → "
+        "send_payment_link(reason='hold'). The guest says they have not paid yet → reason not_paid_yet. If the old link ran out, code checks the same stay again and sends a new summary and link (or "
         "the owner's text when the rooms are gone). Never explain the hold or when a link expires.",
         {"type": "object", "properties": {
             "reason": {"type": "string", "enum": ["lost", "hold", "not_paid_yet"]},
@@ -184,7 +186,9 @@ TOOL_SCHEMAS = [
          "required": ["name"]}),
     ToolSpec(
         "talk_to_owner",
-        "Use this when you do not know the answer or cannot do what the guest asks. The guest gets the fixed text "
+        "Use this when you do not know the answer or cannot do what the guest asks. NOT for the first discount ask. "
+        "First discount ask → answer yourself in one warm line with a real good point from FACTS. Only the SECOND "
+        "discount ask → talk_to_owner(other). The guest gets the fixed text "
         "for the reason (sent for you). After cannot_answer, call_request, other or guest_called write NOTHING at all "
         "(no link reminder, no 'I've passed it on'). Reasons: "
         "pay_terms = other payment terms (a smaller advance, cash, pay at the property, pay later instead of the online "
@@ -204,6 +208,10 @@ TOOL_SCHEMAS = [
         "link you sent', 'my last enquiry'). Never for a greeting, small talk or a fresh request. Read only.",
         {"type": "object", "properties": {"query": {"type": "string", "description": "what you are looking for"}}}),
 ]
+# fix round 5: `language` is REQUIRED in every tool that sends the guest text (code still falls back to the last one)
+for _spec in TOOL_SCHEMAS:
+    if "language" in _spec.parameters["properties"] and "language" not in _spec.parameters.get("required", []):
+        _spec.parameters["required"] = [*_spec.parameters.get("required", []), "language"]
 TOOLS = TOOL_SCHEMAS  # the same list, under the name AI-2a used
 
 
@@ -570,6 +578,8 @@ class AgentTools:
         def done(ok: bool, facts: dict[str, Any], note: str) -> dict[str, Any]:
             enq.started = True
             enq.save(repo, phone)
+            if enq.place and (known := repo.get_property(enq.place)) is not None:
+                facts.setdefault("resort", bot._place_label(known))  # the resort code resolved (the eval checks it)
             return self._result(ok, facts, start, enq, note)
 
         # 1. the place: only one the guest wrote in this chat counts (else it is ignored); unknown -> the owner's
