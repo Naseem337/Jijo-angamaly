@@ -83,7 +83,7 @@ def test_the_glimpse_goes_once_and_a_second_check_sends_no_photo_twice(pw):
     w = pw
     run(w, "update_enquiry", STAY)
     result, items, _ = run(w, "update_enquiry", {**STAY, "check_in": "2026-11-20", "check_out": "2026-11-22"})  # new dates
-    assert result["sent"] == ["rooms_ok", "rooms_plain", "ask_contact"]  # glimpse once, every photo already sent
+    assert result["sent"] == ["rooms_ok", "rooms_plain", "ask_contact"]  # glimpse, photos and label once
     assert photo_rows(w) == w.general + w.refs["deluxe"]
 
 
@@ -140,10 +140,12 @@ def test_kind_room_type_sends_that_rooms_photos_when_it_is_free(pw):
     w = pw
     checked(w)
     result, items, _ = run(w, "send_photos", {"kind": "room_type", "room_type": "family"})
-    assert result["ok"] and keys(items)[:3] == ["room_label", "photos:2", "ask_contact"]
-    assert items[0][1] == "*Family Suite*" and items[1][2] == w.refs["family"]
+    # fix round 3: not the offered room (Deluxe) -> 'also free' first, then its label and photos; nothing switches
+    assert result["ok"] and keys(items)[:4] == ["other_room_free", "room_label", "photos:2", "ask_contact"]
+    assert items[1][1] == "*Family Suite*" and items[2][2] == w.refs["family"]
+    assert Enquiry.load(w.repo, GUEST).checked["summary"] == "1 Deluxe"
     again, items, _ = run(w, "send_photos", {"kind": "room_type", "room_type": "family"})
-    assert keys(items) == ["photos_sent"]  # photos already sent
+    assert keys(items) == ["other_free"]  # its photos already went: only 'Yes, Family Suite is also free ...'
 
 
 def test_kind_resort_sends_only_the_general_photos_with_no_label(pw):

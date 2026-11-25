@@ -49,6 +49,7 @@ from app.resort.flow import BookingBot  # noqa: E402
 from app.resort.payments import MockPayments  # noqa: E402
 from app.settings import EnvSecretResolver  # noqa: E402
 from app.whatsapp.parse import InboundMessage  # noqa: E402
+from scripts.agent_test_data import add_test_photos  # noqa: E402
 
 SCENARIOS = ROOT / "tests" / "eval" / "agent_scenarios.yaml"
 OUT = ROOT / "tests" / "eval" / "out"
@@ -114,13 +115,7 @@ def scratch_world(llm: Any) -> World:
     os.environ["RESORT_DB_PATH"] = str(tmp / "r.sqlite3")  # the photo files go next to the scratch database
     repo = ResortRepo(tmp / "r.sqlite3")
     seed.seed(repo)
-    for n, p in enumerate(repo.list_properties(active_only=False)):
-        p.active = True
-        p.photo_urls = [ph.save_photo(PNG + f"p{n}-{i}".encode()) for i in range(3)]
-        repo.save_property(p)
-        for m, rt in enumerate(repo.list_room_types(p.id)):
-            rt.photo_urls = [ph.save_photo(PNG + f"r{n}-{m}-{i}".encode()) for i in range(2)]
-            repo.save_room_type(rt)
+    add_test_photos(repo)  # Kanthalloor switched on, general photos, room numbers and each room's own photo
     cfg = load_resort_config().model_copy(update={"agent_mode": "agent"})
     wa, pay, clock = RecordWA(), MockPayments(), FixedClock(TODAY)
     bot = BookingBot(cfg, repo, wa, pay, clock, llm=lambda: llm)
@@ -164,7 +159,11 @@ def check_turn(turn: dict[str, Any], outcome: str, calls: list[dict[str, Any]], 
             if name not in (turn.get("expect_tools") or []):
                 bad.append(f"tool {name} not called (for its arguments)")
             continue
-        got = mine[-1]["args"] or {}
+        got = dict(mine[-1]["args"] or {})
+        facts = (mine[-1].get("result") or {}).get("facts") or {}
+        for k in ("check_in", "check_out"):  # the AI passes {day, month, year}: the DATE CODE BUILT is what is checked
+            if isinstance(got.get(k), dict) or (k == "check_out" and k not in got and facts.get(k)):
+                got[k] = facts.get(k, got.get(k))
         for k, v in args.items():
             if not arg_ok(got.get(k), v):
                 bad.append(f"{name}.{k} = {got.get(k)!r}, expected {v!r}")
@@ -259,6 +258,10 @@ Lines that start with "SYSTEM:" were sent by the system, not by the bot (the own
 booking step, summaries, payment links, team numbers, photos). NEVER score them and NEVER blame the bot for their
 length, wording or content. They DO count as answering the guest: a link, form or photo the guest asked for that
 went out as SYSTEM is answered. Mark the bot down only when its OWN line repeats a SYSTEM line.
+The resort OWNER's style rules (follow them when scoring): a busy, warm front-desk person on WhatsApp. Short and
+answer-first: one short sentence is best ("Yes sir, there is a pool."). No explanations, no closing lines, no "anything
+else?". A short reply is NOT cold. "sir" once at the start and in short greetings. Saying nothing of its own after
+SYSTEM lines is right. The owner's texts, the open booking step, links and summaries are sent by code, never by the bot.
 Answer ONLY with JSON: {"score": <1-5>, "reason": "<one short line>"}"""
 
 

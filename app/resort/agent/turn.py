@@ -24,7 +24,7 @@ from app.resort.agent import photos_plan as pp
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.prompt import build_system_prompt
 from app.resort.agent.state import Enquiry
-from app.resort.agent.tools import I18N_LANG, TOOL_SCHEMAS, AgentTools, live_link, pay_text
+from app.resort.agent.tools import I18N_LANG, STEP_SHOWN, TOOL_SCHEMAS, AgentTools, live_link, pay_text
 from app.resort.chat import RESTART_MARK
 from app.resort.i18n import t
 
@@ -82,9 +82,19 @@ def history(bot: Any, phone: str) -> list[ChatMessage]:
             messages[-1].content += "\n" + text
         else:
             messages.append(ChatMessage(role, text))
+    opening = []  # what we said before the guest's first message (the greeting after a restart): kept as a note
     while messages and messages[0].role != "user":
-        messages.pop(0)
+        opening.append(messages.pop(0).content)
+    if opening and messages:
+        said = " ".join(" ".join(opening).split())[:300]
+        messages[0].content = f'[You already said: "{said}"]\n' + messages[0].content
     return messages
+
+
+def greeted(bot: Any, phone: str) -> bool:
+    """We already wrote to the guest in this conversation (a restart's greeting counts): it is not a fresh start."""
+    rows = bot.repo.list_chat(phone, limit=200)
+    return any(m.direction == "out" and m.text != RESTART_MARK for m in rows[bot._session_start(rows, by_time=True):])
 
 
 def swipe_note(bot: Any, phone: str, context_id: str | None) -> str:
@@ -126,9 +136,9 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     """Answer one guest message. The outbox is flushed at the end (a dry-run outbox only records)."""
     enq = Enquiry.load(bot.repo, phone)
     messages = _with_guest_message(history(bot, phone), text, swipe)
-    fresh = len(messages) <= 1
+    fresh = len(messages) <= 1 and not greeted(bot, phone)
     system = build_system_prompt(bot, phone, enq, fresh=fresh)
-    tools = AgentTools(bot, phone, outbox)
+    tools = AgentTools(bot, phone, outbox, guest_text=text)
     result = TurnResult("answered")
     response = None
     failure: Exception | None = None
@@ -175,17 +185,20 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         response = ask()
         reply = own(response)
         found, src = check(reply)
-        if found:  # design section 6: ONE retry, the AI is told exactly what was wrong
-            result.guard, result.retried = found, True
-            log.info("Guard: retry for %s: %s", phone[-4:], found)
+        style = guard.style_problems(reply)  # too long / a banned phrase (fix round 3)
+        if found or style:  # design section 6: ONE retry, the AI is told exactly what was wrong
+            result.guard, result.retried = found + style, True
+            log.info("Guard: retry for %s: %s", phone[-4:], found + style)
             messages.append(ChatMessage("assistant", reply))
-            messages.append(ChatMessage("user", guard.retry_message(found)))
+            messages.append(ChatMessage("user", guard.retry_message(found + style)))
             response = ask()
             reply = own(response)
             found, src = check(reply)
             if found:
                 blocked, reply = True, ""
                 result.guard = result.guard + found
+            elif guard.style_problems(reply):  # still too long or banned: cut, never a handoff
+                reply = guard.fix_style(reply)
     except Exception as exc:  # an LLM outage or a crash must never leave the guest unanswered
         failure = exc
         log.warning("AI turn failed: %s", exc)
@@ -250,7 +263,7 @@ def due_step(bot: Any, phone: str, enq: Enquiry, lang: str, outbox: Outbox, *, f
     needs the guest (location, details, extra bed, name and mobile, payment), when its owner text was not sent this
     turn and it is not already the last message we sent."""
     step = enq.next_step
-    if step not in STEP_KEYS or any(k in outbox.keys for k in STEP_KEYS[step]):
+    if step not in STEP_KEYS or any(k in outbox.keys for k in (*STEP_KEYS[step], STEP_SHOWN)):
         return None
     if not asked and (fresh or not enq.active):
         return None

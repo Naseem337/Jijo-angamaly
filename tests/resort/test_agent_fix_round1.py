@@ -141,7 +141,7 @@ def test_a_short_extra_answer_is_not_a_repeat():
 def test_the_ais_line_is_dropped_when_it_repeats_the_tools_messages(world):
     res, box = go(world, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY),
                   reply("Rooms are available from 10 Nov to 12 Nov. Please share your name and mobile."))
-    assert "ai" not in res.sent and not res.retried and res.sent == ["rooms_ok", "rooms_plain", "ask_contact"]
+    assert "ai" not in res.sent and not res.retried and res.sent == ["rooms_ok", "rooms_plain", "room_label", "ask_contact"]
 
 
 def test_a_short_answer_to_another_question_stays_after_the_tools(world):
@@ -221,40 +221,41 @@ def late_month(w):
 
 def test_a_day_without_a_month_that_passed_moves_to_next_month_with_its_check_out(world):
     late_month(world)
-    result, sent, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": "2026-11-12",
-                                                    "check_out": "2026-11-14", "month_given": False, "adults": 2})
+    result, sent, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": {"day": 12},
+                                                    "check_out": {"day": 14}, "adults": 2})
     assert result["facts"]["check_in"] == "2026-12-12" and result["facts"]["check_out"] == "2026-12-14"
     assert "past_date" not in result["sent"]
 
 
 def test_a_day_without_a_month_moves_with_nights_too(world):
     late_month(world)
-    result, _, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": "2026-11-20", "nights": 3,
-                                                 "month_given": False, "adults": 2})
+    result, _, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": {"day": 20}, "nights": 3,
+                                                 "adults": 2})
     assert result["facts"]["check_in"] == "2026-12-20" and result["facts"]["check_out"] == "2026-12-23"
 
 
 def test_a_past_date_with_its_month_given_is_told_as_past(world):
     late_month(world)
-    result, sent, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": "2026-11-20",
-                                                    "check_out": "2026-11-21", "adults": 2, "month_given": True})
+    result, sent, _ = run(world, "update_enquiry", {"place": "Alleppey",
+                                                    "check_in": {"day": 20, "month": 11, "year": 2026},
+                                                    "check_out": {"day": 21}, "adults": 2})
     assert result["sent"] == ["past_date"]
 
 
 def test_a_day_february_does_not_have_skips_to_march(world):
     world.clock.set(world.clock.now().replace(year=2027, month=1, day=31))
-    result, _, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": "2027-01-30", "nights": 1,
-                                                 "month_given": False, "adults": 2})
+    result, _, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": {"day": 30}, "nights": 1,
+                                                 "adults": 2})
     assert result["facts"]["check_in"] == "2027-03-30"  # no 30 Feb
 
 
 def test_check_out_or_nights_is_said_in_the_tool_description():
     spec = next(s for s in TOOL_SCHEMAS if s.name == "update_enquiry")
-    assert "Give check_out OR nights" in spec.description and "month_given" in spec.parameters["properties"]
+    assert "Give check_out OR nights" in spec.description and "month_given" not in spec.parameters["properties"]
 
 
 def test_the_today_block_gives_a_worked_example():
     block = today_block(date(2026, 11, 25))
     assert block.startswith("TODAY\nToday is Wed 25 Nov 2026 (2026-11-25), India time.")
-    assert "A day without a month means the next time it comes (12 → 12 Dec)" in block
-    assert "(12 → 12 Jan)" in today_block(date(2026, 12, 25))
+    assert "Dates: pass only what the guest said ('12' → {day: 12}); code takes the next time it comes (12 Dec)." in block
+    assert "(12 Jan)" in today_block(date(2026, 12, 25))

@@ -137,7 +137,9 @@ def _restart(bot: Any, phone: str, box: Outbox) -> str:
     st = bot.repo.get_state(phone)
     keep = {k: st[k] for k in ("opted_out",) if k in st}
     bot.repo.set_state(phone, keep)  # the agent's Enquiry lives in the state too: it is cleared
+    # the mark goes BEFORE the greeting (fix round 3): the greeting is then part of the new conversation, so the AI
+    # sees it was already said and answers the next message ('I need a room') instead of greeting again
+    bot._log(phone, RESTART_MARK, "system")
     box.text("greet", t("greet", "en"))
     box.flush()
-    bot._log(phone, RESTART_MARK, "system")  # the AI's view of the conversation begins after this line
     return "restart"

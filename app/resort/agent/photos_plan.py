@@ -4,7 +4,8 @@ The old bot found out WHAT the guest wanted with regexes (PHOTO_ASK, ROOM_OPTION
 AI decides and passes `kind`; this file only applies the owner's rules to it:
 
   1. a photo is never sent twice in a conversation;
-  2. the order after a room check: rooms_ok -> rooms sentence -> glimpse -> general photos -> each room's label + photos;
+  2. the order after a room check: rooms_ok -> rooms sentence -> glimpse -> general photos -> FOR EACH offered room its
+     label '*Room <number> - <room type>*' (even with no photo) + its photos -> ask_contact;
   3. a room's photos are those of the exact room the guest would get (108 and 109 can look different);
   4. kinds: room_type (a named room, only if free on the guest's dates), resort (general photos only), other_room (the
      next free room by priority), all_rooms (every free room not shown yet), default / more (the offered room, else the
@@ -38,6 +39,8 @@ class Plan:
     steps: list[tuple[RoomType | None, list[str]]] = field(default_factory=list)  # (room or None for general, photos)
     problem: str = ""  # an i18n key: photos_sent | no_other_room | room_not_free | other_free
     room: str = ""  # the room's name for that text
+    also_free: bool = False  # the room shown is ANOTHER free room than the one offered (dates known): 'Yes, X is also
+    # free for your dates' goes first; it only shows the room, the offer is never switched
 
 
 # ------------------------------------------------------------------ what was sent
@@ -80,22 +83,44 @@ def find_room(bot: Any, rooms: list[RoomType], name: str) -> RoomType | None:
     return bot._room_named(name, rooms) if said else None
 
 
-def next_numbers(bot: Any, rt: RoomType, enq: Enquiry, rooms: int = 1) -> list[str]:
+def next_numbers(bot: Any, rt: RoomType, enq: Enquiry, rooms: int = 1, phone: str = "") -> list[str]:
     """The room numbers the guest would get: the first free ones by the owner's order on their dates (the same rule as
-    when they pay). Without dates: the first numbers in the list."""
+    when they pay). The guest's OWN unpaid hold never counts as taken (a new summary replaces it). Without dates: the
+    first numbers in the list."""
     if not rt.room_list:
         return []
     if not (enq.check_in and enq.check_out):
         return rt.room_list[:rooms]
     now = bot.clock.now()
     probe = Booking(rt.property_id, rt.id, "", enq.check_in, enq.check_out, 1, 0, rooms, 0, 0, now)
-    return av.allocate_rooms(rt, probe, bot.repo.blocking_bookings(rt.id, enq.check_in, enq.check_out), now) \
-        or rt.room_list[:rooms]
+    taken = [b for b in bot.repo.blocking_bookings(rt.id, enq.check_in, enq.check_out)
+             if not (phone and b.status == "hold" and b.guest_phone == phone)]
+    return av.allocate_rooms(rt, probe, taken, now) or rt.room_list[:rooms]
 
 
-def room_refs(bot: Any, rt: RoomType, enq: Enquiry, rooms: int = 1) -> list[str]:
+def room_label(rt: RoomType, number: str = "") -> str:
+    """'*Room 108 - Beach View Standard*': the room the guest would get and its room type name exactly as in the
+    dashboard ('*Beach View Standard*' when the room type has no room numbers)."""
+    return f"*Room {number} - {rt.name}*" if number else f"*{rt.name}*"
+
+
+def offered_sets(bot: Any, rt: RoomType, enq: Enquiry, rooms: int, sent: set[str], phone: str = ""
+                 ) -> list[tuple[str, list[str]]]:
+    """Each offered room of this type as (label, its photos not sent yet), one per room the guest would get. A room
+    with no photos of its own shows the room type's photos (once). A label goes even when there is no photo."""
+    used = set(sent)
+    out: list[tuple[str, list[str]]] = []
+    for number in next_numbers(bot, rt, enq, rooms, phone) or [""]:
+        own = rt.number_photos.get(number, []) if number else []
+        refs = [r for r in dict.fromkeys(own or rt.photo_urls) if r not in used]
+        used |= set(refs)
+        out.append((room_label(rt, number), refs))
+    return out
+
+
+def room_refs(bot: Any, rt: RoomType, enq: Enquiry, rooms: int = 1, phone: str = "") -> list[str]:
     """Photos of the exact room the guest would get, else the room type's photos, else any room number's photos."""
-    own = [r for n in next_numbers(bot, rt, enq, rooms) for r in rt.number_photos.get(n, [])]
+    own = [r for n in next_numbers(bot, rt, enq, rooms, phone) for r in rt.number_photos.get(n, [])]
     if own:
         return list(dict.fromkeys(own))
     if rt.photo_urls:
@@ -146,23 +171,27 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
     def unsent(refs: list[str]) -> list[str]:
         return [r for r in dict.fromkeys(refs) if r not in sent][:MAX_ROOM_PHOTOS]
 
+    picked = {rt.id for p in enq.room_picks if (rt := find_room(bot, rooms, str(p.get("room_type") or "")))}
+    offered_id = (enq.checked or {}).get("pref") or (next(iter(picked)) if len(picked) == 1 else None)
     if kind == "room_type":
         named = find_room(bot, rooms, room_type)
         if named is None:
             return Plan(problem="unknown_room", room=room_type)
         if named not in free:
             return Plan(problem="room_not_free", room=named.name)
-        refs = unsent(room_refs(bot, named, enq))
+        refs = unsent(room_refs(bot, named, enq, 1, phone))
+        offered = next((rt for rt in free if rt.id == offered_id), free[0] if free else None)
+        if dated and (enq.checked or {}).get("available") and offered is not None and named.id != offered.id:
+            # another room than the offered one: shown, never switched; its photos already went -> only 'also free'
+            return Plan([(named, refs)], also_free=True) if refs else Plan(problem="other_free", room=named.name)
         return Plan([(named, refs)]) if refs else Plan(problem="photos_sent")
     if kind == "resort":
         refs = unsent(prop.photo_urls)
         return Plan([(None, refs)]) if refs else Plan(problem="photos_sent")
     if not free:
         return Plan(problem="no_other_room")
-    picked = {rt.id for p in enq.room_picks if (rt := find_room(bot, rooms, str(p.get("room_type") or "")))}
-    chosen_id = next(iter(picked)) if len(picked) == 1 else None
-    current = next((rt for rt in free if rt.id == chosen_id), free[0])
-    refs_of = {rt.id: room_refs(bot, rt, enq) for rt in free}
+    current = next((rt for rt in free if rt.id == offered_id), free[0])
+    refs_of = {rt.id: room_refs(bot, rt, enq, 1, phone) for rt in free}
     others = [rt for rt in free if rt is not current and unsent(refs_of[rt.id])]
     # before any dates every room is shown (owner, 2026-11-21: photos are not restricted); 'not free on your dates' is
     # only said once there ARE dates
@@ -179,7 +208,8 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
         return Plan(problem=none_left)
     if kind == "other_room":
         if others:
-            return Plan([(others[0], unsent(refs_of[others[0].id]))])
+            return Plan([(others[0], unsent(refs_of[others[0].id]))],
+                        also_free=dated and bool((enq.checked or {}).get("available")))
         if dated and other_free:
             # another room IS free, its photos already went (or it has none): never 'no other room is free'
             return Plan(problem="other_free", room=other_free[0].name)
@@ -195,25 +225,32 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
 # ------------------------------------------------------------------ queueing
 
 
-def queue_room(out: Outbox, rt: RoomType, refs: list[str]) -> int:
-    """Each room's label as a text, then its photos (owner, 2026-11-20: a text between two rooms' photos says which
-    room and number they are). Returns the number of photos queued."""
+def queue_room(out: Outbox, rt: RoomType, refs: list[str], number: str = "") -> int:
+    """The room's label as a text, then its photos (owner, 2026-11-20: a text between two rooms' photos says which room
+    and number they are). The label names the room the guest would get (`number`); photos of several room numbers are
+    split under each number's own label. A label goes even with no photo. Returns the number of photos queued."""
+    sets = label_sets(rt, refs)
+    if len(sets) <= 1:
+        sets = [(room_label(rt, number), list(refs))]
     count = 0
-    for label, part in label_sets(rt, refs):
+    for label, part in sets:
         out.text("room_label", label)
-        out.photos(f"photos:{len(part)}", part)
-        count += len(part)
+        if part:
+            out.photos(f"photos:{len(part)}", part)
+            count += len(part)
     return count
 
 
-def queue_steps(out: Outbox, steps: list[tuple[RoomType | None, list[str]]]) -> int:
+def queue_steps(out: Outbox, steps: list[tuple[RoomType | None, list[str]]], bot: Any = None,
+                enq: Enquiry | None = None, phone: str = "") -> int:
     count = 0
     for rt, refs in steps:
         if rt is None:
             out.photos(f"photos:{len(refs)}", refs)  # general photos go without a label
             count += len(refs)
         else:
-            count += queue_room(out, rt, refs)
+            number = next(iter(next_numbers(bot, rt, enq, 1, phone)), "") if bot is not None and enq is not None else ""
+            count += queue_room(out, rt, refs, number)
     return count
 
 

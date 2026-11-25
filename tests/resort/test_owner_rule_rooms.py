@@ -85,7 +85,7 @@ def test_agent_3_adults_1_room_asks_the_question_and_waits(world):
     w = world
     result, texts = update(w, adults=3, rooms=1)
     assert result["facts"]["rooms"] == 1 and result["facts"]["rooms_offered"] == "1 Deluxe"
-    assert result["sent"] == ["rooms_ok", "rooms_plain", "ask_extra_bed"] and texts["ask_extra_bed"] == QUESTION
+    assert result["sent"] == ["rooms_ok", "rooms_plain", "room_label", "ask_extra_bed"] and texts["ask_extra_bed"] == QUESTION
     assert "ask_contact" not in texts and result["next_step"] == "ask_extra_bed" and result["facts"]["extra_bed_question"]
     assert result["facts"]["price"]["total"] == 8000  # nothing added by itself
     # the booking waits for the answer
@@ -183,7 +183,7 @@ def test_agent_a_bed_the_guest_asks_for_is_added_and_charged_without_a_question(
     w = world
     result, texts = update(w, adults=2, extra_beds=1)  # 2 adults, 1 room, they want a bed
     assert result["facts"]["extra_beds"] == 1 and result["facts"]["price"]["total"] == 9000
-    assert "ask_extra_bed" not in texts and result["sent"] == ["rooms_ok", "rooms_beds", "ask_contact"]
+    assert "ask_extra_bed" not in texts and result["sent"] == ["rooms_ok", "rooms_beds", "room_label", "ask_contact"]
     too_many, texts = update(w, adults=2, extra_beds=2)  # at most one per room
     assert not too_many["ok"] and "at most one extra bed per room" in too_many["facts"]["problem"] and texts == {}
 

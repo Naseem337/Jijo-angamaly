@@ -68,9 +68,10 @@ def test_place_missing_sends_the_owners_location_question(world):
     assert texts["ask_location"] == "Sure, Kindly confirm the Location 📍\nAlleppey or Munnar ?"
 
 
-def test_an_unknown_place_asks_the_location_too(world):
+def test_a_place_we_have_no_resort_in_is_told_then_the_location_question(world):  # fix round 3
     result, texts, _ = update(world, {"place": "Goa", "check_in": "2026-11-10"})
-    assert result["sent"] == ["ask_location"] and "ask_location" in texts
+    assert result["sent"] == ["not_our_place", "ask_location"]
+    assert texts["not_our_place"] == "Sorry, we have properties only in Alleppey and Munnar."
 
 
 def test_a_switched_off_resort_gets_closed_place_and_is_not_saved(world):
@@ -130,9 +131,14 @@ def test_a_date_that_just_passed_is_told_and_not_saved(world):
     assert enq.check_in is None and enq.check_out is None and result["next_step"] == "ask_details"
 
 
-def test_a_date_months_ago_means_the_next_time_it_comes(world):
-    result, _, _ = update(world, {"place": "Alleppey", "check_in": "2025-12-25", "nights": 2, "adults": 2, "month_given": True})
-    assert (result["facts"]["check_in"], result["facts"]["check_out"]) == ("2026-12-25", "2026-12-27")
+def test_a_date_without_a_year_means_the_next_time_it_comes(world):
+    result, _, _ = update(world, {"place": "Alleppey", "check_in": {"day": 25, "month": 10}, "nights": 2, "adults": 2})
+    assert (result["facts"]["check_in"], result["facts"]["check_out"]) == ("2027-10-25", "2027-10-27")
+
+
+def test_a_full_date_months_ago_is_told_as_past(world):
+    result, _, _ = update(world, {"place": "Alleppey", "check_in": "2025-12-25", "nights": 2, "adults": 2})
+    assert result["sent"] == ["past_date"]
 
 
 def test_a_check_out_before_the_check_in_is_a_problem_not_a_message(world):
@@ -147,7 +153,7 @@ def test_available_sends_the_owners_messages_in_order_with_the_price_in_facts(wo
     w = world
     result, texts, box = update(w, {**STAY, "adults": 2})
     assert_shape(result)
-    assert result["sent"] == ["rooms_ok", "rooms_plain", "ask_contact"]  # this resort has no glimpse or photos yet
+    assert result["sent"] == ["rooms_ok", "rooms_plain", "room_label", "ask_contact"]  # this resort has no glimpse or photos yet
     assert [i.key for i in box.queue] == result["sent"]
     assert texts["rooms_ok"] == "Yes, rooms are available for your dates."
     assert texts["rooms_plain"] == "For 2 persons: 1 room(s)."

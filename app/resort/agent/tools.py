@@ -14,6 +14,7 @@ Every result has the same shape: {ok, facts, sent, next_step, note}.
 
 from __future__ import annotations
 
+import difflib
 import logging
 import time
 from datetime import date, timedelta
@@ -22,7 +23,7 @@ from typing import Any
 from app.providers.llm import ToolSpec
 from app.resort import availability as av
 from app.resort.agent import photos_plan as pp
-from app.resort.agent.outbox import Outbox
+from app.resort.agent.outbox import Outbox, near_same
 from app.resort.agent.state import LANGUAGES, Enquiry
 from app.resort.chat import _Turn, _count_name, _money, close_word
 from app.resort.i18n import status_name, t
@@ -33,6 +34,7 @@ log = logging.getLogger(__name__)
 
 I18N_LANG = {"en": "en", "manglish": "mn", "tanglish": "tn", "hinglish": "hn"}
 
+STEP_SHOWN = "step_shown"  # an outbox marker: the open step is the last message already, the turn adds it no more
 ALREADY_SENT = "Already sent to the guest. Do not repeat it."  # the start of every note when a tool sent messages
 SENT_NOTE = ("Write NOTHING unless the guest also asked something these messages did not answer; then answer only that, "
              "in one short sentence.")
@@ -54,12 +56,22 @@ LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
                                  "letters (venum, irukka, irukkom, vanakkam, la); hinglish = Hindi words in English "
                                  "letters (chahiye, hai, kya)"}
 
+DATE_FIELD = {"type": "object",
+              "description": "Copy only what the guest said. Never fill month or year yourself. '12' -> {day: 12}; "
+                             "'dec 12' -> {day: 12, month: 12}; '12/12/2026' -> {day: 12, month: 12, year: 2026}. Code "
+                             "works out the date (a day alone = the next time it comes).",
+              "properties": {"day": {"type": "integer", "description": "1-31"},
+                             "month": {"type": "integer", "description": "1-12, or null if the guest did not say it"},
+                             "year": {"type": "integer", "description": "null if the guest did not say it"}},
+              "required": ["day"]}
+
 # the tools that send something to the guest or the team: each runs at most ONCE per turn (fix round 2)
 ONCE_TOOLS = ("send_payment_link", "send_photos", "create_booking", "check_payment", "talk_to_owner", "send_map")
 ONCE_NOTE = "Already done this turn: nothing more was sent. Do not call it again and do not repeat it."
 # talk_to_owner reasons after which the guest gets ONLY the fixed text: the AI's own line and the open step are dropped
 QUIET_REASONS = ("cannot_answer", "call_request", "other", "guest_called")
-NO_STEP_REASONS = ("cannot_answer", "call_request", "other")
+# cannot_answer is not here (fix round 3): a question not in FACTS gets the handoff text, THEN the open booking step
+NO_STEP_REASONS = ("call_request", "other")
 
 TOOL_SCHEMAS = [
     ToolSpec(
@@ -74,19 +86,19 @@ TOOL_SCHEMAS = [
         "anything missing (place, dates, adults, name, mobile) with the owner's words and checks the rooms; those "
         "messages go out for you (see `sent`): never write them yourself.",
         {"type": "object", "properties": {
-            "place": {"type": "string", "description": "the resort or town the guest named, spelled however they wrote it"},
-            "check_in": {"type": "string", "description": "YYYY-MM-DD; a date with no year is the next time it comes"},
-            "month_given": {"type": "boolean", "description": "REQUIRED whenever check_in is given: true only if the guest "
-                                                               "said the month; false for a day number alone (12, 20th, "
-                                                               "'12 muthal 14'); code then moves a day already past to "
-                                                               "next month"},
-            "check_out": {"type": "string", "description": "YYYY-MM-DD"},
+            "place": {"type": "string", "description": "the resort or town the guest named in this chat, spelled however "
+                                                       "they wrote it; never a place they did not write"},
+            "check_in": DATE_FIELD,
+            "check_out": DATE_FIELD,
             "nights": {"type": "integer", "description": "instead of check_out, if the guest gave nights"},
             "adults": {"type": "integer", "description": "total adults above 6 years as the guest said them (never assume); "
                                                          "children are not asked or counted"},
             "rooms": {"type": "integer", "description": "only if the guest said a number of rooms; 0 = let the code pick"},
-            "room_picks": {"type": "array", "description": "rooms the guest chose, one entry per kind; [] clears the "
-                                                         "choice. Guest wants a room type → room_picks=[that type]",
+            "room_picks": {"type": "array", "description": "rooms the guest chose THEMSELVES, one entry per kind; [] "
+                                                         "clears the choice. Guest wants a room type → room_picks=[that "
+                                                         "type]. Guest only asks about or wants to see another room → "
+                                                         "send_photos, not room_picks. No choice → leave it out: code "
+                                                         "picks by the owner's order",
                            "items": {"type": "object", "properties": {
                                "room_type": {"type": "string", "description": "a room type name from the FACTS"},
                                "room_number": {"type": "string"},
@@ -114,7 +126,9 @@ TOOL_SCHEMAS = [
         "Use this when the guest asks to see photos or pictures of the resort or its rooms. Say only WHAT they asked for "
         "with `kind`: room_type (a named room: also pass room_type), resort (outside, beach, common areas), other_room "
         "(another room than the one offered), all_rooms (every room), default (room photos, no room named), more (they want "
-        "more photos). If no resort is known yet the location question goes first and the photos follow the answer.",
+        "more photos). The guest asks about ANOTHER room in any words ('any other room?', 'is the cottage free?') → "
+        "other_room, or room_type with its name: code says whether it is free for their dates and shows it; it never "
+        "switches their room. If no resort is known yet the location question goes first and the photos follow.",
         {"type": "object", "properties": {
             "kind": {"type": "string", "enum": list(pp.KINDS)},
             "room_type": {"type": "string", "description": "only for kind room_type: the room type name from the FACTS"},
@@ -227,33 +241,141 @@ def _mobile_on(booking: Any) -> str:
     return ""
 
 
-def _day(value: Any) -> date | None:
-    return date.fromisoformat(str(value)) if value else None
+def _style(args: dict[str, Any], saved: str) -> str:
+    """The language style the AI passed, any case; missing or not one of LANGUAGES -> the previous turn's (saved)."""
+    said = str(args.get("language") or "").strip().lower()
+    return said if said in LANGUAGES else saved
 
 
-def _next_month_day(d: date, today: date) -> date | None:
-    """The same day of the month in the next month after `today` that has that day ('31' skips a short month)."""
-    year, month = today.year, today.month
-    for _ in range(3):
-        month += 1
-        if month > 12:
-            year, month = year + 1, 1
+# ------------------------------------------------------------------ dates: the AI copies what the guest said, code builds
+
+
+def _date_parts(value: Any) -> tuple[int, int | None, int | None] | None:
+    """(day, month or None, year or None) from the AI's {day, month, year} (a full 'YYYY-MM-DD' string is also taken).
+    None when nothing was passed. ValueError when it is not a date."""
+    if value is None or value == "" or value == {}:
+        return None
+    if isinstance(value, str):
+        d = date.fromisoformat(value.strip())
+        return d.day, d.month, d.year
+    if not isinstance(value, dict):
+        raise ValueError("not a date object")
+
+    def num(key: str) -> int | None:
+        raw = value.get(key)
+        return None if raw is None or raw == "" else int(raw)
+
+    day, month, year = num("day"), num("month"), num("year")
+    if day is None or not 1 <= day <= 31 or (month is not None and not 1 <= month <= 12):
+        raise ValueError("day 1-31, month 1-12")
+    if year is not None and year < 100:
+        year += 2000  # '26' -> 2026
+    return day, month, year
+
+
+def _month_after(year: int, month: int) -> tuple[int, int]:
+    return (year + 1, 1) if month == 12 else (year, month + 1)
+
+
+def _day_from(day: int, year: int, month: int, earliest: date, strictly_after: bool = False) -> date | None:
+    """The first date with this day number in (year, month) or a later month, on or after `earliest` (after it when
+    `strictly_after`). A month that lacks the day ('31' in November) is skipped."""
+    for _ in range(14):
         try:
-            return date(year, month, d.day)
+            d = date(year, month, day)
+        except ValueError:
+            d = None
+        if d is not None and (d > earliest if strictly_after else d >= earliest):
+            return d
+        year, month = _month_after(year, month)
+    return None
+
+
+def _date_from(day: int, month: int, earliest: date, strictly_after: bool = False) -> date | None:
+    """The next time this day and month come, on or after `earliest` (after it when `strictly_after`)."""
+    for year in range(earliest.year, earliest.year + 9):  # 29 Feb waits for a leap year
+        try:
+            d = date(year, month, day)
         except ValueError:
             continue
+        if d > earliest if strictly_after else d >= earliest:
+            return d
     return None
+
+
+def build_check_in(parts: tuple[int, int | None, int | None], today: date) -> tuple[date | None, bool]:
+    """(check-in, full): no month -> the next time that day comes; no year -> the next time that date comes; a full
+    date stays as given (full=True: if it has passed, the guest is told past_date)."""
+    day, month, year = parts
+    if month is None:
+        return _day_from(day, today.year, today.month, today), False
+    if year is None:
+        return _date_from(day, month, today), False
+    return date(year, month, day), True
+
+
+def build_check_out(parts: tuple[int, int | None, int | None], check_in: date) -> date | None:
+    """No month -> the check-in's month, or the next month when that would not be after the check-in; no year -> the
+    check-in's year, or the next year when that would not be after it."""
+    day, month, year = parts
+    if month is None:
+        return _day_from(day, check_in.year, check_in.month, check_in, strictly_after=True)
+    if year is None:
+        return _date_from(day, month, check_in, strictly_after=True)
+    return date(year, month, day)
+
+
+# ------------------------------------------------------------------ places: a fact check against the dashboard names
+
+
+def _words(text: str) -> list[str]:
+    """Lower-case words of a text (letters and digits only). Plain string methods, no pattern matching."""
+    return "".join(ch if ch.isalnum() else " " for ch in (text or "").casefold()).split()
+
+
+def _squash(word: str) -> str:
+    """'aalappee' -> 'alape': doubled letters once (speech-to-text spellings)."""
+    out = ""
+    for ch in word:
+        if not out or out[-1] != ch:
+            out += ch
+    return out
+
+
+def same_name(said: str, name: str) -> bool:
+    """A word the guest wrote is this dashboard name, give or take a letter or two ('allepy' ~ 'alleppey'). Short words
+    must match exactly."""
+    if said == name:
+        return True
+    if min(len(said), len(name)) < 5 or said[0] != name[0]:
+        return False
+    return (difflib.SequenceMatcher(None, said, name).ratio() >= 0.75
+            or difflib.SequenceMatcher(None, _squash(said), _squash(name)).ratio() >= 0.8)
 
 
 def _label(d: date) -> str:
     return f"{d.day} {d.strftime('%b')}"
 
 
+def towns_and(bot: Any) -> str:
+    """'Alleppey and Kanthalloor': where the OPEN resorts are, from the dashboard (never written in code)."""
+    towns: list[str] = []
+    for p in bot._places():
+        town = (p.city or p.place or p.name).split(",")[0].strip()
+        if p.active and town and town.casefold() not in (x.casefold() for x in towns):
+            towns.append(town)
+    if not towns:
+        return ""
+    return towns[0] if len(towns) == 1 else ", ".join(towns[:-1]) + " and " + towns[-1]
+
+
 class AgentTools:
     """The tools of one guest turn. `bot` is the BookingBot: its repository, clock, payments and existing helpers."""
 
-    def __init__(self, bot: Any, phone: str, outbox: Outbox) -> None:
+    def __init__(self, bot: Any, phone: str, outbox: Outbox, guest_text: str | None = None) -> None:
         self.bot, self.phone, self.out = bot, phone, outbox
+        # the guest's message of this turn (run_turn passes it); None = a call outside a guest turn: places not checked
+        self.guest_text = guest_text
         self.ran: list[str] = []  # the tools that ran this turn (ONCE_TOOLS run at most once)
         self.quiet = False  # talk_to_owner(cannot_answer / call_request / other / guest_called): no AI line
         self.no_step = False  # talk_to_owner(cannot_answer / call_request / other): no open step after the handoff
@@ -275,6 +397,38 @@ class AgentTools:
         """The one open resort, when there is exactly one: then the place is never asked."""
         places = [p for p in self.bot._places() if p.active]
         return places[0] if len(places) == 1 else None
+
+    def _guest_words(self) -> list[str]:
+        """Every word the guest wrote in this conversation (since a restart or a long gap), this turn's message too."""
+        rows = self.bot.repo.list_chat(self.phone, limit=200)
+        said = [m.text for m in rows[self.bot._session_start(rows, by_time=True):] if m.direction == "in"]
+        return [w for text in [*said, self.guest_text or ""] for w in _words(text)]
+
+    def _place_said(self, place: str) -> bool:
+        """The place the AI passed is one the guest wrote in this chat: its own words, or a dashboard name / alias of the
+        resort it stands for, as written or misspelt. A fact check against the dashboard, never a reading of intent."""
+        if self.guest_text is None:
+            return True  # not a guest turn (code calling the tool itself)
+        said = set(self._guest_words())
+        own = [w for w in _words(place) if len(w) >= 3]
+        if own and all(any(same_name(s, w) for s in said) for w in own):
+            return True
+        props = [p for p in self.bot.repo.list_properties(active_only=False) if self._names_place(p, place)]
+        return any(same_name(s, n) for p in props for n in self.bot._place_words(p) for s in said)
+
+    def _names_place(self, prop: Property, place: str) -> bool:
+        """The AI's `place` is this resort: one of its dashboard names or aliases, as written or misspelt (a 5-letter start
+        is enough: 'Kanthal')."""
+        names = self.bot._place_words(prop)
+        return any(same_name(w, n) or (len(w) >= 5 and n.startswith(w[:5])) for w in _words(place) for n in names)
+
+    def _our_place(self, place: str) -> Property | None:
+        """The open resort the AI's `place` names, or None when it names none of ours (or more than one)."""
+        hits = [p for p in self.bot._places() if p.active and self._names_place(p, place)]
+        return hits[0] if len(hits) == 1 else None
+
+    def _towns_and(self) -> str:
+        return towns_and(self.bot)
 
     def _send(self, key: str, lang: str, **values: Any) -> None:
         """An owner text from i18n.py, in the guest's language."""
@@ -383,7 +537,7 @@ class AgentTools:
         cur = Enquiry.load(repo, phone)
         if cur.paid:  # a paid stay is over: a new enquiry starts (the language is kept)
             cur = Enquiry(language=cur.language)
-        style = args.get("language") if args.get("language") in LANGUAGES else cur.language
+        style = _style(args, cur.language)
         lang = I18N_LANG[style]
         enq = Enquiry.from_dict(cur.to_dict())
         enq.language = style
@@ -395,15 +549,30 @@ class AgentTools:
             enq.save(repo, phone)
             return self._result(ok, facts, start, enq, note)
 
-        # 1. the place: unknown -> the owner's location question; switched off -> closed_place
+        # 1. the place: only one the guest wrote in this chat counts (else it is ignored); unknown -> the owner's
+        # location question; switched off -> closed_place; not one of ours -> not_our_place
         place = str(args.get("place") or "").strip()
+        ignored = ""
+        if place and not self._place_said(place):
+            ignored, place = place, ""  # the AI's own guess: never taken
         prop: Property | None = None
         if place:
             if closed := self._closed_place(place):
                 self._send("closed_place", lang,
                            place=(closed.city or closed.place or closed.name).split(",")[0].strip())
                 return done(True, {"place": place, "available": False}, SENT_NOTE)
-            prop = bot._find_property(place)
+            prop = self._our_place(place)
+            if prop is None and self._only_resort() is None:  # a town we have no resort in
+                self._send("not_our_place", lang, towns=self._towns_and())
+                enq.place = None
+                ask = t("ask_location", lang, towns=bot._towns_text())
+                if not any(near_same(ask, x) for x in [*self.out.texts, repo.last_outbound_text(phone) or ""]):
+                    self.out.text("ask_location", ask)
+                else:  # it is the last message already: the turn's open step must not add it either
+                    self.out.marker(STEP_SHOWN)
+                return done(True, {"place": place, "ours": False}, SENT_NOTE)
+            if prop is None:  # one resort only: the guest is told, and the booking goes on with it
+                self._send("not_our_place", lang, towns=self._towns_and())
         if prop is None and cur.place:
             prop = repo.get_property(cur.place)
         if prop is None and held:
@@ -413,26 +582,24 @@ class AgentTools:
         if prop is None or not prop.active:
             enq.place = None
             self._send("ask_location", lang, towns=bot._towns_text())
-            return done(True, {"known": enq.to_dict()["place"]}, SENT_NOTE)
+            facts = {"known": enq.to_dict()["place"]}
+            if ignored:
+                facts["place_ignored"] = f"the guest has not written '{ignored}' in this chat"
+            return done(True, facts, SENT_NOTE)
         enq.place = prop.id
         wish, enq.photo_wish = cur.photo_wish, None  # photos asked for before the resort was known
 
         # the stay as the AI passes it; what it leaves out stays as saved (a field the AI forgets is never lost)
+        # the dates: the AI copies only what the guest said ({day, month, year}); code builds them (fix round 3)
         try:
-            ci, co = _day(args.get("check_in")), _day(args.get("check_out"))
-        except ValueError:
-            return done(False, {"problem": "check_in and check_out must be YYYY-MM-DD"}, "Fix the dates and call again.")
+            ci_parts, co_parts = _date_parts(args.get("check_in")), _date_parts(args.get("check_out"))
+            ci, full = build_check_in(ci_parts, today) if ci_parts else (None, False)
+            base = ci or cur.check_in or today
+            co = build_check_out(co_parts, base) if co_parts else None
+        except (ValueError, TypeError):
+            return done(False, {"problem": "check_in / check_out must be {day, month, year} with only what the guest said"},
+                        "Fix the dates and call again.")
         nights = _int(args, "nights")
-        if ci and ci < today and args.get("month_given") is None:
-            # month_given is required with check_in (fix round 2); it changes the result only for a day already past
-            return done(False, {"problem": "month_given is required whenever check_in is given"},
-                        "Call update_enquiry again with month_given: true only if the guest said the month; false for a "
-                        "day number alone (12, 20th).")
-        if ci and args.get("month_given") is False and ci < today:
-            # a day with no month that already passed this month is that day next month; the check-out moves with it
-            if (moved := _next_month_day(ci, today)) is not None:
-                co = co + (moved - ci) if co else co
-                ci = moved
         if ci and co is None:
             if nights:
                 co = ci + timedelta(days=nights)
@@ -451,18 +618,8 @@ class AgentTools:
         if problem:
             return done(False, {"problem": problem}, "Tell the guest nothing invented; ask which room they mean.")
 
-        # 3. a date in the past: a year-less date goes to the next time it comes, a date that just passed is told
-        if ci and (today - ci).days > 14:
-            for years in (1, 2):
-                try:
-                    moved = ci.replace(year=ci.year + years)
-                except ValueError:
-                    continue
-                if moved >= today:
-                    co = co + (moved - ci) if co else co
-                    ci = moved
-                    break
-        if ci and ci < today:
+        # 3. a full date (day, month and year) that has passed is told; a date without month or year never is
+        if ci and full and ci < today:
             self._send("past_date", lang, day=_label(ci))
             enq.check_in = enq.check_out = None
             return done(True, {"problem": "the check-in date has passed"}, SENT_NOTE)
@@ -572,7 +729,8 @@ class AgentTools:
         offered = [p["rt"] for p in parts]
         summary = " + ".join(_count_name(p["rooms"], p["rt"].name) for p in parts)
         enq.checked = {"available": True, "summary": summary, "rooms": quoted, "key": key, "pref": pref,
-                       "base": base, "extra_bed_pending": pending, "extra_bed_max": threes}
+                       "base": base, "extra_bed_pending": pending, "extra_bed_max": threes,
+                       "labels": list((cur.checked or {}).get("labels") or [])}
         facts = {"available": True, "place": bot._place_label(prop), "check_in": ci.isoformat(),
                  "check_out": co.isoformat(), "nights": (co - ci).days, "adults": adults,
                  "rooms": quoted, "rooms_offered": summary, "extra_beds": sum(p["beds"] for p in parts),
@@ -585,7 +743,12 @@ class AgentTools:
             bool(held) and key.split("|")[:3] == [held[0].property_id, held[0].check_in.isoformat(),
                                                   held[0].check_out.isoformat()])  # the dates on the open link
         line_key, rooms_line = self._rooms_line(prop, parts, adults, children, wanted, lang)
-        picked_now = bool(pref) and picked_before != pref and not (held and {b.room_type_id for b in held} == {pref})
+        # room_picked only when the GUEST chose a room (a room type or number in room_picks); a room the code picked by
+        # priority (no pick, or only a refused type) never gets it (fix round 3)
+        guest_chose = any(str(p.get("room_type") or "").strip() or str(p.get("room_number") or "").strip()
+                          for p in (picks_arg or []))
+        picked_now = (guest_chose and bool(pref) and picked_before != pref
+                      and not (held and {b.room_type_id for b in held} == {pref}))
 
         held_same = False  # is this the stay on the open link?
         if held:
@@ -626,14 +789,15 @@ class AgentTools:
             return done(True, facts, SENT_NOTE)
         if picked_now:
             self._send("room_picked", lang, room=offered[0].name)
+        shown = list((cur.checked or {}).get("labels") or [])  # the room labels the last room check sent
         if not same_dates:  # new dates: rooms available, the rooms sentence, the photo flow, then the name ask
             if not picked_now:
                 self._send("rooms_ok", lang)
             self.out.text(line_key, rooms_line)
-            self._stay_photos(enq, prop, parts, bool(mix), price, True)
+            self._stay_photos(enq, prop, parts, bool(mix), price, True, shown)
         else:  # only persons, rooms or the room type changed: the new rooms sentence, a new room's photos, the name ask
             self.out.text(line_key, rooms_line)
-            self._stay_photos(enq, prop, parts, bool(mix), price, False)
+            self._stay_photos(enq, prop, parts, bool(mix), price, False, shown)
         if pending:  # a room will hold 3 adults: the extra-bed question, once; the booking waits for the answer
             if ask_now:  # one room holds 3 adults: yes/no; two or more: how many
                 self._send("ask_extra_bed" if threes == 1 else "ask_extra_beds", lang)
@@ -643,9 +807,12 @@ class AgentTools:
                                               "answer to the extra-bed question." if closed_link else ""))
 
     def _stay_photos(self, enq: Enquiry, prop: Property, parts: list[dict[str, Any]], mixed: bool,
-                     price: dict[str, Any], first_time: bool) -> None:
-        """The owner's order after a room check (rule 2): the glimpse, the general photos not sent yet, then each room's
-        label and photos. Only the room photos when just the persons or rooms changed on the same dates."""
+                     price: dict[str, Any], first_time: bool, shown: list[str] | None = None) -> None:
+        """The owner's order after a room check (rule 2): the glimpse, the general photos not sent yet, then FOR EACH
+        offered room its label and photos. Only the room photos when just the persons or rooms changed on the same
+        dates. A label the last check (`shown`) or this conversation already sent goes again only with new photos; the
+        labels are kept in enq.checked["labels"]."""
+        shown = list(shown or [])
         sent = pp.sent_refs(self.bot, self.phone, self.out)
         if first_time:
             if prop.intro and enq.intro_sent != prop.id:
@@ -656,9 +823,16 @@ class AgentTools:
             if general := pp.general_photos(prop, sent):
                 self.out.photos(f"photos:{len(general)}", general)
                 sent |= set(general)
-        for part in (parts if mixed else parts[:1]):  # both room types only when the group is split over two
-            if refs := [x for x in pp.room_refs(self.bot, part["rt"], enq, part["rooms"]) if x not in sent]:
-                pp.queue_room(self.out, part["rt"], refs[:pp.MAX_ROOM_PHOTOS])
+        for part in parts:  # FOR EACH offered room: its label (even with no photo), then its photos (fix round 3)
+            for label, refs in pp.offered_sets(self.bot, part["rt"], enq, part["rooms"], sent, self.phone):
+                if not refs and (label in shown or pp.already_said(self.bot, self.phone, self.out, label)):
+                    continue  # this room was labelled already and no new photo follows (a re-check of the same rooms)
+                self.out.text("room_label", label)
+                shown.append(label)
+                if refs:
+                    self.out.photos(f"photos:{len(refs)}", refs)
+                    sent |= set(refs)
+        enq.checked = {**(enq.checked or {}), "labels": shown}
 
     # ------------------------------------------------------------------ send_photos
 
@@ -675,9 +849,9 @@ class AgentTools:
         if plan.problem:  # photos_sent | no_other_room | room_not_free | other_free
             self._send(plan.problem, lang, room=plan.room)
             return {"photos": 0, "told": plan.problem}
-        if kind == "other_room" and enq.checked and plan.steps and plan.steps[0][0] is not None:
+        if plan.also_free and plan.steps and plan.steps[0][0] is not None:  # another free room: shown, never switched
             self._send("other_room_free", lang, room=plan.steps[0][0].name)
-        count = pp.queue_steps(self.out, plan.steps)
+        count = pp.queue_steps(self.out, plan.steps, bot, enq, phone)
         pp.queue_open_step(bot, phone, enq, lang, self.out)  # back to the booking: the step still open
         return {"photos": count, "kind": kind, "rooms": [rt.name for rt, _ in plan.steps if rt is not None]}
 
@@ -685,7 +859,7 @@ class AgentTools:
         bot, phone, repo = self.bot, self.phone, self.bot.repo
         start = len(self.out.keys)
         enq = Enquiry.load(repo, phone)
-        style = args.get("language") if args.get("language") in LANGUAGES else enq.language
+        style = _style(args, enq.language)
         lang = I18N_LANG[style]
         enq.language = style
         kind, room_type = str(args.get("kind") or "default"), str(args.get("room_type") or "").strip()
@@ -791,7 +965,7 @@ class AgentTools:
         repo = bot.repo
         start = len(self.out.keys)
         enq = Enquiry.load(repo, phone)
-        style = args.get("language") if args.get("language") in LANGUAGES else enq.language
+        style = _style(args, enq.language)
         lang = I18N_LANG[style]
         held = bot._held_stay(phone)
         if enq.place and enq.check_in and enq.check_out and enq.adults:
@@ -854,7 +1028,7 @@ class AgentTools:
     def _ctx(self, args: dict[str, Any]) -> tuple[int, Enquiry, str, str]:
         """(outbox position, the saved Enquiry with this call's language, language style, i18n language code)."""
         enq = Enquiry.load(self.bot.repo, self.phone)
-        style = args.get("language") if args.get("language") in LANGUAGES else enq.language
+        style = _style(args, enq.language)
         enq.language = style
         return len(self.out.keys), enq, style, I18N_LANG[style]
 

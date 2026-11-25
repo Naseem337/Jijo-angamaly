@@ -50,8 +50,8 @@ def test_an_amount_from_get_price_this_turn_is_allowed(world):
 
 
 def test_an_amount_the_guest_typed_is_allowed(world):
-    res, box = go(world, "can you do it for 7000?", reply("I will check if ₹7,000 is possible with the owner. One moment"),
-                  reply("Rs 7000 is not something I can decide; let me pass it to the owner."))
+    res, box = go(world, "can you do it for 7000?", reply("I will check if ₹7,000 is possible with the team. One moment"),
+                  reply("Rs 7000 is not something I can decide here."))
     assert res.retried and "One moment" in check_note(world) and "7,000" not in check_note(world)
     assert not res.guard[1:]  # the second reply was fine: the guest typed 7000
 

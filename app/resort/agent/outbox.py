@@ -40,9 +40,12 @@ def _norm(text: str) -> str:
 
 
 def near_same(a: str, b: str) -> bool:
-    """The same message: equal after case / punctuation / spaces, or (both 20+ letters) at least 90% alike."""
+    """The same message: equal after case / punctuation / spaces, or (both 20+ letters) at least 90% alike. Texts with
+    different numbers are never the same ('*Room 101 - ...*' and '*Room 102 - ...*', two amounts, two dates)."""
     x, y = _norm(a), _norm(b)
     if not x or not y:
+        return False
+    if re.findall(r"\d+", x) != re.findall(r"\d+", y):
         return False
     return x == y or (min(len(x), len(y)) >= 20 and SequenceMatcher(None, x, y).ratio() >= NEAR_SAME)
 
@@ -139,14 +142,16 @@ class Outbox:
 def bot_outbox(bot: Any, phone: str, *, dry_run: bool = False) -> Outbox:
     """An outbox that sends through the BookingBot: texts and photos go to WhatsApp and are logged in the chat with the
     WhatsApp id WhatsApp returns, so a swipe-reply to a photo or a room label finds its room (bot._note_quote)."""
-    return Outbox(phone, lambda to, text: bot._text(to, text, repeat_ok=True), lambda to, refs: bot._send_photos(to, refs),
-                  dry_run=dry_run, send_staff=lambda to, text: bot.wa.send_text(to, text),
-                  send_exact=lambda to, text: _send_exact(bot, to, text))
+    # every agent text goes word for word (fix round 3): the old send path's 'sir' filter (bot._ease_sir) never touches
+    # the AI's line or the owner's texts
+    exact = lambda to, text: _send_exact(bot, to, text)  # noqa: E731
+    return Outbox(phone, exact, lambda to, refs: bot._send_photos(to, refs),
+                  dry_run=dry_run, send_staff=lambda to, text: bot.wa.send_text(to, text), send_exact=exact)
 
 
 def _send_exact(bot: Any, phone: str, text: str) -> bool:
-    """An owner text word for word: like bot._text (English letters only, no booking id, logged with its WhatsApp id) but
-    without taking 'sir' out (bot._ease_sir), because the owner's exact wording has it."""
+    """A text word for word: like bot._text (English letters only, no booking id, logged with its WhatsApp id) but
+    without taking 'sir' out (bot._ease_sir)."""
     from app.resort.chat import english_letters_only
     from app.resort.flow import BOOKING_ID
 

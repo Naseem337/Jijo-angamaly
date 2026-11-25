@@ -61,7 +61,7 @@ def test_a_tool_call_is_run_its_result_is_fed_back_and_the_final_text_is_the_ans
     assert second[-2].tool_calls[0].name == "update_enquiry" and second[-1].tool_call_id == second[-2].tool_calls[0].id
     fed = json.loads(second[-1].content)
     assert set(fed) == {"ok", "facts", "sent", "next_step", "note"} and fed["ok"] is True
-    assert fed["sent"] == ["rooms_ok", "rooms_plain", "ask_contact"] and fed["next_step"] == "ask_contact"
+    assert fed["sent"] == ["rooms_ok", "rooms_plain", "room_label", "ask_contact"] and fed["next_step"] == "ask_contact"
     assert not second[-1].is_error
 
 
@@ -106,7 +106,7 @@ def test_a_bad_tool_call_from_the_ai_is_reported_back_and_never_crashes(world):
 def test_the_ais_own_line_goes_first_then_the_tool_messages_in_order(world):
     w = world
     res, box = go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), reply("Yes, there is a pool."))
-    assert res.sent == ["ai", "rooms_ok", "rooms_plain", "ask_contact"]
+    assert res.sent == ["ai", "rooms_ok", "rooms_plain", "room_label", "ask_contact"]
     assert [i.text for i in box.sent][0] == "Yes, there is a pool." and box.sent[1].text == "Yes, rooms are available for your dates."
 
 
@@ -114,7 +114,7 @@ def test_the_order_holds_when_it_goes_out_live(world):
     w = world
     go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), reply("Yes, there is a pool."), live=True)
     assert w.wa.texts(GUEST) == ["Yes, there is a pool.", "Yes, rooms are available for your dates.",
-                                 "For 2 persons: 1 room(s).", "Please share your name and mobile number to proceed."]
+                                 "For 2 persons: 1 room(s).", "*Deluxe*", "Please share your name and mobile number to proceed."]
 
 
 def test_the_ais_line_comes_before_photos_too(pw):
@@ -126,7 +126,7 @@ def test_the_ais_line_comes_before_photos_too(pw):
 def test_no_reply_marker_from_the_ai_is_not_sent(world):
     w = world
     res, box = go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"))
-    assert res.reply == "" and res.sent == ["rooms_ok", "rooms_plain", "ask_contact"]
+    assert res.reply == "" and res.sent == ["rooms_ok", "rooms_plain", "room_label", "ask_contact"]
 
 
 # --------------------------------------------------------------------------- never silent
@@ -194,7 +194,7 @@ def test_no_llm_at_all_is_ai_down(world):
 def test_the_llm_failing_after_a_tool_already_spoke_does_not_add_ai_down_text(world):
     w = world
     res, box = go(w, ASK, tool("update_enquiry", **STAY), LLMError("mock", "down"))
-    assert res.outcome == "ai_down" and res.sent == ["rooms_ok", "rooms_plain", "ask_contact", "staff:ai_down"]
+    assert res.outcome == "ai_down" and res.sent == ["rooms_ok", "rooms_plain", "room_label", "ask_contact", "staff:ai_down"]
 
 
 # --------------------------------------------------------------------------- what the AI sees

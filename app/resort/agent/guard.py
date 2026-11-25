@@ -15,6 +15,9 @@
     fix round 2 (sentences dropped from the AI's own line): the hold or the link's expiry explained; "sent / shared /
        resent / passed your question / informed the team" when no sending tool ran; "How may I assist you" anywhere
        but the first greeting (nothing left -> "Hi sir."); "owner" is said as "team"
+    fix round 3 (short, human replies): more than 2 sentences / 30 words, or a banned phrase ("anything else", "feel
+       free", "system", "owner" ...) -> ONE retry (too long: "Too long. Say the same in under 20 words ..."); still bad ->
+       the banned sentences are dropped and a reply still too long keeps its first sentence (never a handoff)
 
 Regex here only reads the AI's own reply and code-made facts; nothing here decides what the GUEST meant (the guest's
 messages are only searched for the same numbers and dates the AI wrote).
@@ -270,6 +273,45 @@ def repeats_tools(reply: str) -> bool:
     summary / payment / advance / link, or more than 25 words."""
     return bool(AMOUNT.search(reply) or LINK.search(reply) or dates_in(reply) or TOOL_WORDS.search(reply)
                 or len(reply.split()) > REPEAT_MAX_WORDS)
+
+
+# ------------------------------------------------------------------ fix round 3: short, human replies (the AI's line only)
+
+MAX_SENTENCES, MAX_WORDS = 2, 30
+TOO_LONG = "Too long. Say the same in under 20 words, one sentence if possible."
+BANNED_PHRASES = ("anything else", "is there anything", "other listings", "other hotels", "other options", "feel free",
+                  "don't hesitate", "I'm sorry, I only", "I don't have details", "as an AI", "please note that",
+                  "I can help you with", "system", "automatically", "the tool", "owner")
+BANNED = re.compile(r"\b(?:" + "|".join(re.escape(p).replace("'", "['’]") for p in BANNED_PHRASES) + r")\b", re.IGNORECASE)
+
+
+def sentences(reply: str) -> list[str]:
+    return [s for line in reply.split("\n") for s in re.split(r"(?<=[.!?])\s+", line) if re.search(r"[A-Za-z0-9]", s)]
+
+
+def too_long(reply: str) -> bool:
+    """More than 2 sentences or 30 words."""
+    return len(sentences(reply)) > MAX_SENTENCES or len(reply.split()) > MAX_WORDS
+
+
+def banned_in(reply: str) -> list[str]:
+    return list(dict.fromkeys(m.group(0) for m in BANNED.finditer(reply)))
+
+
+def style_problems(reply: str) -> list[str]:
+    """Too long or a banned phrase: said so the AI can fix it in its ONE retry. [] = fine."""
+    found = [TOO_LONG] if reply and too_long(reply) else []
+    found += [f'Never write "{p}". Say it another way, or leave it out.' for p in banned_in(reply)]
+    return found
+
+
+def fix_style(reply: str) -> str:
+    """After the retry: sentences with a banned phrase are dropped, then a reply still too long keeps its first
+    sentence. '' when nothing is left."""
+    reply = drop_sentences(reply, lambda s: bool(BANNED.search(s)))
+    if reply and too_long(reply):
+        reply = sentences(reply)[0].strip()
+    return reply
 
 
 def is_repeat(bot: Any, phone: str, text: str) -> bool:

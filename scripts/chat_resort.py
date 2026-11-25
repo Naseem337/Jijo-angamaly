@@ -23,6 +23,7 @@ import os  # noqa: E402
 os.environ.setdefault("RESORT_STAFF_NUMBERS", "")
 from app.core.clock import SystemClock  # noqa: E402
 from app.providers.llm import build_llm  # noqa: E402
+from app.resort import photos as ph  # noqa: E402
 from app.resort import seed  # noqa: E402
 from app.resort.config import load_resort_config  # noqa: E402
 from app.resort.db import ResortRepo  # noqa: E402
@@ -30,6 +31,7 @@ from app.resort.flow import BookingBot  # noqa: E402
 from app.resort.payments import MockPayments  # noqa: E402
 from app.settings import EnvSecretResolver  # noqa: E402
 from app.whatsapp.parse import InboundMessage  # noqa: E402
+from scripts.agent_test_data import add_test_photos  # noqa: E402
 
 
 class PrintWA:
@@ -44,7 +46,7 @@ class PrintWA:
         return "wamid.x"
 
     def send_image(self, to, media_id, caption=""):
-        print(f"BOT: [photo {media_id}]")
+        print(f"    [photo] {media_id.removeprefix('media:')}")  # one line per photo, right under its room label
         return "wamid.img"
 
     def upload_media(self, data, mime_type="image/jpeg", filename="x"):
@@ -66,8 +68,13 @@ PHONE = "+919847000123"
 def new_session(agent: bool = False):
     """A fresh scratch database with the seed data. agent=True: AGENT_MODE=agent (the gate, the AI agent, the guard
     and the outbox, exactly as live), but WhatsApp is the printing fake and payments are fake links."""
-    repo = ResortRepo(Path(tempfile.mkdtemp()) / "r.sqlite3")
+    db = Path(tempfile.mkdtemp()) / "r.sqlite3"
+    os.environ["RESORT_DB_PATH"] = str(db)  # the fake photos go next to the scratch database
+    repo = ResortRepo(db)
     seed.seed(repo)
+    if agent:  # room numbers, each room's own photo, general photos: the labels and [photo] lines can be seen
+        ph._shrink = lambda data: None  # fake photos are not real images
+        add_test_photos(repo)
     cfg = load_resort_config()
     if agent:
         cfg = cfg.model_copy(update={"agent_mode": "agent"})

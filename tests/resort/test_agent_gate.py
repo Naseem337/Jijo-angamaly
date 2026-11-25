@@ -104,7 +104,7 @@ def test_restart_clears_the_enquiry_greets_and_keeps_stop(agent):
     assert send(agent, m("Restart")) == "restart"
     assert Enquiry.load(agent.repo, GUEST).place is None and agent.repo.get_state(GUEST) == {"opted_out": True}
     assert agent.wa.texts()[-1] == "Hi, How may I assist you?" and agent.llm.calls == []
-    assert agent.repo.list_chat(GUEST)[-1].text == RESTART_MARK
+    assert agent.repo.list_chat(GUEST)[-2].text == RESTART_MARK  # the greeting belongs to the new conversation
 
 
 # --------------------------------------------------------------------------- staff pause
@@ -216,9 +216,9 @@ def test_a_full_turn_gate_ai_tools_guard_outbox_in_order(agent):
     assert out == "answered"
     texts = agent.wa.texts()
     assert texts[0] == "Yes, there is a pool."  # the AI's line first
-    assert texts[1:4] == ["Yes, rooms are available for your dates.", "For 2 persons: 1 room(s).",
+    assert texts[1:5] == ["Yes, rooms are available for your dates.", "For 2 persons: 1 room(s).", "*Deluxe*",
                           "Please share your name and mobile number to proceed."]
-    assert texts[4].startswith("Deluxe: ₹4,000 per room per night.")  # the tool messages in queue order
+    assert texts[5].startswith("Deluxe: ₹4,000 per room per night.")  # the tool messages in queue order
     assert agent.wa.texts(STAFF) == []
     stored = [r.text for r in agent.repo.list_chat(GUEST) if r.direction == "out"]
     assert stored == texts

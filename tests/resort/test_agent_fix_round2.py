@@ -41,21 +41,16 @@ def live_link_world(w):
 # --------------------------------------------------------------------------- a) month_given
 
 
-def test_month_given_is_described_as_required_with_check_in():
-    desc = spec("update_enquiry").parameters["properties"]["month_given"]["description"]
-    assert desc.startswith("REQUIRED whenever check_in is given: true only if the guest said the month; false for a day "
-                           "number alone (12, 20th")
+def test_month_given_is_gone_dates_are_objects():  # fix round 3: {day, month, year} replaced month_given
+    props = spec("update_enquiry").parameters["properties"]
+    assert "month_given" not in props and props["check_in"]["properties"].keys() == {"day", "month", "year"}
 
 
-def test_a_past_day_without_month_given_is_sent_back_to_the_ai_and_nothing_goes_to_the_guest(world):
+def test_a_day_alone_that_passed_this_month_is_next_month(world):
     late_month(world)  # today 2026-11-25
-    result, sent, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": "2026-11-20",
-                                                    "check_out": "2026-11-22", "adults": 2})
-    assert not result["ok"] and "month_given" in result["facts"]["problem"] and sent == {}
-    assert "false for a day number alone" in result["note"]
-    result, _, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": "2026-11-20",
-                                                 "check_out": "2026-11-22", "adults": 2, "month_given": False})
-    assert result["ok"] and result["facts"]["check_in"] == "2026-12-20"
+    result, sent, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": {"day": 20},
+                                                    "check_out": {"day": 22}, "adults": 2})
+    assert result["ok"] and result["facts"]["check_in"] == "2026-12-20" and "past_date" not in sent
 
 
 def test_a_future_check_in_needs_no_month_given_to_work(world):
@@ -293,12 +288,12 @@ def test_the_ais_own_owner_is_said_as_team(line, said):
     assert guard.team_not_owner(line) == said
 
 
-def test_the_ais_line_says_team_in_the_turn(world):
-    res, box = go(world, "who runs it?", reply("The owner runs the resort."))
-    assert texts(box)["ai"] == "The team runs the resort."
+def test_the_ais_owner_gets_one_retry(world):  # fix round 3: "owner" is a banned phrase
+    res, box = go(world, "who runs it?", reply("The owner runs the resort."), reply("The team runs the resort."))
+    assert res.retried and texts(box)["ai"] == "The team runs the resort."
 
 
-@pytest.mark.parametrize("reason", ["cannot_answer", "call_request", "other"])
+@pytest.mark.parametrize("reason", ["call_request", "other"])  # cannot_answer: the open step follows (fix round 3)
 def test_after_a_handoff_only_its_text_goes_no_ai_line_no_link_reminder(world, reason):
     w = world
     live_link_world(w)
@@ -319,12 +314,12 @@ def test_staff_alerts_stay_for_pay_terms_and_paid_changes(world):
 
 def test_the_prompt_has_the_policy_team_and_greeting_rules(world):
     system = system_prompt(world)
-    assert ("Resort policies (pets, alcohol, couples, smoking, visitors, food, etc.) and services: answer from FACTS in one"
-            "\n  short line. If FACTS doesn't have it → talk_to_owner(cannot_answer). Never guess.") in system
-    assert 'With the guest say "team", never "owner".' in system
+    assert ("If the answer is not written in FACTS, you do NOT know it. Call talk_to_owner(cannot_answer). Never answer "
+            "policy\n  questions") in system
+    assert 'Say "team", never "owner".' in system
     assert 'A later "hi": only "Hi sir."' in system
     assert "Never explain the hold or when a link expires." in system
-    assert "check_in given → month_given too" in system
+    assert "Never fill month or year yourself" in system
 
 
 def test_the_enquiry_survives_a_quiet_handoff(world):

@@ -133,8 +133,59 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
   - tone only: photos_* (the AI's line repeats the open step), discount, guest_called 1/3, mid_chat_hi ("Hi sir." is
     eased to "Hi." by the old send path; the judge calls it cold), thanks_with_link_open, unrelated_question.
 
+## Fix round 3 (2026-11-25): round-2 eval fixes, short human replies, room labels and photos
+- Dates: `month_given` is gone. update_enquiry takes check_in / check_out as {day, month, year} ("Copy only what the guest
+  said. Never fill month or year yourself."); code builds them (`tools.build_check_in` / `build_check_out`): no month ->
+  the next time that day comes; no year -> the next time that date comes; a full date that has passed -> past_date (the
+  old "more than 14 days ago -> next year" shift is gone); check_out with no month -> the check-in's month, or the next
+  month when it would not be after the check-in. nights still works. A full 'YYYY-MM-DD' string is still taken.
+- Place: update_enquiry takes a place only if it (or a dashboard name / alias of the resort it stands for, as written or
+  misspelt: `same_name`, plain string code, no regex) is in the guest's messages of this conversation; else it is ignored
+  (facts `place_ignored`) and the location question goes. `AgentTools(guest_text=...)`: run_turn passes the guest's message;
+  None = a call outside a guest turn (tests, `_renew`), not checked.
+- Not our place: new fixed text `not_our_place` ("Sorry, we have properties only in {towns}.", en/mn/tn/hn; towns = the
+  OPEN resorts from the dashboard, `tools.towns_and`), then the location question unless it is the last message (then an
+  outbox marker `step_shown` keeps the turn's open step from adding it). One resort only: the text, then the booking goes
+  on with that resort. The prompt's Kochi example gets the same dashboard towns.
+- Restart: root cause = the gate logged the greeting BEFORE the `[restart]` mark, so the next message ("I need a room")
+  looked like the first message of a new conversation (no greeting in view, `fresh=True`) and the AI greeted again. The
+  mark now goes first; a greeting before the guest's first message reaches the AI as `[You already said: "..."]`;
+  `fresh` = nothing sent in this conversation yet (`turn.greeted`).
+- Language: `tools._style`: any case; missing / invalid -> the previous turn's language.
+- talk_to_owner(cannot_answer): the handoff text, THEN the code's open step (form / name+mobile / link) unless it is the
+  last message (cannot_answer left NO_STEP_REASONS; call_request / other still get only the handoff).
+- Prompt: "If the answer is not written in FACTS, you do NOT know it. Call talk_to_owner(cannot_answer). Never answer
+  policy questions ... from general knowledge."; new HOW YOU TALK block (busy, warm front-desk person; answer first;
+  examples); "sir" once at the start of a chat and in short greetings.
+- Sir: `bot_outbox` sends EVERY agent text through `_send_exact` (English letters, no booking id, logged) - the old send
+  path's `_ease_sir` never touches agent messages.
+- Guard (AI's own line): more than 2 sentences / 30 words -> ONE retry ("Too long. Say the same in under 20 words, one
+  sentence if possible."), still too long -> the first sentence. Banned phrases (anything else, is there anything, other
+  listings / hotels / options, feel free, don't hesitate, I'm sorry I only, I don't have details, as an AI, please note
+  that, I can help you with, system, automatically, the tool, owner) -> the same retry, then the sentence is dropped.
+- Judge: gets the owner's style rules (short, answer-first, a short reply is not cold; code sends the owner's texts, open
+  steps, links and summaries).
+- Rooms: the guest's OWN unpaid hold never counts as taken for the room number they would get (`pp.next_numbers(phone=)`;
+  the room checks already used `free_rooms(own)`). After a room check: rooms_ok -> rooms sentence -> glimpse -> general
+  photos not sent yet -> FOR EACH offered room "*Room <number> - <room type>*" + that room's photos (a label even with no
+  photo; `pp.offered_sets`) -> ask_contact. A label the last room check already sent (`checked["labels"]`, or the chat
+  log) goes again only with new photos (the extra-bed answer re-checks the same rooms: no second label). Found on the way: `Outbox.dedupe` dropped the second label ("Room 101" vs
+  "Room 102" are 90% alike); `near_same` now never matches texts whose numbers differ.
+- Room choice: `room_picked` only when the GUEST chose a room (room_picks with a type or number), never for the code's
+  pick by priority or an exclude-only change. send_photos(other_room / room_type) for ANOTHER room than the offered one:
+  "Yes, X is also free for your dates..." (`other_room_free`) + label + photos (`Plan.also_free`), photos already sent ->
+  `other_free`; not free -> room_not_free / no_other_room. It only shows, never switches.
+- Test data: `scripts/agent_test_data.py` (eval scratch DB and `chat_resort.py --agent`): every resort on, general photos,
+  room numbers (101.. / 201..) and one own photo per room number. chat_resort prints each photo as a `[photo] <name>` line
+  under its label. The eval checks `check_in` / `check_out` against the date CODE built (the tool result's facts).
+- New evals: not_our_place, place_never_guessed, check_out_next_month, room_labels_each_room,
+  other_room_shown_not_switched, short_human_reply; day_without_month checks the built dates; restart turn 3 expects
+  update_enquiry and no "How may I assist" (47 scenarios). Tests: tests/resort/test_agent_fix_round3.py.
+- NOT done yet: Part 2 c) "Guest CHOOSES ..." (the instructions were cut off there).
+
 ## Next
-- Fix the remaining eval failures with general rules (prompt / tool description / tool result), one at a time.
+- Run the real-AI eval (the user runs `scripts\eval_agent.py`), then fix what fails with general rules.
+- Part 2 c) "Guest CHOOSES ..." and the rest of the round-3 list (cut off in the message).
 - AI-6 is now the OWNER TESTING on a test WhatsApp number with `AGENT_MODE=agent` (shadow mode dropped: no live traffic).
 - Then AI-7 switch, AI-8 cleanup.
 

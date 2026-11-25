@@ -95,12 +95,13 @@
       expect_args: {update_enquiry: {check_in: "2027-01-03", check_out: "2027-01-05"}}
       expect_sent: [rooms_ok]
 
-- id: day_without_month  # fix round 1: 20 has passed in November -> 20 Dec (code moves it)
+- id: day_without_month  # fix round 3: the AI copies {day: 20} / {day: 22}; code builds 20 Dec (20 Nov has passed)
   turns:
     - guest: "Alleppey 20 to 22, 2 adults"
       expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {check_in: "2026-12-20", check_out: "2026-12-22"}}
       expect_sent: [rooms_ok]
-      not_sent: [past_date]  # the AI may pass 2026-11-20 + month_given=false: the code moves it, so no date check
+      not_sent: [past_date]
 
 - id: past_date
   turns:
@@ -401,3 +402,49 @@
       expect_text: "Hi, How may I assist you?"
     - guest: "I need a room"
       expect_sent: [ask_location]
+      expect_tools: [update_enquiry]  # fix round 3: the AI sees its greeting after the restart, never greets again
+      must_not: ["How may I assist"]
+
+# ───────────────────────── fix round 3 ─────────────────────────
+- id: not_our_place  # a town with no resort: the owner's fixed text with the dashboard towns, the AI adds nothing
+  turns:
+    - guest: "I am looking for a property in kochi"
+      expect_tools: [update_enquiry]
+      expect_sent: [not_our_place]
+      expect_text: "Sorry, we have properties only in Alleppey and Kanthalloor."
+
+- id: place_never_guessed  # the AI may not fill a place the guest did not write: the location question goes
+  turns:
+    - guest: "I need a room for 2 on dec 10 to 12"
+      expect_tools: [update_enquiry]
+      expect_sent: [ask_location]
+      not_sent: [form, rooms_ok]
+
+- id: check_out_next_month  # {day: 30} / {day: 2}: code builds 30 Nov -> 2 Dec
+  turns:
+    - guest: "Alleppey 30 to 2, 2 adults"
+      expect_tools: [update_enquiry]
+      expect_args: {update_enquiry: {check_in: "2026-11-30", check_out: "2026-12-02"}}
+      expect_sent: [rooms_ok]
+
+- id: room_labels_each_room  # 4 adults -> 2 rooms: a label for EACH room, by its room number
+  turns:
+    - guest: "Alleppey dec 10 to 12, 4 adults"
+      expect_sent: [rooms_ok, glimpse, room_label, ask_contact]
+      expect_text: "*Room 102 - Beach View AC Room*"
+      not_sent: [room_picked]
+
+- id: other_room_shown_not_switched  # asking about another room only shows it
+  turns:
+    - guest: "Kanthalloor dec 12 to 14, 2 adults"
+      expect_sent: [rooms_ok, room_label]
+    - guest: "do you have a deluxe room also?"
+      expect_tools: [send_photos]
+      expect_sent: [other_room_free, room_label]
+      not_sent: [room_picked, summary]
+
+- id: short_human_reply  # no bot phrases in the AI's own words
+  turns:
+    - guest: "how is the weather in december?"
+      not_sent: [handoff, staff]
+      must_not: ["anything else", "feel free", "as an AI", "owner", "don't hesitate", "please note"]
