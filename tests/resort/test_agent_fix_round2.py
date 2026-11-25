@@ -317,7 +317,7 @@ def test_the_prompt_has_the_policy_team_and_greeting_rules(world):
     assert ("If the answer is not written in FACTS, you do NOT know it. Call talk_to_owner(cannot_answer). Never answer "
             "policy\n  questions") in system
     assert 'Say "team", never "owner".' in system
-    assert 'A later "hi": only "Hi."' in system
+    assert "Any greeting, in any words or language (hi, hello, hai, vanakkam, namaste, good morning) → greet." in system
     assert "Never explain the hold or when a link expires." in system
     assert "Never fill month or year yourself" in system
 

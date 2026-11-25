@@ -108,7 +108,7 @@ def test_sure_never_answers_while_a_step_is_open(world):
 
 def test_sure_only_for_an_acknowledgement_with_no_step_open(world):
     go(world, "is there a pool?", reply("Yes, there is a pool."), live=True)
-    res, _ = go(world, "ok", reply(""), live=True)
+    res, _ = go(world, "ok", reply("[ack]"), live=True)
     assert res.sent == ["sure"] and world.wa.texts(GUEST)[-1] == "Sure."
 
 

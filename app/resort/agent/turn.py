@@ -22,7 +22,7 @@ from datetime import timedelta
 from typing import Any
 
 from app.providers.llm import ChatMessage
-from app.resort.agent import guard
+from app.resort.agent import conversation, guard
 from app.resort.agent import photos_plan as pp
 from app.resort.agent import usage
 from app.resort.agent.outbox import Outbox, near_same
@@ -40,6 +40,7 @@ HISTORY = 12  # real messages of the current conversation the AI sees (CURRENT E
 TEMPERATURE = 0.2
 AI_DOWN_ALERT_GAP = timedelta(minutes=30)  # one staff alert per outage, not per message
 NO_REPLY = "[no reply]"
+ACK = "[ack]"  # the AI's whole reply for a pure acknowledgement ('ok', 'thanks'): only then may the code say 'Sure.'
 SKIPPED_ROWS = ("[invoice]", "[template", "[image]", "[voice note: not understood")  # log lines, never shown to the AI
 
 
@@ -54,6 +55,7 @@ class TurnResult:
     error: str = ""
     guard: list[str] = field(default_factory=list)  # what the guard found wrong with the AI's own text
     retried: bool = False  # the AI got its one retry
+    ack: bool = False  # the AI's reply was exactly ACK: the guest only acknowledged ('ok', 'thanks')
     # token use of the whole turn (usage.py logs it; never any guest text)
     model: str = ""
     llm_calls: int = 0
@@ -90,7 +92,7 @@ def history(bot: Any, phone: str) -> list[ChatMessage]:
     photos is one short note; log lines, templates and old links never reach the AI."""
     rows = bot.repo.list_chat(phone, limit=200)
     items: list[tuple[str, str]] = []
-    for m in rows[bot._session_start(rows, by_time=True):]:
+    for m in rows[conversation.start_index(rows):]:
         text = m.text
         if text == RESTART_MARK or text.startswith(SKIPPED_ROWS):
             continue
@@ -119,7 +121,7 @@ def history(bot: Any, phone: str) -> list[ChatMessage]:
 def greeted(bot: Any, phone: str) -> bool:
     """We already wrote to the guest in this conversation (a restart's greeting counts): it is not a fresh start."""
     rows = bot.repo.list_chat(phone, limit=200)
-    return any(m.direction == "out" and m.text != RESTART_MARK for m in rows[bot._session_start(rows, by_time=True):])
+    return any(m.direction == "out" and m.text != RESTART_MARK for m in rows[conversation.start_index(rows):])
 
 
 def swipe_note(bot: Any, phone: str, context_id: str | None) -> str:
@@ -185,13 +187,24 @@ def summary_line(name: str, out: dict[str, Any]) -> str:
     return "[earlier result] " + ", ".join(parts)
 
 
+def _raw(response: Any) -> str:
+    return (response.text or "").strip() if response is not None else ""
+
+
+def is_ack(response: Any) -> bool:
+    """The AI marked the guest's message as a pure acknowledgement ('ok', 'thanks') by writing exactly ACK. This reads the
+    AI's own output, never the guest's words."""
+    return _raw(response).lower() == ACK
+
+
 def _own_text(response: Any) -> str:
-    reply = (response.text or "").strip() if response is not None else ""
-    return "" if reply.lower() == NO_REPLY else reply
+    reply = _raw(response)
+    return "" if reply.lower() in (NO_REPLY, ACK) else reply
 
 
 def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe: str = "") -> TurnResult:
     """Answer one guest message. The outbox is flushed at the end (a dry-run outbox only records)."""
+    conversation.remember(bot, phone)  # where this guest's conversation began (restart / confirmed booking / 12 h gap)
     enq = Enquiry.load(bot.repo, phone)
     messages = _with_guest_message(history(bot, phone), text, swipe)
     fresh = len(messages) <= 1 and not greeted(bot, phone)
@@ -240,6 +253,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         return guard.problems(reply, src), src
 
     def own(response: Any) -> str:
+        result.ack = is_ack(response)
         reply = _own_text(response)
         if tools.quiet:  # talk_to_owner(cannot_answer / call_request / other / guest_called): only the fixed text goes
             return ""
@@ -354,7 +368,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         if not outbox.spoke:  # NEVER SILENT (live test 2026-11-25): every guest message gets at least one reply
             result.outcome = "never_silent"
             wanted = asked or booking_dropped  # the AI's own booking ask / answer was taken out: the step IS wanted
-            if step := quiet_reply(bot, phone, enq, lang, wanted=wanted):  # a pay nudge / a step not sent lately / 'Sure.'
+            if step := quiet_reply(bot, phone, enq, lang, wanted=wanted, ack=result.ack):  # pay nudge / step / 'Sure.'
                 outbox.text(*step)
             else:
                 second = second_chance()  # a) the AI once more (internal: the guest never sees the ask)
@@ -418,12 +432,15 @@ def _recent(bot: Any, phone: str, text: str, link: Any = None) -> bool:
     return any(near_same(text, x) or (url and url in x) for x in recent)
 
 
-def quiet_reply(bot: Any, phone: str, enq: Enquiry, lang: str, *, wanted: bool = False) -> tuple[str, str] | None:
+def quiet_reply(bot: Any, phone: str, enq: Enquiry, lang: str, *, wanted: bool = False,
+                ack: bool = False) -> tuple[str, str] | None:
     """Nothing at all went out this turn (the AI wrote nothing, no tool spoke). The code's own short answer, or None
     (then run_turn asks the AI once more, then re-sends the open step / says 'say again': never silent):
     - an open unpaid link: pay_nudge once (not when pay_nudge or the link is among the last 2 messages)
     - an open step not among the last 2 messages: that step
-    - NO step open: 'Sure.' (not when 'Sure.' was the last message); a first message: None
+    - NO step open: 'Sure.' ONLY when the AI marked the message as a pure acknowledgement (`ack`: it wrote exactly ACK
+      for 'ok' / 'thanks') and 'Sure.' was not the last message; anything else: None, so the AI is asked once more
+      (live test 2026-11-25: 'hello' got 'Sure.')
     'Sure.' never answers while a step is open (live test 2026-11-25: 'what sure' / 'send' got 'Sure' or nothing)."""
     recent = pp.recent_texts(bot, phone, 2)
     if (link := live_link(bot, phone)) is not None and enq.next_step == "pay":
@@ -433,7 +450,7 @@ def quiet_reply(bot: Any, phone: str, enq: Enquiry, lang: str, *, wanted: bool =
     step = pp.open_step(bot, enq, lang) if (enq.active or wanted) else None
     if step is not None:
         return None if _recent(bot, phone, step[1]) else step
-    if not greeted(bot, phone):
+    if not ack or not greeted(bot, phone):
         return None
     sure = ("sure", t("sure", lang))
     return None if recent and near_same(recent[-1], sure[1]) else sure

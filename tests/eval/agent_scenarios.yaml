@@ -585,3 +585,23 @@
       expect_tools: [update_enquiry]
       expect_sent: [past_date]
       not_sent: [rooms_ok]
+
+- id: greetings_in_any_words  # live test 2026-11-25 (Haiku): 'hi' got 'Hi.', 'hello' got 'Sure.'
+  turns:
+    - guest: "hi"
+      expect_tools: [greet]
+      only_sent: [greet]
+      expect_text: "Hi, How may I assist you?"
+    - guest: "is there parking?"
+    - guest: "hello"
+      expect_tools: [greet]
+      only_sent: [hello]
+      not_sent: [sure]
+    - guest: "ok thanks"
+      not_sent: [greet, hello]
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+      expect_sent: [rooms_ok]
+    - guest: "namaskaram"
+      expect_tools: [greet]
+      expect_sent: [hello_back]
+      not_sent: [sure, greet]

@@ -254,12 +254,12 @@ def test_the_owner_rules_are_in_the_prompt(world):
         assert line in system, line
 
 
-def test_every_call_offers_the_12_tools_at_low_temperature(world):
+def test_every_call_offers_the_13_tools_at_low_temperature(world):
     w = world
     go(w, ASK, tool("update_enquiry", **STAY), reply("Done."))
     assert len(w.llm.calls) == 2
     for call in w.llm.calls:
-        assert call.tools == TOOL_SCHEMAS and len(call.tools) == 12
+        assert call.tools == TOOL_SCHEMAS and len(call.tools) == 13
         assert call.temperature == 0.2 and call.max_tokens == 300
 
 

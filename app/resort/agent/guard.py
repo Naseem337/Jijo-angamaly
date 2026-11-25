@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
+from app.resort.agent import conversation
 from app.resort.chat import english_letters_only
 from app.resort.flow import BOOKING_ID, INDIC
 
@@ -207,7 +208,7 @@ def guest_names(bot: Any, phone: str, enq: Any) -> list[str]:
 def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_texts: list[str],
             guest_text: str) -> Sources:
     rows = bot.repo.list_chat(phone, limit=200)
-    said = [m.text for m in rows[bot._session_start(rows, by_time=True):] if m.direction == "in"]
+    said = [m.text for m in rows[conversation.start_index(rows):] if m.direction == "in"]
     today = bot._today()
     days = "\n".join((today + timedelta(days=i)).isoformat() for i in range(2))
     prop = bot.repo.get_property(enq.place) if enq.place else None

@@ -115,9 +115,9 @@ def test_ok_after_the_name_ask_gets_the_ais_second_short_line(world):  # live te
 
 def test_ok_with_no_step_open_gets_sure_then_the_ais_second_line(world):
     go(world, "is there a pool?", reply("Yes, there is a pool."), live=True)
-    res, _ = go(world, "ok", reply(""), live=True)
+    res, _ = go(world, "ok", reply("[ack]"), live=True)  # the AI marks a pure acknowledgement
     assert res.sent == ["sure"] and world.wa.texts(GUEST)[-1] == "Sure."
-    res, _ = go(world, "ok", reply(""), reply("You're welcome."), live=True)
+    res, _ = go(world, "ok", reply("[ack]"), reply("You're welcome."), live=True)
     assert res.sent == ["ai"]
 
 

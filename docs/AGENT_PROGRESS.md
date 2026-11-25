@@ -379,3 +379,14 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
   after ANY exception from a provider (one log line "LLM provider X crashed, trying next"), and AnthropicLLM wraps any
   SDK exception in LLMError. Live: 3 scenarios x 3 runs on Haiku, cache hit 92%, ~17k tokens per AI turn (2-3 calls).
   photos_after_link fails: the room photos were already sent in turn 1, so 'send room pics' gets photos_sent (code rule).
+
+## Greetings and 'Sure.' (live test 2026-11-25, Haiku: 'hi' -> 'Hi.', 'hello' -> 'Sure.')
+- Conversation boundary in code (`agent/conversation.py`): a new conversation after 'restart' or a confirmed booking
+  (RESTART_MARK) or 12 h with no message. Stored per guest in state `agent_conv` {started_at, reason}. Every agent
+  file uses it instead of the old bot's 24 h `_session_start`. No guest words decide it.
+- New tool `greet` (13 tools, ONCE): new conversation -> owner's greet; mid-conversation with an open enquiry or link ->
+  hello_back (stay) + the open step unless it is the last message; a confirmed booking ahead -> hello_booked; else
+  'Hi.'. Prompt: any greeting -> greet, never write a greeting yourself.
+- 'Sure.' only when the AI replied exactly `[ack]` (pure 'ok' / 'thanks', nothing open). An empty reply is no longer an
+  acknowledgement: the AI is asked once more, then the open step / 'Sorry, could you say that again?'.
+- Tests: tests/resort/test_agent_greet.py; eval scenario greetings_in_any_words (not run).

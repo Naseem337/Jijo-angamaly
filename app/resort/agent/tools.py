@@ -22,9 +22,10 @@ from typing import Any
 
 from app.providers.llm import ToolSpec
 from app.resort import availability as av
+from app.resort.agent import conversation
 from app.resort.agent import photos_plan as pp
 from app.resort.agent.outbox import Outbox, near_same
-from app.resort.agent.state import LANGUAGES, Enquiry
+from app.resort.agent.state import LANGUAGES, Enquiry, _day
 from app.resort.chat import _Turn, _count_name, _money, close_word
 from app.resort.i18n import status_name, t
 from app.resort.models import Property, RoomType
@@ -36,6 +37,7 @@ I18N_LANG = {"en": "en", "manglish": "mn", "tanglish": "tn", "hinglish": "hn"}
 
 STEP_SHOWN = "step_shown"  # an outbox marker: the open step is the last message already, the turn adds it no more
 ALREADY_SENT = "Already sent to the guest. Do not repeat it."  # the start of every note when a tool sent messages
+MID_HI = "Hi."  # a mid-conversation hello with nothing to add (same in every language, like the owner's greet)
 SENT_NOTE = ("Write NOTHING unless the guest also asked something these messages did not answer; then answer only that, "
              "in one short sentence.")
 UNCHANGED_NOTE = ("Nothing new to send: the stay is unchanged. Answer only what the guest asked, in one short line.")
@@ -67,7 +69,7 @@ DATE_FIELD = {"type": "object",
 
 # the tools that send something to the guest or the team: each runs at most ONCE per turn (fix round 2)
 ONCE_TOOLS = ("send_payment_link", "send_photos", "create_booking", "check_payment", "talk_to_owner", "send_map",
-              "repeat_step")
+              "repeat_step", "greet")
 ONCE_NOTE = "Already done this turn: nothing more was sent. Do not call it again and do not repeat it."
 # talk_to_owner reasons after which the guest gets ONLY the fixed text: the AI's own line and the open step are dropped
 QUIET_REASONS = ("cannot_answer", "call_request", "other", "guest_called")
@@ -181,6 +183,12 @@ TOOL_SCHEMAS = [
         "A booking step is open (the form, the name and mobile ask, the payment link) and the guest asks for it again "
         "or writes something unclear about it ('what sure'): the step is sent again. NOT for a plain 'ok' / 'thanks' "
         "that only acknowledges.",
+        {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
+    ToolSpec(
+        "greet",
+        "The guest greets, in any words or language ('hi', 'hello', 'hai', 'vanakkam', 'namaste', 'good morning'). Code "
+        "sends the right greeting: the owner's welcome for a new conversation, else 'Hi' with their open enquiry and its "
+        "step, or their confirmed booking. Write nothing after it unless the guest also asked something.",
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "recall_old_chat",
@@ -411,7 +419,7 @@ class AgentTools:
     def _guest_words(self) -> list[str]:
         """Every word the guest wrote in this conversation (since a restart or a long gap), this turn's message too."""
         rows = self.bot.repo.list_chat(self.phone, limit=200)
-        said = [m.text for m in rows[self.bot._session_start(rows, by_time=True):] if m.direction == "in"]
+        said = [m.text for m in rows[conversation.start_index(rows):] if m.direction == "in"]
         return [w for text in [*said, self.guest_text or ""] for w in _words(text)]
 
     def _place_said(self, place: str) -> bool:
@@ -1349,14 +1357,73 @@ class AgentTools:
         self.out.text(*step)
         return self._result(True, {"step": step[0]}, start, enq, SENT_NOTE)
 
+    # ------------------------------------------------------------------ greet
+
+    def greet(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The guest greeted (live test 2026-11-25: 'hi' got 'Hi.', 'hello' got 'Sure.'). Code picks the owner's text:
+        - a NEW conversation (conversation.py: restart, confirmed booking or a 12 h gap): greet ('Hi, How may I assist you?')
+        - mid-conversation, a booking under way: hello_back ('Hi. Your enquiry: {stay}.') + the open step, unless that
+          step is the last message we sent (the live link's pay text for an open link)
+        - mid-conversation, a confirmed booking still ahead: hello_booked
+        - mid-conversation, nothing open: 'Hi.'"""
+        bot = self.bot
+        start, enq, style, lang = self._ctx(args)
+        if not conversation.we_spoke(bot, self.phone):
+            self.out.text("greet", t("greet", lang))
+            return self._result(True, {"greeting": "new_conversation"}, start, enq, SENT_NOTE)
+        link = live_link(bot, self.phone)
+        booked = self._booked_ahead()
+        # an enquiry is open while a booking is under way, unless it is the one that was just paid
+        open_enquiry = enq.active and not enq.paid and not (booked is not None and enq.booking_id == booked.id)
+        if open_enquiry or link is not None:
+            last = pp.last_text(bot, self.phone, self.out)  # read BEFORE the hello is queued
+            stay = self._stay_words(enq, link)
+            self.out.text("hello_back", t("hello_back", lang, stay=stay) if stay else MID_HI)
+            step = ("pay", pay_text(link, lang, bot.clock.now())) if link is not None else pp.open_step(bot, enq, lang)
+            if step is not None and step[1] != last:
+                self.out.text(*step)
+            self.no_step = True  # greet already decided the open step: turn.py's due_step must not add it again
+            return self._result(True, {"greeting": "open_enquiry", "stay": stay}, start, enq, SENT_NOTE)
+        if booked is not None:
+            prop = bot.repo.get_property(booked.property_id)
+            self.out.text("hello_booked", t("hello_booked", lang, place=bot._place_label(prop) if prop else "the resort",
+                                            dates=f"{_day(booked.check_in)} to {_day(booked.check_out)}"))
+            return self._result(True, {"greeting": "confirmed_booking"}, start, enq, SENT_NOTE)
+        self.out.text("hello", MID_HI)
+        return self._result(True, {"greeting": "mid_conversation"}, start, enq, SENT_NOTE)
+
+    def _stay_words(self, enq: Enquiry, link: Any = None) -> str:
+        """'Pozhiyoram, Alleppey, 10 Dec to 12 Dec, 4 person(s), 2 room(s)': what is known of the stay (the open link's
+        booking when there is one); '' when nothing is known yet."""
+        bot = self.bot
+        if link is not None:
+            prop = bot.repo.get_property(link.property_id)
+            parts = [bot._place_label(prop) if prop else "", f"{_day(link.check_in)} to {_day(link.check_out)}",
+                     f"{link.adults} person(s)", f"{link.rooms} room(s)"]
+        else:
+            prop = bot.repo.get_property(enq.place) if enq.place else None
+            dates = (f"{_day(enq.check_in)} to {_day(enq.check_out)}" if enq.check_in and enq.check_out
+                     else _day(enq.check_in) if enq.check_in else "")
+            parts = [bot._place_label(prop) if prop else "", dates,
+                     f"{enq.adults} person(s)" if enq.adults else "",
+                     f"{enq.rooms} room(s)" if isinstance(enq.rooms, int) and enq.rooms > 0 else ""]
+        return ", ".join(p for p in parts if p)
+
+    def _booked_ahead(self) -> Any:
+        """The guest's confirmed booking that is not over yet, or None."""
+        today = self.bot._today()
+        paid = [b for b in self.bot.repo.list_bookings(phone=self.phone, limit=10)
+                if b.status in ("paid", "checked_in") and b.check_out >= today]
+        return paid[0] if paid else None
+
     # ------------------------------------------------------------------ recall_old_chat (read only)
 
     def recall_old_chat(self, args: dict[str, Any]) -> dict[str, Any]:
-        """What was said in this guest's EARLIER conversations (a 24 h gap or a restart ends one). Links are hidden."""
+        """What was said in this guest's EARLIER conversations (a 12 h gap, a restart or a confirmed booking ends one). Links are hidden."""
         bot = self.bot
         start, enq, style, lang = self._ctx(args)
         rows = bot.repo.list_chat(self.phone, limit=80)
-        older = rows[:bot._session_start(rows, by_time=True)]
+        older = rows[:conversation.start_index(rows)]
         if not older:
             return self._result(True, {"messages": [], "info": "there is no earlier chat with this guest"}, start, enq,
                                 "Read only.")
@@ -1378,7 +1445,7 @@ class AgentTools:
                     "check_payment": self.check_payment, "send_payment_link": self.send_payment_link,
                     "my_bookings": self.my_bookings, "change_name": self.change_name,
                     "talk_to_owner": self.talk_to_owner, "recall_old_chat": self.recall_old_chat,
-                    "repeat_step": self.repeat_step}
+                    "repeat_step": self.repeat_step, "greet": self.greet}
         start, enq = len(self.out.keys), Enquiry.load(self.bot.repo, self.phone)
         handler = handlers.get(name)
         if handler is None:
