@@ -73,9 +73,26 @@ class ChatMessage:
 
 @dataclass(frozen=True)
 class Usage:
-    input_tokens: int = 0
+    input_tokens: int = 0  # every input token, cached ones included
     output_tokens: int = 0
-    cached_input_tokens: int = 0
+    cached_input_tokens: int = 0  # read from the prompt cache
+    cache_write_tokens: int = 0  # written to the prompt cache this call
+
+
+# A caller may put CACHE_SPLIT once in the system prompt: the part before it never changes between turns (it is cached
+# where the provider supports it); the part after it changes every turn. Providers without caching join both parts.
+CACHE_SPLIT = "\n\n<<<CACHE_SPLIT>>>\n\n"
+
+
+def split_system(system: str) -> tuple[str, str]:
+    """(static part, dynamic part); no CACHE_SPLIT -> (system, '')."""
+    static, _, dynamic = system.partition(CACHE_SPLIT)
+    return static, dynamic
+
+
+def plain_system(system: str) -> str:
+    """The system prompt as one text, for providers without prompt caching."""
+    return system.replace(CACHE_SPLIT, "\n\n")
 
 
 @dataclass

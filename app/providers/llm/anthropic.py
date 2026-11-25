@@ -1,8 +1,8 @@
 """Claude via the official Anthropic SDK (Messages API), with prompt caching.
 
-The model ID comes only from config (ANTHROPIC_MODEL in .env); nothing is hardcoded.
-The system prompt and tool list are identical on every turn, so one cache breakpoint
-on the system block caches tools + system together.
+The model ID comes only from config (ANTHROPIC_MODEL for the car bot, AGENT_MODEL for the resort agent); nothing is
+hardcoded. The API key is read by the provider factory from the secret store and never logged.
+Prompt caching: one breakpoint after the tools and one after the static system part (see `request`).
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from app.providers.llm.base import (
     ToolCall,
     ToolSpec,
     Usage,
+    split_system,
 )
 
 _STOP: dict[str, StopReason] = {
@@ -63,6 +64,28 @@ def _to_wire(messages: list[ChatMessage]) -> list[dict[str, Any]]:
     return wire
 
 
+CACHE = {"type": "ephemeral"}
+
+
+def request(model: str, system: str, messages: list[ChatMessage], tools: list[ToolSpec] | None, max_tokens: int,
+            temperature: float | None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The Messages API request. Claude reads tools -> system -> messages, so the order of the cached prefix is:
+    tool definitions [breakpoint 1: shared by every guest] -> the static system part [breakpoint 2] -> the dynamic
+    system part (after CACHE_SPLIT: changes every turn, never cached) -> the chat. No extended thinking is asked for."""
+    static, dynamic = split_system(system)
+    blocks: list[dict[str, Any]] = [{"type": "text", "text": static, "cache_control": CACHE}]
+    if dynamic.strip():
+        blocks.append({"type": "text", "text": dynamic})
+    kwargs: dict[str, Any] = {"model": model, "max_tokens": max_tokens, "system": blocks,
+                              "messages": _to_wire(messages), **(extra or {})}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if tools:
+        kwargs["tools"] = [{"name": t.name, "description": t.description, "input_schema": t.parameters} for t in tools]
+        kwargs["tools"][-1]["cache_control"] = CACHE
+    return kwargs
+
+
 class AnthropicLLM:
     def __init__(
         self,
@@ -89,20 +112,7 @@ class AnthropicLLM:
         max_tokens: int = 1024,
         temperature: float | None = None,
     ) -> LLMResponse:
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": max_tokens,
-            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            "messages": _to_wire(messages),
-            **self._extra,
-        }
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-        if tools:
-            kwargs["tools"] = [
-                {"name": t.name, "description": t.description, "input_schema": t.parameters}
-                for t in tools
-            ]
+        kwargs = request(self.model, system, messages, tools, max_tokens, temperature, self._extra)
         try:
             response = self._client.messages.create(**kwargs)
         except anthropic.RateLimitError as exc:
@@ -111,7 +121,7 @@ class AnthropicLLM:
             raise LLMError(self.name, f"HTTP {exc.status_code}: {exc.message}",
                            retryable=exc.status_code >= 500) from exc
         except anthropic.APIConnectionError as exc:
-            raise LLMError(self.name, f"connection failed: {exc!r}") from exc
+            raise LLMError(self.name, f"connection failed: {type(exc).__name__}") from exc
 
         texts: list[str] = []
         calls: list[ToolCall] = []
@@ -135,6 +145,7 @@ class AnthropicLLM:
                 + (usage.cache_read_input_tokens or 0),
                 usage.output_tokens,
                 usage.cache_read_input_tokens or 0,
+                usage.cache_creation_input_tokens or 0,
             ),
             provider_data={"anthropic": list(response.content)},
         )

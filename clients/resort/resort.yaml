@@ -31,7 +31,12 @@ speaking_style: >
 
 providers:
   llm:
-    deepseek:                       # paid, cheap; the go-live brain (owner, 2026-11-18). Key: DEEPSEEK_API_KEY
+    anthropic:                      # the agent's main brain (Claude Haiku). Key: ANTHROPIC_API_KEY, model: AGENT_MODEL
+      kind: anthropic
+      model: "${AGENT_MODEL:-}"     # never hard-coded: empty -> skipped with a log line, the next provider answers
+      api_key_secret: anthropic_api_key
+      timeout_s: 20
+    deepseek:                      # paid, cheap; the go-live brain (owner, 2026-11-18). Key: DEEPSEEK_API_KEY
       kind: openai_compatible
       base_url: https://api.deepseek.com
       model: "${DEEPSEEK_MODEL:-deepseek-chat}"
@@ -59,7 +64,7 @@ providers:
       timeout_s: 20
       thinking_headroom_tokens: 1024
       extra: {reasoning_effort: low}
-  llm_chain: "${LLM_CHAIN:-gemini,sarvam_chat,groq}"     # free tiers, testing
+  llm_chain: "${LLM_CHAIN:-anthropic,sarvam_chat,groq}"  # Claude first; Sarvam, then Groq on an error
   stt:
     kind: sarvam
     api_key_secret: sarvam_api_key

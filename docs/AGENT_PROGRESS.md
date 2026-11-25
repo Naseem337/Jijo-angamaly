@@ -355,3 +355,21 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
 - `get_price` also still exists in chat.py (the old bot offers it until AI-8).
 - Old chat.py `other_room_free` line is said whenever kind=other_room and rooms are checked (the old regex "not a photo word"
   condition cannot be kept).
+
+## Claude Haiku + prompt caching + lean requests (2026-11-25)
+- Provider: the existing `AnthropicLLM` (app/providers/llm/anthropic.py) is the resort chain's `anthropic` entry
+  (clients/resort/resort.yaml): key `ANTHROPIC_API_KEY`, model `AGENT_MODEL` (never hard-coded). Default chain
+  `anthropic,sarvam_chat,groq`; an Anthropic error moves to Sarvam, then Groq (FallbackLLM). A missing key or model:
+  skipped with the log line "LLM provider skipped: anthropic: ...". Sarvam speech-to-text is unchanged.
+- Caching: request = tools [cache breakpoint] -> static system (rules, style, OWNER RULES, FACTS) [cache breakpoint] ->
+  dynamic system (TODAY, GUEST RECORDS, CURRENT ENQUIRY) -> chat. prompt.py puts `CACHE_SPLIT` between the two parts;
+  OpenAI-style providers get one plain text (`plain_system`). The swipe note stays on the guest's message.
+- Lean: HISTORY 12, MAX_ROUNDS 4, max_tokens 300, temperature 0.2, no extended thinking. Tool results go back as compact
+  JSON without empty fields; when a new tool round starts, the earlier round's results shrink to one line
+  (`[earlier result] update_enquiry: ok, ..., sent ask_contact, next ask_contact`). Earlier turns never carried tool JSON
+  (the history is the chat log). Tool descriptions shortened (12.8k -> 9.3k chars) without repeating the prompt.
+- Measure: `app/resort/agent/usage.py` logs "Agent tokens: model=.. calls=.. input=.. cache_read=.. cache_write=..
+  output=.. rounds=.." per turn and appends to agent_tokens.jsonl next to the database (no guest text, no phone: a
+  12-char hash). `scripts/token_report.py` prints averages per turn / per booking chat and the cache hit rate. The eval
+  prints tokens per scenario and in SUMMARY.
+- Tests: tests/resort/test_agent_haiku_tokens.py (fake clients only).

@@ -269,6 +269,7 @@ def run_scenario(sc: dict[str, Any], llm: Any) -> dict[str, Any]:
                          calls=[{"name": c["name"], "args": c["args"], "ok": c["result"].get("ok"),
                                  "next_step": c["result"].get("next_step")} for c in calls],
                          guard=res.guard if res else [], bad=bad, ai=res.reply if res else "",
+                         tokens=_tokens(res),
                          fixed=[k for k in keys if k != "ai" and not k.startswith(("staff:", "photos"))])
             log.append(entry)
             w.clock.advance(minutes=1)
@@ -276,7 +277,38 @@ def run_scenario(sc: dict[str, Any], llm: Any) -> dict[str, Any]:
                 time.sleep(PAUSE_S)  # free-tier rate limits: a short gap between AI turns
     finally:
         gate.run_turn = real_turn
-    return {"log": log, "failures": failures}
+    return {"log": log, "failures": failures, "tokens": _sum_tokens(log)}
+
+
+TOKEN_KEYS = ("input", "cache_read", "cache_write", "output", "calls")
+
+
+def _tokens(res: Any) -> dict[str, int]:
+    """One AI turn's token use (all zero when the gate answered without the AI)."""
+    if res is None:
+        return dict.fromkeys(TOKEN_KEYS, 0)
+    return {"input": res.input_tokens, "cache_read": res.cache_read_tokens, "cache_write": res.cache_write_tokens,
+            "output": res.output_tokens, "calls": res.llm_calls}
+
+
+def _sum_tokens(log: list[dict[str, Any]]) -> dict[str, int]:
+    total = dict.fromkeys(TOKEN_KEYS, 0)
+    turns = 0
+    for e in log:
+        if t := e.get("tokens"):
+            turns += 1 if t["calls"] else 0
+            for k in TOKEN_KEYS:
+                total[k] += t[k]
+    total["turns"] = turns
+    return total
+
+
+def token_text(t: dict[str, int]) -> str:
+    total = t["input"] + t["output"]
+    per = total // t["turns"] if t.get("turns") else 0
+    hit = f"{100 * t['cache_read'] // t['input']}%" if t["input"] else "-"
+    return (f"{total:,} tokens ({per:,}/AI turn; in {t['input']:,}, cache read {t['cache_read']:,}, "
+            f"cache write {t['cache_write']:,}, out {t['output']:,}; cache hit {hit})")
 
 
 JUDGE = """You grade one WhatsApp chat between a guest and a resort's front-desk bot. Score the BOT 1-5:
@@ -330,7 +362,7 @@ def save_transcript(sc: dict[str, Any], run_no: int, result: dict[str, Any]) -> 
         lines.append(f"--- turn {e['n']}: GUEST: {e['guest']}")
         if "outcome" not in e:
             continue
-        lines.append(f"    outcome={e['outcome']}  {e['seconds']}s  sent={e['sent']}")
+        lines.append(f"    outcome={e['outcome']}  {e['seconds']}s  sent={e['sent']}  tokens={e.get('tokens')}")
         for c in e["calls"]:
             lines.append(f"    TOOL {c['name']}({json.dumps(c['args'], ensure_ascii=False)}) ok={c['ok']} "
                          f"next_step={c['next_step']}")
@@ -367,15 +399,20 @@ def main() -> int:
             old.unlink()
     summary: list[tuple[str, int, str]] = []
     started, rate_retries = time.monotonic(), 0
+    grand = dict.fromkeys((*TOKEN_KEYS, "turns"), 0)
     total, width = len(scenarios), max((len(s["id"]) for s in scenarios), default=0)
     for i, sc in enumerate(scenarios, 1):
         passed, first_reason, sc_started = 0, "", time.monotonic()
+        sc_tokens = dict.fromkeys((*TOKEN_KEYS, "turns"), 0)
         for run_no in range(1, a.runs + 1):
             result = run_scenario(sc, llm)
             if any("ai_down" in f for f in result["failures"]):  # a rate limit, not the agent: wait and run it again once
                 time.sleep(RATE_WAIT_S)
                 result = run_scenario(sc, llm)
                 rate_retries += 1
+            for k, v in result["tokens"].items():
+                sc_tokens[k] += v
+                grand[k] += v
             if not a.no_judge:
                 result["score"], result["reason"] = judge(llm, sc, result["log"])
                 if result["score"] is not None and result["score"] < 4:
@@ -390,6 +427,7 @@ def main() -> int:
         ok_so_far = sum(1 for _, p, _ in summary if p == a.runs)
         line = (f"[{i}/{total} {i * 100 // total}%] {sc['id']:<{width}} ... {mark} {passed}/{a.runs} "
                 f"({time.monotonic() - sc_started:.0f}s)  [pass {ok_so_far}/{i}]")
+        line += f"  {token_text(sc_tokens)}"
         if first_reason:
             line += f" — {first_reason[:150]}"
         print(line, flush=True)
@@ -397,7 +435,7 @@ def main() -> int:
     runs_ok = sum(p for _, p, _ in summary)
     print(f"\nSUMMARY: {full}/{len(summary)} scenarios pass every run; {runs_ok}/{len(summary) * a.runs} runs pass; "
           f"{(time.monotonic() - started) / 60:.1f} min; {rate_retries} run(s) repeated after the AI was down. "
-          f"Failed transcripts: {OUT.relative_to(ROOT)}")
+          f"Failed transcripts: {OUT.relative_to(ROOT)}. Tokens: {token_text(grand)}")
     return 0 if full == len(summary) else 1
 
 

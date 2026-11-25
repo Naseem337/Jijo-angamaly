@@ -1,8 +1,9 @@
 """The agent's system prompt (docs/AI_AGENT_DESIGN.md section 5), built fresh every turn.
 
 The flow details live in the tool results (`next_step`, `note`), not here, so the prompt stays short. The static part comes
-first (it can be cached), then the blocks that change each turn: TODAY, FACTS (from the dashboard, never an amount),
-GUEST RECORDS and CURRENT ENQUIRY. The swipe-reply note is not here: it goes on the guest's own message (turn.py).
+first and is cached across turns and guests: the rules, OWNER RULES and FACTS (from the dashboard, never an amount). Then
+CACHE_SPLIT, then the blocks that change each turn: TODAY, GUEST RECORDS and CURRENT ENQUIRY. The swipe-reply note is not
+here: it goes on the guest's own message (turn.py).
 
 No price, rate or amount is ever written into this prompt: they come only from tool results.
 """
@@ -12,6 +13,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from app.providers.llm.base import CACHE_SPLIT
 from app.resort.agent.state import Enquiry
 from app.resort.agent.tools import towns_and
 
@@ -111,15 +113,26 @@ def today_block(today: date) -> str:
             f"it comes ({day} {month.strftime('%b')}).")
 
 
-def build_system_prompt(bot: Any, phone: str, enq: Enquiry, *, fresh: bool = False) -> str:
-    """The static rules, then TODAY, FACTS, GUEST RECORDS and CURRENT ENQUIRY for this guest."""
-    today = bot._today()
-    prop = bot.repo.get_property(enq.place) if enq.place else None
+def static_prompt(bot: Any) -> str:
+    """The cached part: rules, style, OWNER RULES and FACTS. The same for every guest and every turn; it changes only
+    when the owner edits the dashboard. Nothing per guest or per turn may go in here."""
     return "\n\n".join([
         SYSTEM.replace("{brand}", bot._brand()).replace("{towns}", towns_and(bot)),
         OWNER_RULES,
-        today_block(today),
         "FACTS\n" + bot._facts(),
+    ])
+
+
+def dynamic_prompt(bot: Any, phone: str, enq: Enquiry, *, fresh: bool = False) -> str:
+    """The per-turn part, after the cache breakpoint: TODAY, GUEST RECORDS and CURRENT ENQUIRY."""
+    prop = bot.repo.get_property(enq.place) if enq.place else None
+    return "\n\n".join([
+        today_block(bot._today()),
         bot._guest_memory(phone, fresh),
         enq.render(bot._place_label(prop) if prop else ""),
     ])
+
+
+def build_system_prompt(bot: Any, phone: str, enq: Enquiry, *, fresh: bool = False) -> str:
+    """static_prompt, CACHE_SPLIT (the cache breakpoint), dynamic_prompt. Providers without caching join the two."""
+    return static_prompt(bot) + CACHE_SPLIT + dynamic_prompt(bot, phone, enq, fresh=fresh)

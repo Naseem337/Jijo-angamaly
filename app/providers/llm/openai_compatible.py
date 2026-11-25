@@ -16,6 +16,7 @@ from app.providers.llm.base import (
     ToolCall,
     ToolSpec,
     Usage,
+    plain_system,
 )
 
 _FINISH: dict[str, StopReason] = {
@@ -53,7 +54,7 @@ def _retry_after(resp: httpx.Response) -> float | None:
 def _to_wire(system: str, messages: list[ChatMessage], *, keep_tools: bool = True) -> list[dict[str, Any]]:
     """keep_tools=False (a rewrite call without tools): some APIs (Sarvam) reject tool messages when no
     tools are sent, so tool calls and results become plain text the model can still read."""
-    wire: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    wire: list[dict[str, Any]] = [{"role": "system", "content": plain_system(system)}]
     for m in messages:
         if not keep_tools and m.role == "tool":
             wire.append({"role": "user", "content": f"[stock tool result]\n{m.content}"})

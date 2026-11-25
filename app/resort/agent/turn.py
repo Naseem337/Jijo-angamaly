@@ -1,11 +1,14 @@
 """One guest turn (docs/AI_AGENT_DESIGN.md sections 1 and 4): the AI reads the message, calls tools, and answers.
 
-    system prompt + the last 20 real messages + the new guest message (with a swipe-reply line before it)
-      -> LLM <-> tools, at most 6 rounds of tool calls
+    system prompt (cached static part + per-turn part) + the last 12 real messages + the new guest message (with a
+    swipe-reply line before it)
+      -> LLM <-> tools, at most 4 rounds of tool calls; tool results go back as compact JSON, and an earlier round's
+         results shrink to one line each when a new round starts
       -> the outbox: the AI's own line first, then the tools' messages in the order they were queued,
          then the open step if nothing at all went out (never silent)
 
-The model comes from the LLM chain (LLM_CHAIN) only: nothing here names one. Temperature is 0.3. The AI's own text goes
+The model comes from the LLM chain (LLM_CHAIN) only: nothing here names one. Temperature 0.2, at most 300 output tokens
+per call, no extended thinking. Token use per turn goes to usage.py. The AI's own text goes
 through guard.py (one retry with the problem told to the AI; still bad -> handoff text + staff alert); tool messages are
 never checked. A failing LLM gets the ai_down text and one staff alert per 30 minutes.
 """
@@ -21,6 +24,7 @@ from typing import Any
 from app.providers.llm import ChatMessage
 from app.resort.agent import guard
 from app.resort.agent import photos_plan as pp
+from app.resort.agent import usage
 from app.resort.agent.outbox import Outbox, near_same
 from app.resort.agent.prompt import build_system_prompt
 from app.resort.agent.state import Enquiry
@@ -30,10 +34,10 @@ from app.resort.i18n import t
 
 log = logging.getLogger(__name__)
 
-MAX_ROUNDS = 6  # rounds of tool calls in one turn
-MAX_REPLY_TOKENS = 700
-HISTORY = 20  # real messages of the current conversation the AI sees
-TEMPERATURE = 0.3
+MAX_ROUNDS = 4  # rounds of tool calls in one turn
+MAX_REPLY_TOKENS = 300  # the AI's line is one short sentence; tool calls are small
+HISTORY = 12  # real messages of the current conversation the AI sees (CURRENT ENQUIRY already holds the stay)
+TEMPERATURE = 0.2
 AI_DOWN_ALERT_GAP = timedelta(minutes=30)  # one staff alert per outage, not per message
 NO_REPLY = "[no reply]"
 SKIPPED_ROWS = ("[invoice]", "[template", "[image]", "[voice note: not understood")  # log lines, never shown to the AI
@@ -50,6 +54,27 @@ class TurnResult:
     error: str = ""
     guard: list[str] = field(default_factory=list)  # what the guard found wrong with the AI's own text
     retried: bool = False  # the AI got its one retry
+    # token use of the whole turn (usage.py logs it; never any guest text)
+    model: str = ""
+    llm_calls: int = 0
+    input_tokens: int = 0  # cached ones included
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    output_tokens: int = 0
+
+    def add_usage(self, response: Any) -> None:
+        u = getattr(response, "usage", None)
+        self.llm_calls += 1
+        self.model = getattr(response, "model", "") or self.model
+        if u is not None:
+            self.input_tokens += u.input_tokens
+            self.cache_read_tokens += u.cached_input_tokens
+            self.cache_write_tokens += getattr(u, "cache_write_tokens", 0)
+            self.output_tokens += u.output_tokens
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
 
 
 # ------------------------------------------------------------------ what the AI sees
@@ -127,6 +152,39 @@ def _with_guest_message(messages: list[ChatMessage], text: str, swipe: str) -> l
 # ------------------------------------------------------------------ the turn
 
 
+def _filled(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def compact_result(out: dict[str, Any]) -> str:
+    """A tool result as the AI reads it this turn: compact JSON with only the fields that say something (empty facts,
+    an empty `sent`, a missing next step or note are left out). `ok` always stays."""
+    lean: dict[str, Any] = {"ok": out.get("ok")}
+    for key, value in out.items():
+        if key == "ok":
+            continue
+        if isinstance(value, dict):
+            value = {k: v for k, v in value.items() if _filled(v)}
+        if _filled(value):
+            lean[key] = value
+    return json.dumps(lean, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def summary_line(name: str, out: dict[str, Any]) -> str:
+    """An older tool result (an earlier round of this turn): one line, e.g. 'update_enquiry: ok, rooms=2, sent
+    ask_contact, next ask_contact'. The latest round's results stay in full."""
+    parts = [f"{name}: {'ok' if out.get('ok') else 'not ok'}"]
+    facts = out.get("facts") or {}
+    short = [(k, v) for k, v in facts.items() if isinstance(v, (str, int, float, bool)) and _filled(v)
+             and len(str(v)) <= 24]
+    parts += [f"{k}={v}" for k, v in short[:4]]
+    if sent := [k for k in out.get("sent") or [] if not str(k).startswith("staff:")]:
+        parts.append("sent " + ", ".join(map(str, sent)))
+    if out.get("next_step"):
+        parts.append(f"next {out['next_step']}")
+    return "[earlier result] " + ", ".join(parts)
+
+
 def _own_text(response: Any) -> str:
     reply = (response.text or "").strip() if response is not None else ""
     return "" if reply.lower() == NO_REPLY else reply
@@ -143,14 +201,24 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     response = None
     failure: Exception | None = None
 
+    latest: list[tuple[ChatMessage, str]] = []  # the last round's tool results (full) and their one-line summaries
+
+    def complete() -> Any:
+        response = llm.complete(system, messages, TOOL_SCHEMAS, MAX_REPLY_TOKENS, temperature=TEMPERATURE)
+        result.add_usage(response)
+        return response
+
     def ask() -> Any:
         """One LLM reply, with every tool call it makes run and fed back (MAX_ROUNDS for the whole turn)."""
-        response = llm.complete(system, messages, TOOL_SCHEMAS, MAX_REPLY_TOKENS, temperature=TEMPERATURE)
+        response = complete()
         while response.tool_calls:
             if result.rounds >= MAX_ROUNDS:
                 result.hit_limit = True
                 log.warning("Agent turn for %s still wanted tools after %d rounds", phone[-4:], MAX_ROUNDS)
                 break
+            for msg, short in latest:  # an older round's results: one line each (the newest round stays in full)
+                msg.content = short
+            latest.clear()
             messages.append(response.to_message())
             for call in response.tool_calls:
                 if call.arguments_error:  # the model did not send a JSON object: it is told, the tool does not run
@@ -159,9 +227,11 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
                 else:
                     out = tools.call(call.name, call.arguments)
                 result.calls.append({"name": call.name, "args": call.arguments, "result": out})
-                messages.append(ChatMessage.tool_result(call.id, json.dumps(out, ensure_ascii=False), is_error=not out["ok"]))
+                msg = ChatMessage.tool_result(call.id, compact_result(out), is_error=not out["ok"])
+                messages.append(msg)
+                latest.append((msg, summary_line(call.name, out)))
             result.rounds += 1
-            response = llm.complete(system, messages, TOOL_SCHEMAS, MAX_REPLY_TOKENS, temperature=TEMPERATURE)
+            response = complete()
         return response
 
     def check(reply: str) -> tuple[list[str], guard.Sources]:
@@ -299,6 +369,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     outbox.move_last(STEP_TEXT_KEYS)  # the open step (name ask, form, link) is always the LAST message of the turn
     outbox.flush()
     result.sent = outbox.keys
+    usage.record(bot, phone, result, dry_run=outbox.dry_run)
     return result
 
 

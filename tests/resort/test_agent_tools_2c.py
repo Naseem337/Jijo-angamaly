@@ -465,7 +465,7 @@ def test_there_are_12_schemas_that_say_when_to_use_each_tool():
                      "recall_old_chat"]
     assert tools_module.TOOLS is TOOL_SCHEMAS
     for spec in TOOL_SCHEMAS:
-        assert spec.description.startswith("Use this") and len(spec.description) > 60, spec.name  # WHEN, not how
+        assert 40 < len(spec.description) < 700, spec.name  # WHEN to use it, short (lean requests)
         assert spec.parameters["type"] == "object"
         assert set(spec.parameters.get("required", [])) <= set(spec.parameters["properties"]), spec.name
     by = {x.name: x for x in TOOL_SCHEMAS}

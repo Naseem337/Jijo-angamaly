@@ -57,14 +57,12 @@ LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
                                  "letters (chahiye, hai, kya)"}
 
 DATE_FIELD = {"type": "object",
-              "description": "Copy only what the guest said. Never fill month or year yourself. '12' -> {day: 12}; "
-                             "'20 Nov' → {day: 20, month: 11}. A month word the guest wrote is ALWAYS copied. Only "
-                             "leave month null if the guest wrote no month. "
-                             "'dec 12' -> {day: 12, month: 12}; '12/12/2026' -> {day: 12, month: 12, year: 2026}. Code "
-                             "works out the date (a day alone = the next time it comes).",
+              "description": "Copy only what the guest said. Never fill month or year yourself. '20 Nov' → {day: 20, "
+                             "month: 11}. A month word the guest wrote is ALWAYS copied. Only leave month null if the "
+                             "guest wrote no month.",
               "properties": {"day": {"type": "integer", "description": "1-31"},
-                             "month": {"type": "integer", "description": "1-12, or null if the guest did not say it"},
-                             "year": {"type": "integer", "description": "null if the guest did not say it"}},
+                             "month": {"type": "integer", "description": "1-12, or null"},
+                             "year": {"type": "integer", "description": "null if not said"}},
               "required": ["day"]}
 
 # the tools that send something to the guest or the team: each runs at most ONCE per turn (fix round 2)
@@ -76,144 +74,117 @@ QUIET_REASONS = ("cannot_answer", "call_request", "other", "guest_called")
 # cannot_answer is not here (fix round 3): a question not in FACTS gets the handoff text, THEN the open booking step
 NO_STEP_REASONS = ("call_request", "other")
 
+# Descriptions are short (one example each) and do not repeat the system prompt: they are sent on every call (cached).
 TOOL_SCHEMAS = [
     ToolSpec(
         "update_enquiry",
-        "Use this for any wish to book, see rooms or know availability, even with no details at all ('I need a room'). "
-        "Also whenever the guest says anything about their stay: the place, dates or nights, number of adults, number "
-        "of rooms, a room type or room number, 'one more room', 'make it 5 persons', 'change to jan 2-5', 'no cottage'. "
+        "Any wish to book, see rooms or know availability (even 'I need a room'), and anything the guest says about "
+        "their stay (place, dates, nights, adults, rooms, a room type or number, 'make it 5 persons'). "
         "A place or resort name on its own ('Alleppey', 'kanthaloor', even misspelt) IS booking information → call "
-        "update_enquiry(place=...). "
-        "Pass the FULL stay as you now understand it (CURRENT ENQUIRY plus what the guest just said), not only the change, "
-        "and leave out what is still unknown. Give check_out OR nights: code works out the other. It asks the guest for "
-        "anything missing (place, dates, adults, name, mobile) with the owner's words and checks the rooms; those "
-        "messages go out for you (see `sent`): never write them yourself.",
+        "update_enquiry(place=...). Pass the FULL stay (CURRENT ENQUIRY + what the guest just said); leave out what is "
+        "unknown. Give check_out OR nights: code works out the other. It asks for anything missing and checks the "
+        "rooms; its messages go out for you (see `sent`).",
         {"type": "object", "properties": {
-            "place": {"type": "string", "description": "the resort or town the guest named in this chat, spelled however "
-                                                       "they wrote it; never a place they did not write"},
+            "place": {"type": "string", "description": "the resort or town as the guest wrote it in this chat"},
             "check_in": DATE_FIELD,
             "check_out": DATE_FIELD,
-            "nights": {"type": "integer", "description": "instead of check_out, if the guest gave nights"},
-            "adults": {"type": "integer", "description": "total adults above 6 years as the guest said them (never assume); "
-                                                         "children are not asked or counted"},
-            "rooms": {"type": "integer", "description": "only if the guest said a number of rooms; 0 = let the code pick"},
-            "room_picks": {"type": "array", "description": "rooms the guest CHOSE themselves ('this one', 'take it', "
-                                                         "'change to X', 'cottage venam', 'room 103', a swipe-reply 'this "
-                                                         "one' on a room's photo or label), one entry per kind; [] "
-                                                         "clears the choice. Guest wants a room type → room_picks=[that "
-                                                         "type]. Guest only asks about or wants to see another room → "
-                                                         "send_photos, not room_picks. No choice → leave it out: code "
-                                                         "picks by the owner's order",
+            "nights": {"type": "integer", "description": "instead of check_out"},
+            "adults": {"type": "integer", "description": "adults above 6 years, as the guest said (never assume)"},
+            "rooms": {"type": "integer", "description": "only if the guest said a number of rooms"},
+            "room_picks": {"type": "array", "description": "rooms the guest CHOSE themselves ('cottage venam', 'room "
+                                                         "103', a swipe-reply 'this one' on a room's photo), one entry "
+                                                         "per kind; [] clears it. Guest wants a room type → "
+                                                         "room_picks=[that type]. Only asking about or wanting to see "
+                                                         "another room → send_photos, not room_picks.",
                            "items": {"type": "object", "properties": {
-                               "room_type": {"type": "string", "description": "a room type name from the FACTS"},
+                               "room_type": {"type": "string", "description": "a room type name from FACTS"},
                                "room_number": {"type": "string"},
                                "count": {"type": "integer"}}}},
             "exclude_room_types": {"type": "array", "items": {"type": "string"},
-                                   "description": "use ONLY when the guest says they don't want a type ('no cottage'); "
-                                                  "a room type they want goes in room_picks"},
-            "extra_beds": {"type": "integer", "description": "pass it ONLY when the guest answers the extra-bed question "
-                                                                "('Do you need an extra bed?' or 'How many extra beds do you "
-                                                                "need?': the number, 0 for no) or asks for an extra bed on "
-                                                                "their own; the code caps it"},
-            "early_checkin": {"type": "boolean", "description": "true only if the guest asked for early check-in (it adds "
-                                                                "a charge); false removes it"},
+                                   "description": "use ONLY when the guest says they don't want a type ('no cottage')"},
+            "extra_beds": {"type": "integer", "description": "only the guest's answer to the extra-bed question (0 = "
+                                                             "no) or an extra bed they ask for themselves"},
+            "early_checkin": {"type": "boolean", "description": "true only if the guest asked for early check-in"},
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "get_price",
-        "Use this for EVERY question about price, rate, cost, total or advance, also for one named room type ('cost of the "
-        "cottage'). It answers for the stay the guest already gave (or the stay on their open payment link) and sends the "
-        "price message for you. It never books or switches anything. If no stay is known yet, call update_enquiry instead.",
+        "Every question about price, rate, cost, total or advance (e.g. 'cost of the cottage'). Answers for the stay "
+        "already given (or on the open link) and sends the price message. No stay known yet → update_enquiry instead.",
         {"type": "object", "properties": {
             "room_type": {"type": "string", "description": "only if the guest named a room type"},
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_photos",
-        "Use this whenever the guest asks to see rooms or the resort in any words ('pics?', 'how does it look', 'photo "
-        "undo?'). Never refuse, never ask for dates first. Photos are allowed at any stage (before dates, after the "
-        "room check, after the link, after payment). Say only WHAT they asked for "
-        "with `kind`: room_type (a named room: also pass room_type), resort (outside, beach, common areas), other_room "
-        "(another room than the one offered), all_rooms (every room), default (room photos, no room named), more (they want "
-        "more photos). The guest asks about ANOTHER room in any words ('any other room?', 'is the cottage free?') → "
-        "other_room, or room_type with its name: code says whether it is free for their dates and shows it; it never "
-        "switches their room. If no resort is known yet the location question goes first and the photos follow.",
+        "The guest wants to see rooms or the resort, in any words ('pics?'). Never refuse, never ask for dates first. "
+        "Any stage, also after payment. kind: room_type (also pass room_type), resort, other_room, all_rooms, default "
+        "(no room named), more. Asking about another room ('is the cottage free?') → other_room or room_type: code says "
+        "if it is free and shows it; it never switches their room.",
         {"type": "object", "properties": {
             "kind": {"type": "string", "enum": list(pp.KINDS)},
-            "room_type": {"type": "string", "description": "only for kind room_type: the room type name from the FACTS"},
+            "room_type": {"type": "string", "description": "only for kind room_type: a room type name from FACTS"},
             "language": LANGUAGE_FIELD},
          "required": ["kind"]}),
     ToolSpec(
         "send_map",
-        "Use this when the guest asks where the resort is, or for the location, the map, the pin or directions.",
+        "The guest asks for the location, map, pin or directions.",
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "create_booking",
-        "Use this as soon as rooms were found available and the guest gives their mobile number (and their name, if they "
-        "gave one). 'this number', 'same number' or 'same' means the WhatsApp number: pass mobile 'same'. The name is not "
-        "required: if they gave none, pass an empty name. Do not ask 'shall I confirm?'. The enquiry summary and the "
-        "payment link are sent for you.",
+        "Rooms were found available and the guest gives a mobile number (and a name if they gave one, else empty). "
+        "'same number' → mobile 'same'. Never ask 'shall I confirm?'. The summary and payment link go out for you.",
         {"type": "object", "properties": {
             "guest_name": {"type": "string", "description": "the name the guest gave, or empty"},
-            "mobile": {"type": "string", "description": "the mobile number the guest gave, or 'same' for this WhatsApp number"},
+            "mobile": {"type": "string", "description": "the number the guest gave, or 'same'"},
             "language": LANGUAGE_FIELD},
          "required": ["mobile"]}),
     ToolSpec(
         "check_payment",
-        "Use this when the guest says they have paid or are paying now, sends a payment screenshot, or asks whether their "
-        "payment arrived. Only this tool can confirm a payment: never confirm it yourself from their word or a screenshot. "
-        "The right message is sent for you.",
+        "The guest says they paid, sends a payment screenshot, or asks if the payment arrived. Only this tool can "
+        "confirm a payment.",
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_payment_link",
-        "Use this when the link is not working, the guest asks to send the link again or lost the link (reason lost), "
-        "or the guest wants to hold the room, reserve, or pay later/tonight/tomorrow with an open enquiry → "
-        "send_payment_link(reason='hold'). The guest says they have not paid yet → reason not_paid_yet. If the old link ran out, code checks the same stay again and sends a new summary and link (or "
-        "the owner's text when the rooms are gone). Never explain the hold or when a link expires.",
+        "Link not working, lost, or 'send it again' → reason lost. If the guest wants to hold the room, reserve, or pay "
+        "later/tonight/tomorrow with an open enquiry → send_payment_link(reason='hold'). 'not paid yet' → not_paid_yet. "
+        "An expired link is checked again by code.",
         {"type": "object", "properties": {
             "reason": {"type": "string", "enum": ["lost", "hold", "not_paid_yet"]},
             "language": LANGUAGE_FIELD},
          "required": ["reason"]}),
     ToolSpec(
         "my_bookings",
-        "Use this when the guest asks about a booking or payment they already have (dates, status, what was paid, the "
-        "balance), or wants to cancel: it gives the cancellation charge if they cancelled today. Read only.",
+        "The guest asks about a booking they already have (dates, status, paid, balance) or wants to cancel (gives the "
+        "charge if cancelled today). Read only.",
         {"type": "object", "properties": {}}),
     ToolSpec(
         "change_name",
-        "Use this when the guest corrects the name on their enquiry or booking ('my name is not X, it is Y'). Never start "
-        "the booking again for a name correction.",
+        "The guest corrects their name ('my name is not X, it is Y'). Never start the booking again for it.",
         {"type": "object", "properties": {
             "name": {"type": "string", "description": "the correct name, in English letters"},
             "language": LANGUAGE_FIELD},
          "required": ["name"]}),
     ToolSpec(
         "talk_to_owner",
-        "Use this when you do not know the answer or cannot do what the guest asks. NOT for the first discount ask. "
-        "First discount ask → answer yourself in one warm line with a real good point from FACTS. Only the SECOND "
-        "discount ask → talk_to_owner(other). The guest gets the fixed text "
-        "for the reason (sent for you). After cannot_answer, call_request, other or guest_called write NOTHING at all "
-        "(no link reminder, no 'I've passed it on'). Reasons: "
-        "pay_terms = other payment terms (a smaller advance, cash, pay at the property, pay later instead of the online "
-        "advance); guest_called = the guest says they called, spoke to, tried calling, visited or paid the owner directly "
-        "(a thank-you, no alert, the open booking step follows); cannot_answer = you do not know the answer, or 3+ "
-        "questions at once; call_request = they ask for the owner or a call; change_or_cancel_paid = change or cancel a "
-        "booking that is already paid; other = a complaint, a refund, a second discount request, an exception.",
+        "You do not know the answer or cannot do what the guest asks. NOT for the first discount ask. First discount "
+        "ask → answer yourself in one warm line with a real good point from FACTS. Only the SECOND discount ask → "
+        "talk_to_owner(other). Its fixed text is sent for you. Reasons: pay_terms = other payment terms (smaller "
+        "advance, cash, pay at the property); guest_called = they say they called, visited or paid the owner; "
+        "cannot_answer = not in FACTS, or 3+ questions at once; call_request = they want the owner or a call; "
+        "change_or_cancel_paid = change or cancel a PAID booking; other = complaint, refund, second discount ask.",
         {"type": "object", "properties": {
             "reason": {"type": "string", "enum": list(OWNER_REASONS)},
-            "staff_note": {"type": "string", "description": "optional, only for the staff: one short line, e.g. 'asks "
-                                                            "full refund'"},
+            "staff_note": {"type": "string", "description": "optional, for the staff only, e.g. 'asks full refund'"},
             "language": LANGUAGE_FIELD},
          "required": ["reason"]}),
     ToolSpec(
         "repeat_step",
-        "Use this when a booking step is open (CURRENT ENQUIRY next step: the form, the name and mobile ask, or the "
-        "payment link) and the guest asks for it again or writes something unclear about it ('ok send me', 'send', "
-        "'what', 'what sure', 'send again', 'where?'): that step is sent again with the owner's words (a repeat is "
-        "allowed here). NOT for a plain 'ok' / 'thanks' that only acknowledges.",
+        "A booking step is open (the form, the name and mobile ask, the payment link) and the guest asks for it again "
+        "or writes something unclear about it ('what sure'): the step is sent again. NOT for a plain 'ok' / 'thanks' "
+        "that only acknowledges.",
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "recall_old_chat",
-        "Use this only when the guest refers to something said or sent in an EARLIER conversation ('as I told you', 'the "
-        "link you sent', 'my last enquiry'). Never for a greeting, small talk or a fresh request. Read only.",
+        "Only when the guest refers to an EARLIER conversation ('as I told you'). Never for a fresh request. Read only.",
         {"type": "object", "properties": {"query": {"type": "string", "description": "what you are looking for"}}}),
 ]
 # fix round 5: `language` is REQUIRED in every tool that sends the guest text (code still falls back to the last one)

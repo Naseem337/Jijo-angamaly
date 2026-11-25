@@ -80,14 +80,14 @@ def test_several_tool_calls_in_one_reply_all_run_in_order(world):
     assert [m.tool_call_id for m in tool_msgs] == ["a", "b"]
 
 
-def test_at_most_6_rounds_of_tool_calls_run(world):
+def test_at_most_4_rounds_of_tool_calls_run(world):
     w = world
     script = [tool("get_price", call_id=f"c{i}") for i in range(MAX_ROUNDS + 1)]  # the AI never stops asking
     res, box = go(w, "price?", *script)
-    assert MAX_ROUNDS == 6 and res.rounds == 6 and res.hit_limit
-    assert len(res.calls) == 6 and w.llm.script == []  # the 7th reply's call is not run
-    assert len(w.llm.calls) == 8  # 7 + the never-silent second ask (live test 2026-11-25)
-    assert len([m for m in w.llm.calls[6].messages if m.role == "tool"]) == 6
+    assert MAX_ROUNDS == 4 and res.rounds == 4 and res.hit_limit
+    assert len(res.calls) == 4 and w.llm.script == []  # the 5th reply's call is not run
+    assert len(w.llm.calls) == 6  # 5 + the never-silent second ask (live test 2026-11-25)
+    assert len([m for m in w.llm.calls[4].messages if m.role == "tool"]) == 4
     assert res.outcome == "never_silent"  # nothing was said: the open step goes
 
 
@@ -260,7 +260,7 @@ def test_every_call_offers_the_12_tools_at_low_temperature(world):
     assert len(w.llm.calls) == 2
     for call in w.llm.calls:
         assert call.tools == TOOL_SCHEMAS and len(call.tools) == 12
-        assert call.temperature == 0.3 and call.temperature <= 0.3 and call.max_tokens == 700
+        assert call.temperature == 0.2 and call.max_tokens == 300
 
 
 def test_no_model_name_is_hard_coded_in_the_agent(world):
@@ -286,7 +286,7 @@ def say(w, direction, text, minutes_ago):
     w.repo.add_chat(ChatMessage(GUEST, direction, text, w.clock.now() - timedelta(minutes=minutes_ago), "text"))
 
 
-def test_the_ai_sees_the_last_20_real_messages_ending_with_the_new_one(world):
+def test_the_ai_sees_the_last_12_real_messages_ending_with_the_new_one(world):
     w = world
     for i in range(30):
         say(w, "in" if i % 2 == 0 else "out", f"message {i}", 100 - i)
@@ -295,7 +295,7 @@ def test_the_ai_sees_the_last_20_real_messages_ending_with_the_new_one(world):
     assert messages[0].role == "user" and messages[-1].content.endswith("the new one")
     lines = [ln for m in messages for ln in m.content.splitlines()]
     assert len(lines) <= HISTORY + 1 and "message 0" not in lines and "message 29" in lines
-    assert HISTORY == 20
+    assert HISTORY == 12 and "message 17" not in lines
 
 
 def test_the_new_message_is_added_once_whether_or_not_it_was_stored(world):
