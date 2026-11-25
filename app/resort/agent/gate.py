@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from app.core.phone import mask_phone, try_normalize_phone
+from app.resort.agent import conversation
 from app.resort.agent.outbox import Outbox, bot_outbox
 from app.resort.agent.state import Enquiry
 from app.resort.agent.tools import I18N_LANG
@@ -30,8 +31,11 @@ COMMANDS = ("stop", "start", "restart")  # the ONLY words code reads; anything e
 
 
 def command(text: str) -> str:
-    """'stop' / 'start' / 'restart' when the whole message is exactly that word (any case, a trailing . or !), else ''."""
-    word = text.strip().rstrip(".! ").strip().lower()
+    """'stop' / 'start' / 'restart' when the whole message is exactly that word, else ''. Case, spaces and trailing
+    marks (a dot, '!', an emoji) do not count: 'Restart.', ' RESTART 🙏', 're start'."""
+    word = "".join(text.split()).lower()
+    while word and not word[-1].isalnum():
+        word = word[:-1]
     return word if word in COMMANDS else ""
 
 
@@ -150,13 +154,36 @@ def _opt(bot: Any, phone: str, cmd: str, box: Outbox, lang: str) -> str:
 
 
 def _restart(bot: Any, phone: str, box: Outbox) -> str:
-    """'restart': a fresh conversation, the enquiry and the language start again. Bookings and records stay."""
+    """'restart' (live bug 2026-11-25: the agent still talked about the previous chat): a clean new conversation.
+    - the agent's Enquiry and the whole chat state go (place, dates, adults, rooms, picks, extra beds, contact, the
+      checked result, the language and its lock); only STOP's opt-out stays
+    - every open UNPAID hold of this guest is closed with its payment link; a PAID booking is never touched
+    - `restarted_at` is stored: GUEST RECORDS then lists only confirmed bookings from before it, and recall_old_chat
+      never reads past it
+    - RESTART_MARK goes in the chat log BEFORE the greeting (fix round 3), so the AI's history, the photo memory and
+      the 'already sent' checks all start after it, and the greeting is part of the new conversation"""
     st = bot.repo.get_state(phone)
     keep = {k: st[k] for k in ("opted_out",) if k in st}
-    bot.repo.set_state(phone, keep)  # the agent's Enquiry lives in the state too: it is cleared
-    # the mark goes BEFORE the greeting (fix round 3): the greeting is then part of the new conversation, so the AI
-    # sees it was already said and answers the next message ('I need a room') instead of greeting again
+    keep[conversation.RESTARTED_KEY] = bot.clock.now().isoformat()
+    bot.repo.set_state(phone, keep)
+    close_unpaid(bot, phone)
     bot._log(phone, RESTART_MARK, "system")
     box.text("greet", t("greet", "en"))
     box.flush()
     return "restart"
+
+
+def close_unpaid(bot: Any, phone: str) -> int:
+    """Close this guest's unpaid holds and their payment links (status hold only: paid / checked-in bookings stay)."""
+    closed = 0
+    for b in bot.repo.list_bookings(phone=phone, status="hold", limit=50):
+        if b.payment_link_id:
+            try:
+                bot.payments.cancel_link(b.payment_link_id)
+            except Exception as exc:  # a link that cannot be closed must never stop the restart
+                log.warning("Restart: could not close the link of %s: %s", b.id, exc)
+        b.status = "expired"
+        b.notes = (b.notes + " [closed by restart]").strip()
+        bot.repo.save_booking(b)
+        closed += 1
+    return closed

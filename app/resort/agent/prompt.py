@@ -14,8 +14,10 @@ from datetime import date
 from typing import Any
 
 from app.providers.llm.base import CACHE_SPLIT
+from app.resort.agent import conversation
 from app.resort.agent.state import Enquiry
 from app.resort.agent.tools import towns_and
+from app.resort.i18n import status_name
 
 SYSTEM = """You are the WhatsApp front-desk person of {brand}, a resort in Kerala. You read every guest message yourself and
 understand it in any words, spelling or language, including voice notes turned into text. Think about what THIS
@@ -117,6 +119,41 @@ def today_block(today: date) -> str:
             f"it comes ({day} {month.strftime('%b')}).")
 
 
+CONFIRMED = ("paid", "checked_in", "checked_out")
+
+
+def guest_records(bot: Any, phone: str, fresh: bool) -> str:
+    """GUEST RECORDS. After 'restart' (live bug 2026-11-25) only CONFIRMED bookings from before it are listed (so 'my
+    booking' still works) and nothing of the old enquiry; bookings made after the restart are listed as usual. Without
+    a restart it is the bot's usual records block."""
+    since = conversation.restarted_at(bot, phone)
+    if since is None:
+        return bot._guest_memory(phone, fresh)
+    today = bot._today()
+    guest = bot.repo.get_guest(phone)
+    lines = ["GUEST RECORDS (from our database)",
+             f"- Name: {guest.name} (never address them by name)" if guest and guest.name else "- Name: not known yet"]
+    shown = 0
+    for b in bot.repo.list_bookings(phone=phone, limit=10):
+        if b.status not in CONFIRMED and b.created_at <= since:
+            continue  # the old enquiry (an unpaid hold, an expired link) is gone with the restart
+        if b.status == "hold" and not (b.hold_expires_at and b.hold_expires_at > bot.clock.now()):
+            continue
+        prop = bot.repo.get_property(b.property_id)
+        when = "upcoming" if b.check_in >= today else ("in progress" if b.check_out > today else "past")
+        status = "ON HOLD, waiting for payment" if b.status == "hold" else status_name(b.status, "en")
+        lines.append(f"- {b.check_in.isoformat()} to {b.check_out.isoformat()}, "
+                     f"{bot._place_label(prop) if prop else '?'}, {b.rooms} room(s), {status}, {when}")
+        shown += 1
+        if shown == 4:
+            break
+    if not shown:
+        lines.append("- No confirmed booking.")
+    lines.append("- The guest sent 'restart' and was already greeted: the same conversation continuing from that "
+                 "greeting. Nothing from the chat before the restart counts.")
+    return "\n".join(lines)
+
+
 def static_prompt(bot: Any) -> str:
     """The cached part: rules, style, OWNER RULES and FACTS. The same for every guest and every turn; it changes only
     when the owner edits the dashboard. Nothing per guest or per turn may go in here."""
@@ -132,7 +169,7 @@ def dynamic_prompt(bot: Any, phone: str, enq: Enquiry, *, fresh: bool = False) -
     prop = bot.repo.get_property(enq.place) if enq.place else None
     return "\n\n".join([
         today_block(bot._today()),
-        bot._guest_memory(phone, fresh),
+        guest_records(bot, phone, fresh),
         enq.render(bot._place_label(prop) if prop else ""),
     ])
 

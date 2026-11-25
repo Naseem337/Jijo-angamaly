@@ -11,13 +11,14 @@ can be read without the chat log (dashboard, logs).
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.resort.chat import RESTART_MARK
 
 GAP = timedelta(hours=12)
 STATE_KEY = "agent_conv"
+RESTARTED_KEY = "restarted_at"  # when the guest last sent 'restart' (gate.py): nothing before it reaches the AI
 
 
 def start_index(rows: list[Any]) -> int:
@@ -61,3 +62,36 @@ def remember(bot: Any, phone: str) -> dict[str, Any]:
         state[STATE_KEY] = conv
         bot.repo.set_state(phone, state)
     return conv
+
+
+# ------------------------------------------------------------------ 'restart' (live bug 2026-11-25)
+
+
+def restarted_at(bot: Any, phone: str) -> datetime | None:
+    """When this guest last sent 'restart', or None. Read from the guest's state (gate.py stores it)."""
+    raw = bot.repo.get_state(phone).get(RESTARTED_KEY)
+    try:
+        return datetime.fromisoformat(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
+def after_restart(rows: list[Any]) -> list[Any]:
+    """The rows after the newest RESTART_MARK (all rows when there is none)."""
+    for i in range(len(rows) - 1, -1, -1):
+        if rows[i].text == RESTART_MARK:
+            return rows[i + 1:]
+    return rows
+
+
+def since_restart(bot: Any, phone: str, rows: list[Any]) -> list[Any]:
+    """`rows` without anything from before the guest's last 'restart': cut at the restart's own mark row (the newest
+    RESTART_MARK logged at or before `restarted_at`; a confirmed booking's later mark is not it). By position, so
+    messages in the same second as the restart are cut too."""
+    since = restarted_at(bot, phone)
+    if since is None:
+        return rows
+    marks = [i for i, m in enumerate(rows) if m.text == RESTART_MARK and m.at <= since]
+    if marks:
+        return rows[marks[-1] + 1:]
+    return [m for m in rows if m.at > since]  # the mark is not among these rows: only what came after it

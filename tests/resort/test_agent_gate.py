@@ -102,7 +102,9 @@ def test_restart_clears_the_enquiry_greets_and_keeps_stop(agent):
     st["opted_out"] = True
     agent.repo.set_state(GUEST, st)
     assert send(agent, m("Restart")) == "restart"
-    assert Enquiry.load(agent.repo, GUEST).place is None and agent.repo.get_state(GUEST) == {"opted_out": True}
+    st = agent.repo.get_state(GUEST)
+    assert Enquiry.load(agent.repo, GUEST).place is None and st["opted_out"] is True
+    assert set(st) == {"opted_out", "restarted_at"}  # live bug 2026-11-25: the restart time is kept
     assert agent.wa.texts()[-1] == "Hi, How may I assist you?" and agent.llm.calls == []
     assert agent.repo.list_chat(GUEST)[-2].text == RESTART_MARK  # the greeting belongs to the new conversation
 

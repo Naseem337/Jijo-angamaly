@@ -1426,7 +1426,7 @@ class AgentTools:
         bot = self.bot
         start, enq, style, lang = self._ctx(args)
         rows = bot.repo.list_chat(self.phone, limit=80)
-        older = rows[:conversation.start_index(rows)]
+        older = conversation.since_restart(bot, self.phone, rows[:conversation.start_index(rows)])
         if not older:
             return self._result(True, {"messages": [], "info": "there is no earlier chat with this guest"}, start, enq,
                                 "Read only.")

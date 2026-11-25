@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.resort import availability as av
+from app.resort.agent import conversation
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.state import Enquiry
 from app.resort.i18n import t
@@ -65,8 +66,9 @@ def last_text(bot: Any, phone: str, out: Outbox) -> str:
 
 
 def recent_texts(bot: Any, phone: str, n: int = 2) -> list[str]:
-    """The last `n` texts we sent this guest BEFORE this turn (photos and log marks are not messages)."""
-    rows = [m.text for m in bot.repo.list_chat(phone, limit=40)
+    """The last `n` texts we sent this guest BEFORE this turn, never from before a 'restart' (photos and log marks are
+    not messages)."""
+    rows = [m.text for m in conversation.after_restart(bot.repo.list_chat(phone, limit=40))
             if m.direction == "out" and not m.text.startswith("[") and m.text.strip()]
     return rows[-n:]
 
