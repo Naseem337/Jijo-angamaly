@@ -149,10 +149,11 @@ def test_tool_messages_are_never_checked_stripped_or_dropped(world):
     go(w, "price Alleppey 10-12 nov 2 persons", tool("update_enquiry", **STAY), tool("get_price"), reply("[no reply]"),
        live=True)
     w.clock.advance(minutes=1)
-    res, box = go(w, "price again?", tool("get_price"), reply("[no reply]"), live=True)
-    assert res.sent == ["price_answer", "ask_contact"] and not res.retried  # + the open step, which code adds
+    res, box = go(w, "price again?", tool("get_price"), reply("It's the same as above."), live=True)
+    # AI-first rebalance: the price text is among the last 3 messages, so it never goes twice; the AI answers
+    assert res.sent == ["ai"] and not res.retried
     prices = [x for x in w.wa.texts(GUEST) if x.startswith("Deluxe: ₹4,000")]
-    assert len(prices) == 2 and prices[0] == prices[1]  # the same tool text twice, amounts and all
+    assert len(prices) == 1
 
 
 def test_problems_reads_only_the_ais_text():

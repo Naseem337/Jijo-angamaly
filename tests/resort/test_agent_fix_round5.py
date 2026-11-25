@@ -59,10 +59,10 @@ def test_booking_talk_gets_one_retry_and_the_tool_answers(world):
     assert res.sent[0] == "not_our_place" and "ai" not in res.sent
 
 
-def test_booking_talk_still_without_the_tool_is_dropped_and_the_code_asks(world):
+def test_booking_talk_still_without_the_tool_is_dropped_and_never_a_fixed_text_fallback(world):
     line = "Sorry sir, we have properties only in Alleppey and Munnar."
     res, box = go(world, "I am looking for a property in kochi", reply(line), reply(line))
-    assert res.retried and "ai" not in res.sent and res.sent == ["ask_location"]
+    assert res.retried and "ai" not in res.sent and res.sent == ["say_again_short"]
 
 
 def test_a_weather_answer_naming_the_town_is_not_retried(world):
@@ -75,7 +75,7 @@ def test_a_weather_answer_naming_the_town_is_not_retried(world):
 
 def test_the_limit_is_one_sentence_and_twenty_words():
     assert (guard.MAX_SENTENCES, guard.MAX_WORDS) == (1, 20)
-    assert guard.TOO_LONG == "Say it in one short sentence, under 15 words."
+    assert guard.TOO_LONG == "Say it in one short sentence, under 20 words: keep the part that answers the guest's message."
     assert guard.too_long("Yes, there is a pool. It is open daily.")
     assert not guard.too_long("Yes sir, there is a pool.")
 
@@ -117,24 +117,22 @@ def test_ok_with_no_step_open_gets_sure_then_the_ais_second_line(world):
     go(world, "is there a pool?", reply("Yes, there is a pool."), live=True)
     res, _ = go(world, "ok", reply("[ack]"), live=True)  # the AI marks a pure acknowledgement
     assert res.sent == ["sure"] and world.wa.texts(GUEST)[-1] == "Sure."
-    res, _ = go(world, "ok", reply("[ack]"), live=True)  # eval fixes 2026-11-25: [ack] is never asked again
-    assert res.sent == ["sure"]
+    # AI-first rebalance: 'Sure.' is among the last 3 messages, so the AI is asked once more
+    res, _ = go(world, "ok", reply("[ack]"), reply("You're welcome."), live=True)
+    assert res.sent == ["ai"]
 
 
-def test_thanks_right_after_the_link_resends_the_link_when_the_ai_says_nothing(world):
+def test_thanks_right_after_the_link_never_resends_the_link_when_the_ai_says_nothing(world):
     book_live(world)
     res, _ = go(world, "thanks", reply(""), live=True)  # the second ask finds no scripted reply: still never silent
-    assert res.sent == ["pay"]
+    assert res.sent == ["say_again_short"]
 
 
-def test_thanks_later_with_an_open_link_gets_the_pay_nudge_once(world):
+def test_thanks_later_with_an_open_link_never_gets_a_code_nudge(world):  # AI-first rebalance
     book_live(world)
     go(world, "is there wifi?", reply("Yes, there is wifi."), live=True)
     go(world, "and a fridge?", reply("Yes, there is a fridge."), live=True)
-    res, _ = go(world, "ok thanks", reply(""), live=True)
-    assert res.sent == ["pay_nudge"]
-    assert world.wa.texts(GUEST)[-1] == "Please complete the advance payment to confirm your booking."
-    res, _ = go(world, "ok", reply(""), reply("Thank you."), live=True)  # the nudge just went: the AI's own short line
+    res, _ = go(world, "ok thanks", reply(""), reply("Please complete the payment when you can."), live=True)
     assert res.sent == ["ai"]
 
 
@@ -144,18 +142,18 @@ def test_an_answer_does_not_resend_a_step_among_the_last_two_messages(world):
     assert res.sent == ["ai"]
 
 
-def test_an_older_step_comes_back_after_an_answer(world):
+def test_an_older_step_never_comes_back_after_an_answer(world):
     go(world, ASK, tool("update_enquiry", **STAY), reply(""), live=True)
     go(world, "is there a pool?", reply("Yes, there is a pool."), live=True)
     go(world, "and wifi?", reply("Yes, there is wifi."), live=True)
     res, _ = go(world, "and a fridge?", reply("Yes, there is a fridge."), live=True)
-    assert res.sent == ["ai", "ask_contact"]  # the name ask is now 3 messages back
+    assert res.sent == ["ai"]  # AI-first rebalance: the AI reminds in its own words, the code never re-sends
 
 
-def test_after_a_handoff_the_step_still_follows(world):  # a fixed text spoke this turn (round 3 rule kept)
+def test_after_a_handoff_the_step_is_not_sent_again(world):  # AI-first rebalance
     go(world, ASK, tool("update_enquiry", **STAY), reply(""), live=True)
     res, _ = go(world, "parking?", tool("talk_to_owner", reason="cannot_answer", language="en"), reply(""), live=True)
-    assert res.sent == ["handoff", "ask_contact"]
+    assert res.sent == ["handoff"]
 
 
 def test_pay_nudge_and_sure_exist_in_every_language():

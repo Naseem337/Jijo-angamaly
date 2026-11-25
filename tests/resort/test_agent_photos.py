@@ -124,7 +124,8 @@ def test_kind_default_gives_the_offered_room_then_the_next_free_one_then_photos_
     run(w, "update_enquiry", STAY)  # the owner's order sent the general photos and the Deluxe photos
     w.wa.sent.clear()
     one, items, _ = run(w, "send_photos", {"kind": "default"})
-    assert keys(items) == ["room_label", "photos:2", "ask_contact"] and items[0][1] == "*Family Suite*"  # Deluxe already went
+    # Deluxe already went; the name ask went with the room check (AI-first rebalance: a step's text goes once)
+    assert keys(items) == ["room_label", "photos:2"] and items[0][1] == "*Family Suite*"
     two, items, _ = run(w, "send_photos", {"kind": "default"})
     assert keys(items) == ["photos_sent"] and items[0][1] == "All the photos are sent above."
 
@@ -141,7 +142,7 @@ def test_kind_room_type_sends_that_rooms_photos_when_it_is_free(pw):
     checked(w)
     result, items, _ = run(w, "send_photos", {"kind": "room_type", "room_type": "family"})
     # fix round 3: not the offered room (Deluxe) -> 'also free' first, then its label and photos; nothing switches
-    assert result["ok"] and keys(items)[:4] == ["other_room_free", "room_label", "photos:2", "ask_contact"]
+    assert result["ok"] and keys(items) == ["other_room_free", "room_label", "photos:2"]
     assert items[1][1] == "*Family Suite*" and items[2][2] == w.refs["family"]
     assert Enquiry.load(w.repo, GUEST).checked["summary"] == "1 Deluxe"
     again, items, _ = run(w, "send_photos", {"kind": "room_type", "room_type": "family"})
@@ -163,7 +164,7 @@ def test_kind_other_room_says_it_is_free_then_sends_its_photos(pw):
     w = pw
     checked(w)
     result, items, _ = run(w, "send_photos", {"kind": "other_room"})
-    assert keys(items)[:4] == ["other_room_free", "room_label", "photos:2", "ask_contact"]
+    assert keys(items) == ["other_room_free", "room_label", "photos:2"]
     assert items[0][1] == "Yes, Family Suite is also free for your dates. Photos below; tell me if you want this room."
     assert photo_rows(w)[-2:] == w.refs["family"]
 
@@ -257,8 +258,8 @@ def test_photos_before_the_dates_send_the_dates_line_and_the_form_once(pw):
     assert keys(items) == ["room_label", "photos:2", "dates_for_availability", "form"]
     assert items[2][1] == t("dates_for_availability", "en") and items[3][1].startswith("Please share these details")
     more, items, _ = run(w, "send_photos", {"kind": "more"})
-    # no second dates line; the open step is repeated after the photos (rule 8), as the old bot does
-    assert keys(items) == ["room_label", "photos:2", "form"]
+    # no second dates line and no second form: AI-first rebalance, a step's owner text goes once
+    assert keys(items) == ["room_label", "photos:2"]
 
 
 def test_photos_with_a_payment_link_open_are_not_followed_by_a_booking_step(pw):

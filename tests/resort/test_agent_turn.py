@@ -133,13 +133,13 @@ def test_no_reply_marker_from_the_ai_is_not_sent(world):
 # --------------------------------------------------------------------------- never silent
 
 
-def test_nothing_sent_means_the_open_step_goes(world):
+def test_nothing_sent_never_means_a_fixed_step_text(world):
     w = world
     res, box = go(w, "hmm", reply("[no reply]"))  # nothing is open (live test 2026-11-25): never silent -> say again
     assert res.outcome == "never_silent" and res.sent == ["say_again_short"]
     Enquiry(place=w.p1.id).save(w.repo, GUEST)
     again, box = go(w, "hmm", reply(""))
-    assert again.outcome == "never_silent" and again.sent == ["form"]
+    assert again.outcome == "never_silent" and again.sent == ["say_again_short"]
 
 
 def test_nothing_sent_and_nothing_open_asks_to_say_it_again(world):

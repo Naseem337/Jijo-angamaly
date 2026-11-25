@@ -58,16 +58,6 @@ PROMISE = re.compile(r"\b(?:will (?:contact|call|reach|get in touch with|message
                      r"|please wait|let me check)\b", re.IGNORECASE)
 PROVIDER = re.compile(r"[ \t]*\b(?:(?:via|through|using|on|by)[ \t]+)?(?:razor[ \t]?pay|rzp)\b", re.IGNORECASE)
 LINK = re.compile(r"https?://\S+")
-# f) the AI asking for booking details itself (the code's open step asks with the owner's words): a sentence that asks
-# (a question mark or a request word) AND names a booking detail. Only the AI's own reply is read here.
-ASKING = re.compile(r"\?|\b(?:please|pls|plz|kindly|share|send|tell me|let me know|provide|confirm|could you|can you|"
-                    r"may i (?:know|have)|need your|parayamo|parayu|tharamo|tharu|ayakkamo|ayakku|ariyikkamo|sollunga|"
-                    r"batao|bataiye)\b", re.IGNORECASE)
-DETAIL = re.compile(r"\b(?:(?:which|what|preferred)\s+(?:resort|place|location|property)|locations?|where\b.{0,30}\b(?:stay"
-                    r"|looking)|evide|dates?|check[- ]?(?:in|out)|how many (?:nights|days|persons|people|adults|guests|pax"
-                    r"|rooms)|(?:number|no\.?) of (?:nights|persons|people|adults|guests|rooms)|adults|persons|guests|pax|"
-                    r"ethra (?:per|peru|aal|rooms?|divasam)|(?:your|the|full) name|name and|mobile|phone number|contact "
-                    r"(?:number|details)|whatsapp number)\b", re.IGNORECASE)
 TOOL_WORDS = re.compile(r"\b(?:summary|payment|advance|link)\b", re.IGNORECASE)
 REPEAT_MAX_WORDS = 25
 # fix round 2 (all read the AI's own reply only)
@@ -220,11 +210,6 @@ def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_te
                    names=guest_names(bot, phone, enq))
 
 
-def asks_details(sentence: str) -> bool:
-    """f) The AI's sentence asks the guest for a booking detail (place, dates, persons, rooms, name, mobile)."""
-    return bool(ASKING.search(sentence) and DETAIL.search(sentence))
-
-
 def drop_sentences(reply: str, bad: Any) -> str:
     """The AI's reply without its sentences for which bad(sentence) is true. '' when nothing is left."""
     lines = []
@@ -234,12 +219,6 @@ def drop_sentences(reply: str, bad: Any) -> str:
             lines.append(" ".join(kept))
     text = "\n".join(lines).strip()
     return text if re.search(r"[A-Za-z0-9]", text) else ""
-
-
-def drop_detail_asks(reply: str) -> str:
-    """f) Remove the AI's own sentences that ask for booking details: the code's open step asks with the owner's words.
-    '' when nothing is left."""
-    return drop_sentences(reply, asks_details)
 
 
 def drop_hold_talk(reply: str) -> str:
@@ -281,7 +260,7 @@ def repeats_tools(reply: str) -> bool:
 # ------------------------------------------------------------------ fix round 3: short, human replies (the AI's line only)
 
 MAX_SENTENCES, MAX_WORDS = 1, 20  # fix round 5 (was 2 / 30)
-TOO_LONG = "Say it in one short sentence, under 15 words."
+TOO_LONG = "Say it in one short sentence, under 20 words: keep the part that answers the guest's message."
 BANNED_PHRASES = ("anything else", "is there anything", "other listings", "other hotels", "other options", "feel free",
                   "don't hesitate", "I'm sorry, I only", "I don't have details", "as an AI", "please note that",
                   "I can help you with", "system", "automatically", "the tool", "owner",

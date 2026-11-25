@@ -92,7 +92,7 @@ def test_guest_called_goes_word_for_word_with_sir_and_the_ais_line_is_dropped(wo
     w.clock.advance(minutes=1)
     res, _ = go(w, "I already called the owner", tool("talk_to_owner", reason="guest_called"), reply("Got it."),
                 live=True)
-    assert res.sent == ["guest_called", "ask_contact"] and res.reply == ""
+    assert res.sent == ["guest_called"] and res.reply == ""  # AI-first rebalance: the step is never re-sent
     assert GUEST_CALLED in w.wa.texts(GUEST)
     assert not [m for m in w.wa.sent if m[0] != GUEST]  # no staff alert
 
@@ -155,7 +155,7 @@ def test_link_lost_after_the_hold_ran_out_sends_a_new_link_and_never_the_expiry(
     w.clock.advance(minutes=30)
     res, _ = go(w, "I lost the link, send again", tool("send_payment_link", reason="lost"),
                 reply("Sorry, the hold on your room has expired."), live=True)
-    assert "ai" not in res.sent and res.sent[-2:] == ["summary", "pay"]
+    assert "ai" not in res.sent and res.sent[-1] == "pay"  # the summary is among the last 3 messages: not again
     assert "http" in w.wa.texts(GUEST)[-1] and not any("expire" in m.lower() for m in w.wa.texts(GUEST))
     assert "Link not working / send the link again / lost the link" in w.llm.calls[-1].system
 
@@ -253,7 +253,7 @@ def test_a_sent_claim_with_no_sending_tool_is_dropped_in_the_turn(world):
     go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
     w.clock.advance(minutes=1)
     res, _ = go(w, "did you send it?", reply("Yes, I have sent it again."), live=True)
-    assert "ai" not in res.sent and res.sent == ["ask_contact"]  # never silent: the open step again (never "Sure.")
+    assert "ai" not in res.sent and res.sent == ["say_again_short"]  # never silent, never the step again
 
 
 @pytest.mark.parametrize("line", ["Your link is open for 10 more minutes.", "Please pay within 15 minutes.",

@@ -25,8 +25,16 @@ def manglish_chat(w):
     w.clock.advance(minutes=1)
 
 
+def pad(w):
+    """Three AI answers, so the name ask is no longer among our last 3 messages (it may then go again)."""
+    for q, a in (("pool?", "Yes, there is a pool."), ("wifi?", "Yes, there is wifi."), ("ac?", "Yes, there is AC.")):
+        go(w, q, reply(a), live=True)
+        w.clock.advance(minutes=1)
+
+
 def step_again(w, text, given=None):
     """The guest asks for the step again; the AI passes `given` (None = no language at all)."""
+    pad(w)
     args = {} if given is None else {"language": given}
     res, box = go(w, text, tool("repeat_step", **args), reply(""), live=True)
     w.clock.advance(minutes=1)
@@ -54,12 +62,10 @@ def test_a_guest_who_switches_to_english_gets_english_owner_texts(world):
     assert step_again(world, "send the details again please", "en")["ask_contact"] == ask("en")
 
 
-def test_the_closing_step_uses_this_turns_language(world):
+def test_the_say_again_fallback_uses_this_conversations_language(world):
     manglish_chat(world)
-    go(world, "is there a pool?", reply("Yes, there is a pool."), live=True)
-    go(world, "and wifi?", reply("Yes, there is wifi."), live=True)
-    res, box = go(world, "and parking? English please", tool("get_price", language="en"), reply(""), live=True)
-    assert texts(box)["ask_contact"] == ask("en")
+    res, box = go(world, "hmm", reply(""), live=True)
+    assert texts(box)["say_again_short"] == t("say_again_short", I18N_LANG["manglish"])
 
 
 # --------------------------------------------------------------------------- 3. fallback, same conversation only
@@ -74,7 +80,7 @@ def test_a_missing_language_falls_back_to_this_conversations_last_turn(world, gi
 def test_a_missing_language_never_comes_from_an_earlier_conversation(world):
     manglish_chat(world)
     world.clock.advance(hours=13)  # a new conversation
-    go(world, ASK, tool("update_enquiry", **STAY), reply(""), live=True)  # no language passed
+    go(world, "send it again", tool("repeat_step"), reply(""), live=True)  # no language passed
     assert world.wa.texts(GUEST)[-1] == ask("en")
 
 

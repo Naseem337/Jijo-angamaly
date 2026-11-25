@@ -14,7 +14,6 @@ from app.resort.agent.outbox import bot_outbox
 from app.resort.agent.prompt import today_block
 from app.resort.agent.state import Enquiry
 from app.resort.agent.tools import ALREADY_SENT, OWNER_REASONS, TOOL_SCHEMAS, AgentTools
-from app.resort.agent.turn import due_step
 from app.resort.i18n import t
 
 
@@ -38,56 +37,32 @@ def test_a_wish_to_book_with_no_details_gets_the_owners_location_question(world)
     assert res.sent == ["ask_location"] and texts(box)["ask_location"].startswith("Sure, Kindly confirm the Location")
 
 
-def test_the_ais_own_question_for_the_place_is_dropped_and_the_owner_text_goes(world):
-    # fix round 5: asking which place is booking talk -> one retry, still no update_enquiry -> dropped, the code asks
+def test_the_ais_own_question_for_the_place_is_booking_talk_and_never_the_owner_text_again(world):
+    # fix round 5: asking which place is booking talk -> one retry, still no update_enquiry -> dropped; AI-first
+    # rebalance (2026-11-25): the fallback is the AI once more, then 'say that again', never a re-sent owner text
     res, box = go(world, "I need a room", reply("Sure! Which resort or place are you looking for?"),
                   reply("Sure! Which resort or place are you looking for?"))
-    assert res.sent == ["ask_location"] and res.retried
-    res, box = go(world, "I need a room", reply("Which resort or place are you looking for?"),
-                  reply("Which resort or place are you looking for?"))
-    assert res.sent == ["ask_location"] and res.outcome == "never_silent"
+    assert res.retried and res.sent == ["say_again_short"]
 
 
-@pytest.mark.parametrize("line", [
-    "Which resort are you looking for?", "Please share your check-in and check-out dates.",
-    "How many adults are coming?", "How many rooms do you need?", "Please share your name and mobile number.",
-    "Could you tell me your dates?", "Ethra per undu?", "Dates parayamo?", "What is your name?"])
-def test_a_sentence_asking_for_booking_details_is_found(line):
-    assert guard.asks_details(line)
-
-
-@pytest.mark.parametrize("line", [
-    "Yes, there is a pool.", "Rooms are available for your dates.", "Hi, How may I assist you?",
-    "Check-in is at 12 noon.", "You're welcome!", "Please bring your ID proof while coming."])
-def test_answers_and_greetings_are_not_detail_asks(line):
-    assert not guard.asks_details(line)
-
-
-def test_only_the_asking_sentence_is_dropped():
-    assert guard.drop_detail_asks("Yes, there is a pool. Please share your dates.") == "Yes, there is a pool."
-    assert guard.drop_detail_asks("Which dates?") == ""
-
-
-def test_a_mid_chat_hi_gets_a_short_line_and_the_open_step_from_code(world):
+def test_the_ais_own_reminder_of_an_open_step_is_kept(world):  # AI-first rebalance: the detail-ask guard is gone
     w = world
     go(w, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
     w.clock.advance(minutes=1)
-    res, box = go(w, "hi", reply("Hi sir! To proceed, please share your name and mobile number."),
-                  reply("Hi sir! Please share your name and mobile number."), live=True)
-    # 'sir' only in the first reply (live test 2026-11-25); the step was the last message and only the AI spoke
-    assert res.sent == ["ai"] and texts(box)["ai"] == "Hi!"
-    assert w.wa.texts(GUEST)[-2] == t("ask_contact", "en")
+    line = "Please send your name and mobile number to continue."
+    res, box = go(w, "what", reply(line), live=True)
+    assert res.sent == ["ai"] and texts(box)["ai"] == line
 
 
-def test_the_open_step_follows_an_answer_but_never_twice_in_a_row(world):
+def test_an_answer_never_gets_the_open_step_appended(world):
     w = world
     go(w, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
-    w.clock.advance(minutes=1)
-    res, _ = go(w, "is there a pool?", reply("Yes, there is a pool."), live=True)
-    assert res.sent == ["ai"]  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
-    enq = Enquiry.load(w.repo, GUEST)
-    box = bot_outbox(w.bot, GUEST, dry_run=True)
-    assert due_step(w.bot, GUEST, enq, "en", box) is None  # ask_contact is already the last message in the chat
+    for q, a in (("is there a pool?", "Yes, there is a pool."), ("and wifi?", "Yes, there is wifi."),
+                 ("and parking?", "Yes, free parking is available."), ("ac?", "Yes, every room has AC.")):
+        w.clock.advance(minutes=1)
+        res, _ = go(w, q, reply(a), live=True)
+        assert res.sent == ["ai"]
+    assert w.wa.texts(GUEST).count(t("ask_contact", "en")) == 1
 
 
 def test_the_open_step_is_not_added_when_its_text_went_this_turn(world):
@@ -212,7 +187,7 @@ def test_the_prompt_owner_rules_name_the_reasons(world):
     system = world.llm.calls[0].system
     for value in OWNER_REASONS:
         assert f'reason="{value}"' in system or value in system, value
-    assert "Never ask for place, dates, adults, rooms, name or mobile yourself" in system
+    assert "The system asks FIRST for place, dates, adults, rooms, name and mobile" in system
     assert "If tools sent messages this turn, write NOTHING" in system
     assert "even with no details at all" in system
 

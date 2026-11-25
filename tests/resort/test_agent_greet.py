@@ -69,13 +69,13 @@ def test_hi_mid_conversation_with_nothing_open_is_a_short_hi(world):
     assert res.sent == ["hello"] and w.wa.texts(GUEST)[-1] == "Hi."
 
 
-def test_hi_mid_conversation_with_an_open_enquiry_gives_the_stay_and_the_open_step(world):
+def test_hi_mid_conversation_with_an_open_enquiry_gives_the_stay_never_the_step_again(world):
     w = world
     go(w, ASK, tool("update_enquiry", **STAY), reply(""), live=True)  # ends with the name and mobile ask
     go(w, "is there a pool?", reply("Yes, there is a pool."), live=True)
     res, _ = go(w, "hai", tool("greet", language="en"), reply(""), live=True)
-    assert res.sent == ["hello_back", "ask_contact"]
-    hello = w.wa.texts(GUEST)[-2]
+    assert res.sent == ["hello_back"]  # AI-first rebalance: the name ask already went in this conversation
+    hello = w.wa.texts(GUEST)[-1]
     assert hello.startswith("Hi. Your enquiry: ") and "10 Nov to 12 Nov" in hello and "2 person(s)" in hello
 
 
@@ -86,12 +86,12 @@ def test_the_open_step_is_not_repeated_when_it_is_the_last_message(world):
     assert res.sent == ["hello_back"]
 
 
-def test_hi_with_an_open_link_gives_the_stay_and_the_link(world):
+def test_hi_with_an_open_link_gives_the_stay_never_the_link_again(world):
     w = world
     book_live(w)
     go(w, "is there wifi?", reply("Yes, there is wifi."), live=True)
     res, _ = go(w, "hi", tool("greet", language="en"), reply(""), live=True)
-    assert res.sent == ["hello_back", "pay"]
+    assert res.sent == ["hello_back"]
 
 
 def test_hi_after_a_confirmed_booking(world):

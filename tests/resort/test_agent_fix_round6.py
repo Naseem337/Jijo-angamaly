@@ -36,13 +36,12 @@ def test_ok_right_after_the_payment_link_gets_sure_not_the_link_again(world):
     assert res.sent == ["sure"] and "pay" not in res.sent
 
 
-def test_ok_twice_gets_sure_twice_never_a_second_ask(world):
+def test_ok_twice_never_sends_sure_twice_in_a_row(world):  # AI-first rebalance: the last-3 rule
     w = world
     go(w, ASK, tool("update_enquiry", **STAY), reply(""), live=True)
     go(w, "ok", reply("[ack]"), live=True)
-    calls = len(w.llm.calls)
-    res, _ = go(w, "ok", reply("[ack]"), live=True)
-    assert res.sent == ["sure"] and len(w.llm.calls) == calls + 1
+    res, _ = go(w, "ok", reply("[ack]"), reply("Take your time."), live=True)
+    assert res.sent == ["ai"] and w.wa.texts(GUEST).count("Sure.") == 1
 
 
 def test_an_empty_reply_still_gets_the_second_ask(world):
@@ -53,13 +52,13 @@ def test_an_empty_reply_still_gets_the_second_ask(world):
     assert res.sent == ["ai"]
 
 
-def test_ok_when_the_step_is_older_than_the_last_2_messages_gets_the_step(world):
+def test_ok_when_the_step_is_older_gets_sure_never_the_step(world):  # AI-first rebalance
     w = world
     go(w, ASK, tool("update_enquiry", **STAY), reply(""), live=True)
     go(w, "is there a pool?", reply("Yes, there is a pool."), live=True)
     go(w, "and wifi?", reply("Yes, there is wifi."), live=True)
     res, _ = go(w, "ok", reply("[ack]"), live=True)
-    assert res.sent == ["ask_contact"]
+    assert res.sent == ["sure"]
 
 
 # --------------------------------------------------------------------------- 3. room question vs room choice

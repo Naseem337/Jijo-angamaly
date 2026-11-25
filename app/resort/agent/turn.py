@@ -4,8 +4,10 @@
     swipe-reply line before it)
       -> LLM <-> tools, at most 4 rounds of tool calls; tool results go back as compact JSON, and an earlier round's
          results shrink to one line each when a new round starts
-      -> the outbox: the AI's own line first, then the tools' messages in the order they were queued,
-         then the open step if nothing at all went out (never silent)
+      -> the outbox: the AI's own line first, then the tools' messages in the order they were queued; a text that is
+         among our last 3 messages is dropped (owner texts too; only a link the guest asked for may go again)
+      -> never silent: nothing left -> the AI once more -> "Sorry, could you say that again?". A step's owner text
+         goes only when that step starts or changes (a tool sends it); after that the AI reminds in its own words.
 
 The model comes from the LLM chain (LLM_CHAIN) only: nothing here names one. Temperature 0.2, at most 300 output tokens
 per call, no extended thinking. Token use per turn goes to usage.py. The AI's own text goes
@@ -29,7 +31,7 @@ from app.resort.agent import usage
 from app.resort.agent.outbox import Outbox, near_same
 from app.resort.agent.prompt import build_system_prompt
 from app.resort.agent.state import Enquiry
-from app.resort.agent.tools import I18N_LANG, STEP_SHOWN, TOOL_SCHEMAS, AgentTools, live_link, pay_text
+from app.resort.agent.tools import I18N_LANG, TOOL_SCHEMAS, AgentTools
 from app.resort.chat import RESTART_MARK
 from app.resort.i18n import t
 
@@ -212,6 +214,9 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     fresh = len(messages) <= 1 and not greeted(bot, phone)
     system = build_system_prompt(bot, phone, enq, fresh=fresh, lock=words.lock)
     tools = AgentTools(bot, phone, outbox, guest_text=text, lang=words)
+
+    def recent_rule() -> None:  # never a text among our last 3 messages; a link the guest asked for may go again
+        drop_recent(bot, phone, outbox, link_asked=any(n in tools.ran for n in ("send_payment_link", "repeat_step")))
     result = TurnResult("answered")
     response = None
     failure: Exception | None = None
@@ -255,6 +260,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         return guard.problems(reply, src), src
 
     def own(response: Any) -> str:
+        recent_rule()  # a tool text that may not go (among our last 3) never pushes the AI's own line out
         result.ack = is_ack(response)
         reply = _own_text(response)
         if tools.quiet:  # talk_to_owner(cannot_answer / call_request / other / guest_called): only the fixed text goes
@@ -274,14 +280,12 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             return [guard.BOOKING_RETRY]
         return []
 
-    def polish(reply: str, src: Any) -> tuple[str, bool]:
-        """The AI's own line through the quiet guards; (line, the AI asked for booking details itself)."""
+    def polish(reply: str, src: Any) -> str:
+        """The AI's own line through the quiet guards. Its own reminder of an open step ('Please send your name and
+        mobile number to continue.') stays: since the AI-first rebalance (2026-11-25) the code never re-sends the
+        owner's step text."""
         if reply and src is not None:
             reply = guard.clean(reply, src)  # d) provider name, booking ids, other scripts, old links, the name
-        asked = False  # the AI asked for booking details itself: the code's open step takes its place
-        if reply:
-            kept = guard.drop_detail_asks(reply)  # f) the code's open step asks for the details, not the AI
-            asked, reply = kept != reply, kept
         if reply:  # h) i) j) fix round 2
             reply = guard.drop_hold_talk(reply)  # never explain the hold or when the link expires
             if not tools.sending_ran:
@@ -292,7 +296,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         if reply and guard.is_repeat(bot, phone, reply) and not guard.LINK.search(reply):
             log.info("Guard: the AI's line was already sent to %s; dropped", phone[-4:])  # e)
             reply = ""
-        return reply, asked
+        return reply
 
     def second_chance() -> str:
         """Nothing would go out: the AI is asked once more (never shown to the guest). Its tools run as usual; its line
@@ -310,12 +314,12 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
                 return ""
             if guard.style_problems(line):
                 line = guard.fix_style(line)
-            return polish(line, src2)[0]
+            return polish(line, src2)
         except Exception as exc:  # the AI failing here: the code's fallback still answers
             log.warning("Second chance failed for %s: %s", phone[-4:], exc)
             return ""
 
-    reply, src, blocked, booking_dropped = "", None, False, False
+    reply, src, blocked = "", None, False
     try:
         if llm is None:
             raise RuntimeError("no LLM configured")
@@ -337,7 +341,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
                 result.guard = result.guard + found
             elif booking(reply):  # still answering booking information itself: dropped, the code's open step goes
                 log.info("Guard: booking talk without update_enquiry for %s; dropped", phone[-4:])
-                reply, booking_dropped = "", True
+                reply = ""
             elif guard.style_problems(reply):  # still too long or banned: cut, never a handoff
                 reply = guard.fix_style(reply)
     except Exception as exc:  # an LLM outage or a crash must never leave the guest unanswered
@@ -362,39 +366,33 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             outbox.staff("staff:guard", bot.handoff_summary(
                 phone, {"lang": lang}, "the bot's reply failed its checks twice: " + " | ".join(result.guard)[:600]),
                 bot.staff_numbers(enq.place))
-        reply, asked = polish(reply, src)
+        reply = polish(reply, src)
         result.reply = reply
         if reply:  # design section 4: the AI's own line first, then the tools' messages in their order
             outbox.prepend_text("ai", reply)
-        if outbox.spoke and not tools.no_step and (step := due_step(bot, phone, enq, lang, outbox,
-                                                                    fresh=fresh and not result.calls, asked=asked)):
-            outbox.text(*step)  # the open booking step always closes the turn (fix round 1)
-        if not outbox.spoke:  # NEVER SILENT (live test 2026-11-25): every guest message gets at least one reply
-            result.outcome = "never_silent"
-            wanted = asked or booking_dropped  # the AI's own booking ask / answer was taken out: the step IS wanted
-            if step := quiet_reply(bot, phone, enq, lang, wanted=wanted, ack=result.ack):  # pay nudge / step / 'Sure.'
-                outbox.text(*step)
-            else:
-                second = "" if result.ack else second_chance()  # a) the AI once more, only for an EMPTY reply
-                if second:
-                    result.reply = second
-                    outbox.prepend_text("ai", second)
-                if not outbox.spoke:  # b) still nothing: the open step again (a repeat is allowed), else say again
-                    enq = Enquiry.load(bot.repo, phone)
-                    outbox.text(*(open_step_now(bot, phone, enq, lang, wanted=wanted)
-                                  or ("say_again_short", t("say_again_short", lang))))
     outbox.dedupe()  # never the same (or nearly the same) text twice in one turn
-    outbox.move_last(STEP_TEXT_KEYS)  # the open step (name ask, form, link) is always the LAST message of the turn
+
+    recent_rule()
+    if failure is None and not outbox.spoke:  # NEVER SILENT: every guest message gets an answer
+        result.outcome = "never_silent"
+        if result.ack:  # the AI marked a pure 'ok' / 'thanks': 'Sure.' (unless it is among our last 3 messages)
+            outbox.text("sure", t("sure", lang))
+            recent_rule()
+        if not outbox.spoke:  # the AI once more (the guest never sees the ask); its tools' texts pass the rule too
+            if second := second_chance():
+                result.reply = second
+                outbox.prepend_text("ai", second)
+            outbox.dedupe()
+            recent_rule()
+        if not outbox.spoke:  # still nothing: 'Sorry, could you say that again?', never a fixed step text again
+            outbox.text("say_again_short", t("say_again_short", lang))
+    outbox.move_last(STEP_TEXT_KEYS)  # a step text a tool sent this turn (name ask, form, link) goes LAST
     outbox.flush()
     result.sent = outbox.keys
     usage.record(bot, phone, result, dry_run=outbox.dry_run)
     return result
 
 
-# the owner texts that ARE each open step: when one went out this turn, the step is not added again
-STEP_KEYS = {"ask_location": ("ask_location",), "ask_details": ("form", "past_date"),
-             "ask_extra_bed": ("ask_extra_bed", "ask_extra_beds"), "ask_contact": ("ask_contact",),
-             "pay": ("pay", "hold_pay")}
 # the step texts that always close a turn (moved after the photos / labels / price: live test 2026-11-25)
 STEP_TEXT_KEYS = ("ask_location", "form", "ask_extra_bed", "ask_extra_beds", "ask_contact", "pay", "hold_pay",
                   "pay_nudge")
@@ -403,67 +401,22 @@ SECOND_CHANCE = ("[SYSTEM] You sent nothing and the guest is waiting. Reply to t
                  "photos/link).")
 
 
-def due_step(bot: Any, phone: str, enq: Enquiry, lang: str, outbox: Outbox, *, fresh: bool = False,
-             asked: bool = False) -> tuple[str, str] | None:
-    """The open booking step the code adds at the end of a turn: (key, owner text), or None. Only while a booking is
-    under way (never on a first 'hi') or when the AI's own ask for details was dropped (`asked`), only when the step
-    needs the guest (location, details, extra bed, name and mobile, payment), when its owner text was not sent this
-    turn and it is not already the last message we sent."""
-    step = enq.next_step
-    if step not in STEP_KEYS or any(k in outbox.keys for k in (*STEP_KEYS[step], STEP_SHOWN)):
-        return None
-    if not asked and (fresh or not enq.active):
-        return None
-    if step == "pay":
-        b = live_link(bot, phone)
-        found = ("pay", pay_text(b, lang, bot.clock.now())) if b is not None else None
-    elif step == "ask_location" and len([p for p in bot._places() if p.active]) == 1:
-        found = None  # one resort only: the place is never asked
-    else:
-        found = pp.open_step(bot, enq, lang)
-    if found is None or found[1] == pp.last_text(bot, phone, outbox):
-        return None
-    tool_spoke = any(i.kind == "photos" or (i.kind == "text" and i.key != "ai") for i in (*outbox.sent, *outbox.queue))
-    if not tool_spoke and _recent(bot, phone, found[1], live_link(bot, phone) if step == "pay" else None):
-        return None  # fix round 5: only the AI spoke ('ok' / 'thanks') and the step is among the last 2 messages
-    return found
+RECENT = 3  # never a text that is (nearly) the same as one of our last 3 messages (AI-first rebalance, 2026-11-25)
+LINK_KEYS = ("pay", "hold_pay")
+ALWAYS = ("ai_down", "say_again_short")  # an outage notice and the last fallback: the guest is never left silent
 
 
-def _recent(bot: Any, phone: str, text: str, link: Any = None) -> bool:
-    """This text (or, for the payment step, any text with the same link) is among the last 2 messages we sent."""
-    recent = pp.recent_texts(bot, phone, 2)
-    url = getattr(link, "payment_link_url", "") or ""
-    return any(near_same(text, x) or (url and url in x) for x in recent)
-
-
-def quiet_reply(bot: Any, phone: str, enq: Enquiry, lang: str, *, wanted: bool = False,
-                ack: bool = False) -> tuple[str, str] | None:
-    """Nothing at all went out this turn (the AI wrote nothing, no tool spoke). The code's own short answer, or None
-    (then run_turn asks the AI once more, then re-sends the open step / says 'say again': never silent):
-    - an open unpaid link: pay_nudge once (not when pay_nudge or the link is among the last 2 messages)
-    - an open step not among the last 2 messages: that step
-    - otherwise 'Sure.' ONLY when the AI marked the message as a pure acknowledgement (`ack`: it wrote exactly ACK for
-      'ok' / 'thanks'), also while a step is open that is among the last 2 messages (Haiku eval 2026-11-25: 'ok' after
-      the name ask re-sent the ask); anything else: None, so the AI is asked once more (only for an EMPTY reply,
-      never for ACK; live test 2026-11-25: 'hello' got 'Sure.')
-    'Sure.' never answers an unclear message while a step is open ('what sure' / 'send' → repeat_step)."""
-    sure = ("sure", t("sure", lang)) if ack else None
-    if (link := live_link(bot, phone)) is not None and enq.next_step == "pay":
-        nudge = t("pay_nudge", lang)
-        return sure if _recent(bot, phone, nudge, link) else ("pay_nudge", nudge)
-    # a step is open while a booking is under way, or when this turn's own booking ask / answer was taken out (`wanted`)
-    step = pp.open_step(bot, enq, lang) if (enq.active or wanted) else None
-    if step is not None:
-        return sure if _recent(bot, phone, step[1]) else step
-    return sure
-
-
-def open_step_now(bot: Any, phone: str, enq: Enquiry, lang: str, *, wanted: bool = False) -> tuple[str, str] | None:
-    """The open step as it is now, even if it was just sent (never silent): the live link's pay text, else the form /
-    name ask / location question / extra-bed question; None when nothing is open."""
-    if (b := live_link(bot, phone)) is not None:
-        return "pay", pay_text(b, lang, bot.clock.now())
-    return pp.open_step(bot, enq, lang) if (enq.active or wanted) else None
+def drop_recent(bot: Any, phone: str, outbox: Outbox, *, link_asked: bool = False) -> list[Any]:
+    """HARD RULE: a queued text that is (nearly) the same as one of the last RECENT messages we sent is dropped, owner
+    texts too. Only the payment link may go again, when the guest asked for it (send_payment_link / repeat_step ran)."""
+    recent = pp.recent_texts(bot, phone, RECENT)
+    gone = [i for i in outbox.queue if i.kind == "text" and i.key not in ALWAYS
+            and not (link_asked and i.key in LINK_KEYS) and any(near_same(i.text, x) for x in recent)]
+    if gone:
+        outbox.queue = [i for i in outbox.queue if i not in gone]
+        log.info("Outbox: %s already among the last %d messages to %s; dropped", [i.key for i in gone], RECENT,
+                 phone[-4:])
+    return gone
 
 
 def _alert_ai_down(bot: Any, outbox: Outbox, phone: str, text: str, enq: Enquiry) -> None:

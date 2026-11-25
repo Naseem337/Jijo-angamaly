@@ -12,7 +12,7 @@ from app.resort.agent import guard
 from app.resort.agent.outbox import Outbox, photo_gap
 from app.resort.agent.prompt import SYSTEM
 from app.resort.agent.tools import TOOL_SCHEMAS
-from app.resort.agent.turn import SECOND_CHANCE, STEP_TEXT_KEYS, quiet_reply
+from app.resort.agent.turn import SECOND_CHANCE, STEP_TEXT_KEYS
 from app.resort.agent.state import Enquiry
 from app.resort.i18n import t
 
@@ -33,11 +33,11 @@ def linked(w):
 # --------------------------------------------------------------------------- 1. never silent
 
 
-def test_every_guard_drops_the_line_and_the_step_was_last_still_something_goes(world):
+def test_every_guard_drops_the_line_then_say_again_never_the_step_again(world):  # AI-first rebalance 2026-11-25
     checked(world)
     res, _ = go(world, "what sure", reply("Sure, I have sent it again."), reply(""), live=True)  # false 'sent': dropped
-    assert res.outcome == "never_silent" and res.sent == ["ask_contact"]
-    assert world.wa.texts(GUEST)[-1] == ASK_CONTACT  # the open step again, although it was the last message
+    assert res.outcome == "never_silent" and res.sent == ["say_again_short"]
+    assert world.wa.texts(GUEST).count(ASK_CONTACT) == 1
 
 
 def test_the_ai_is_asked_once_more_internally_and_its_line_goes(world):
@@ -55,9 +55,15 @@ def test_the_second_ask_says_exactly_what_was_asked():
 
 
 def test_the_second_ask_may_call_a_tool(world):
+    linked(world)
+    res, _ = go(world, "send the link", reply(""), tool("repeat_step", language="en"), reply(""), live=True)
+    assert res.sent == ["pay"]  # the link the guest asked for may go again
+
+
+def test_a_step_text_from_the_second_ask_still_obeys_the_last_3_rule(world):
     checked(world)
     res, _ = go(world, "send", reply(""), tool("repeat_step", language="en"), reply(""), live=True)
-    assert res.sent == ["ask_contact"]
+    assert res.sent == ["say_again_short"] and world.wa.texts(GUEST).count(ASK_CONTACT) == 1
 
 
 def test_nothing_open_and_nothing_said_gets_say_that_again(world):
@@ -65,19 +71,20 @@ def test_nothing_open_and_nothing_said_gets_say_that_again(world):
     assert res.sent == ["say_again_short"] and texts(box)["say_again_short"] == "Sorry, could you say that again?"
 
 
-def test_an_open_link_is_sent_again_when_nothing_else_goes(world):
+def test_an_open_link_is_never_the_fallback(world):  # AI-first rebalance: never a fixed text as the fallback
     linked(world)
     res, _ = go(world, "send", reply(""), reply(""), live=True)
-    assert res.sent == ["pay"] and "http" in world.wa.texts(GUEST)[-1]
+    assert res.sent == ["say_again_short"]
 
 
 # --------------------------------------------------------------------------- 2. unclear asks re-send the open step
 
 
-def test_repeat_step_resends_the_name_ask_even_when_it_was_last(world):
+def test_repeat_step_never_resends_a_name_ask_among_the_last_3_messages(world):
     checked(world)
-    res, _ = go(world, "ok send me", tool("repeat_step", language="en"), reply(""), live=True)
-    assert res.sent == ["ask_contact"] and world.wa.texts(GUEST)[-2:] == [ASK_CONTACT, ASK_CONTACT]
+    res, _ = go(world, "ok send me", tool("repeat_step", language="en"), reply("Please send your name and mobile."),
+                live=True)
+    assert res.sent == ["ai"] and world.wa.texts(GUEST).count(ASK_CONTACT) == 1
 
 
 def test_repeat_step_resends_the_payment_link(world):
@@ -97,15 +104,6 @@ def test_repeat_step_with_nothing_open_sends_nothing_and_says_so(world):
     assert not res.calls[0]["result"]["ok"] and res.sent == ["ai"]
 
 
-def test_sure_never_answers_while_a_step_is_open(world):
-    checked(world)
-    enq = Enquiry.load(world.repo, GUEST)
-    assert quiet_reply(world.bot, GUEST, enq, "en") is None  # the step was just sent: no 'Sure.' (the AI / step goes)
-    go(world, "is there a pool?", reply("Yes, there is a pool."), live=True)
-    go(world, "and wifi?", reply("Yes, there is wifi."), live=True)
-    assert quiet_reply(world.bot, GUEST, Enquiry.load(world.repo, GUEST), "en")[0] == "ask_contact"
-
-
 def test_sure_only_for_an_acknowledgement_with_no_step_open(world):
     go(world, "is there a pool?", reply("Yes, there is a pool."), live=True)
     res, _ = go(world, "ok", reply("[ack]"), live=True)
@@ -113,9 +111,9 @@ def test_sure_only_for_an_acknowledgement_with_no_step_open(world):
 
 
 def test_the_prompt_and_tool_say_when_to_repeat_the_step():
-    assert '("ok send me", "send", "what", "what sure") → repeat_step. Never just "Sure".' in SYSTEM
+    assert 'The guest clearly asks you to SEND a step again ("send the link again", "send the form again") → '         'repeat_step.' in SYSTEM
     spec = next(s for s in TOOL_SCHEMAS if s.name == "repeat_step")
-    assert "NOT for a plain 'ok' / 'thanks'" in spec.description and spec.parameters["required"] == ["language"]
+    assert "NOT for 'what' / an unclear message" in spec.description and spec.parameters["required"] == ["language"]
 
 
 # --------------------------------------------------------------------------- 3. photo order

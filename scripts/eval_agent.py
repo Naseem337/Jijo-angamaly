@@ -277,6 +277,9 @@ def run_scenario(sc: dict[str, Any], llm: Any) -> dict[str, Any]:
                 time.sleep(PAUSE_S)  # free-tier rate limits: a short gap between AI turns
     finally:
         gate.run_turn = real_turn
+    # every scenario (AI-first rebalance 2026-11-25): the guest never gets the same text twice in a row
+    said = [x for to, kind, x in w.wa.sent if to == GUEST and kind == "text"]
+    failures += [f"the same text twice in a row: {b[:60]!r}" for a, b in zip(said, said[1:]) if near_same(a, b)]
     return {"log": log, "failures": failures, "tokens": _sum_tokens(log)}
 
 

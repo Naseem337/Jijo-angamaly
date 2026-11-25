@@ -300,9 +300,20 @@ def open_step(bot: Any, enq: Enquiry, lang: str) -> tuple[str, str] | None:
     return None
 
 
+STEP_LANGS = ("en", "mn", "tn", "hn")  # the i18n codes of the 4 reply languages (tools.I18N_LANG)
+
+
+def step_said(bot: Any, phone: str, enq: Enquiry, out: Outbox) -> bool:
+    """The open step's owner text already went in this conversation, in ANY language (eval 2026-11-25: the name ask
+    went in Manglish, then again in English after 'Can u speak in english')."""
+    return any((s := open_step(bot, enq, code)) is not None and already_said(bot, phone, out, s[1])
+               for code in STEP_LANGS)
+
+
 def queue_open_step(bot: Any, phone: str, enq: Enquiry, lang: str, out: Outbox, *, dates_line: bool = True) -> None:
     """After the photos the guest is taken back to the booking: before any dates the reason (once per conversation),
-    then the step still open, never the same text twice in a row."""
+    then the step still open, ONLY when its owner text never went in this conversation (the step starts now). After
+    that the AI reminds the guest in its own words (AI-first rebalance, 2026-11-25)."""
     step = open_step(bot, enq, lang)
     if step is None:
         return
@@ -311,5 +322,5 @@ def queue_open_step(bot: Any, phone: str, enq: Enquiry, lang: str, out: Outbox, 
         line = t("dates_for_availability", lang)
         if not already_said(bot, phone, out, line):
             out.text("dates_for_availability", line)
-    if text != last_text(bot, phone, out):
+    if not step_said(bot, phone, enq, out):
         out.text(key, text)

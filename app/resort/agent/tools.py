@@ -89,7 +89,8 @@ TOOL_SCHEMAS = [
         "unknown. Give check_out OR nights: code works out the other. It asks for anything missing and checks the "
         "rooms; its messages go out for you (see `sent`).",
         {"type": "object", "properties": {
-            "place": {"type": "string", "description": "the resort or town as the guest wrote it in this chat"},
+            "place": {"type": "string", "description": "the resort or town as the guest wrote it in this chat; never one the "
+                                                     "guest did not name"},
             "check_in": DATE_FIELD,
             "check_out": DATE_FIELD,
             "nights": {"type": "integer", "description": "instead of check_out"},
@@ -185,9 +186,9 @@ TOOL_SCHEMAS = [
          "required": ["reason"]}),
     ToolSpec(
         "repeat_step",
-        "A booking step is open (the form, the name and mobile ask, the payment link) and the guest asks for it again "
-        "or writes something unclear about it ('what sure'): the step is sent again. NOT for a plain 'ok' / 'thanks' "
-        "that only acknowledges.",
+        "A booking step is open (the form, the name and mobile ask, the payment link) and the guest clearly asks you to "
+        "SEND it again ('send the link again', 'send the form again'): the step is sent again. NOT for 'what' / an "
+        "unclear message (explain it in your own words) and NOT for a plain 'ok' / 'thanks'.",
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "greet",
@@ -1394,8 +1395,8 @@ class AgentTools:
             stay = self._stay_words(enq, link)
             self.out.text("hello_back", t("hello_back", lang, stay=stay) if stay else MID_HI)
             step = ("pay", pay_text(link, lang, bot.clock.now())) if link is not None else pp.open_step(bot, enq, lang)
-            if step is not None and step[1] != last:
-                self.out.text(*step)
+            if step is not None and step[1] != last and not pp.step_said(bot, self.phone, enq, self.out):
+                self.out.text(*step)  # only a step whose owner text never went in this conversation (it starts now)
             self.no_step = True  # greet already decided the open step: turn.py's due_step must not add it again
             return self._result(True, {"greeting": "open_enquiry", "stay": stay}, start, enq, SENT_NOTE)
         if booked is not None:

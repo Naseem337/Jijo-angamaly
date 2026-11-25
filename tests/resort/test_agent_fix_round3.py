@@ -201,18 +201,18 @@ def test_a_missing_or_invalid_language_keeps_the_last_one(world, given, saved, w
 # --------------------------------------------------------------------------- 0e) 0f) a question not in FACTS
 
 
-def test_a_question_not_in_facts_gets_the_handoff_then_the_open_step(world):
+def test_a_question_not_in_facts_gets_the_handoff_and_never_the_step_again(world):
     go(world, "Alleppey 10 to 12 nov 2 adults", tool("update_enquiry", **STAY), reply(""), live=True)
     res, _ = go(world, "is there parking?", tool("talk_to_owner", reason="cannot_answer"), reply("Yes, parking."),
                 live=True)
-    assert res.sent == ["handoff", "ask_contact"] and res.reply == ""
+    assert res.sent == ["handoff"] and res.reply == ""  # AI-first rebalance: the name ask went already
 
 
-def test_with_a_link_open_the_handoff_is_followed_by_the_link(world):
+def test_with_a_link_open_the_handoff_never_resends_the_link(world):
     book(world, live=True)
     world.clock.advance(minutes=1)
     res, _ = go(world, "do you allow pets?", tool("talk_to_owner", reason="cannot_answer"), reply(""), live=True)
-    assert [k for k in res.sent if not k.startswith("staff:")] == ["handoff", "pay"]
+    assert [k for k in res.sent if not k.startswith("staff:")] == ["handoff"]
 
 
 def test_the_policy_rule_is_in_the_prompt():

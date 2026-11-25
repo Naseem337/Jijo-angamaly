@@ -366,11 +366,11 @@
       not_sent: [ask_contact]
       must_not: ["How may I assist you", "assist"]
 
-- id: question_then_open_step  # fix round 1: code closes the turn with the open step
+- id: question_then_open_step  # AI-first rebalance: an answer only; the owner's name ask is never re-sent
   turns:
     - guest: "Alleppey dec 10 to 12, 2 adults"
     - guest: "is there parking?"
-      expect_sent: [ask_contact]
+      not_sent: [ask_contact]
 
 - id: question_with_link_open  # fix round 1: the open payment link follows the answer
   turns:
@@ -457,13 +457,14 @@
       must_not: ["anything else", "feel free", "as an AI", "owner", "don't hesitate", "please note"]
 
 # ───────────────────────── fix round 4 ─────────────────────────
-- id: closed_place_then_yes  # Kanthalloor switched off: closed_place; "yes" -> the location question (AI asks nothing itself)
+- id: closed_place_then_yes  # Kanthalloor off: closed_place; "yes" -> update_enquiry; one resort open -> the form
   closed: [Kanthalloor]
   turns:
     - guest: "Vibes Kanthalloor"
       expect_sent: [closed_place]
-    - guest: "yes"  # after closed_place: the location question again
-      expect_sent: [ask_location]
+    - guest: "yes"  # after closed_place: book elsewhere; only Alleppey is open, so the place is never asked
+      expect_tools: [update_enquiry]
+      expect_sent: [form]
       must_not: ["check-in", "check-out", "adults", "dates"]
     - guest: "ok"
       not_sent: [form, ask_location]
@@ -631,3 +632,36 @@
       expect_args: {update_enquiry: {language: en}}
       expect_sent: [rooms_ok, ask_contact]
       expect_text: "Yes, rooms are available for your dates."
+
+# ───────────────────────── AI-first rebalance (live WhatsApp 2026-11-25) ─────────────────────────
+- id: what_after_contact_ask  # "What" after the name ask: the AI explains in one short line, never the owner text again
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+      expect_sent: [ask_contact]
+    - guest: "What"
+      ai_required: true
+      not_sent: [ask_contact]
+      max_words: 20
+
+- id: english_please_after_manglish  # "English please" after a Manglish text: the next replies are in English
+  turns:
+    - guest: "alleppey il room undo? dec 10 muthal 12 vare, 2 per"
+      expect_tools: [update_enquiry]
+    - guest: "English please"
+      expect_tools: [set_language]
+      expect_args: {set_language: {language: en}}
+      not_sent: [ask_contact]
+    - guest: "Can you check Dec 11 to Dec 13 instead?"
+      expect_tools: [update_enquiry]
+      expect_text: "Yes, rooms are available for your dates."
+
+- id: no_owner_text_twice_in_a_row  # the live chat: "What", "Can u speak in english", "English please"
+  turns:
+    - guest: "alleppey il room undo? dec 10 muthal 12 vare, 2 per"
+      expect_sent: [ask_contact]
+    - guest: "What"
+      not_sent: [ask_contact]
+    - guest: "Can u speak in english"
+      not_sent: [ask_contact]
+    - guest: "English please"
+      not_sent: [ask_contact]
