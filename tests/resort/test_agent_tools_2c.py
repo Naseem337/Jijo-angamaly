@@ -67,7 +67,7 @@ def test_a_staff_alert_is_only_recorded_in_a_dry_run_and_sent_when_live(world):
     assert w.wa.to(STAFF) == [] and w.wa.to(GUEST) == []  # dry run: nothing sent
     run(w, "talk_to_owner", {"reason": "wants a refund"}, live=True)
     assert [m for m in w.wa.texts(STAFF) if m.startswith("Guest needs the team: wants a refund")]  # live: the team hears
-    assert w.wa.texts(GUEST)[-1].startswith("Thank you. Please contact the owner directly:")
+    assert w.wa.texts(GUEST)[-1].startswith("Thank you. Please contact the team directly:")
 
 
 def test_guest_called_sends_the_owners_thank_you_and_alerts_no_one(world):
@@ -338,13 +338,13 @@ def test_send_payment_link_lost_sends_the_link_and_hold_sends_the_pay_now_line(w
     assert again["sent"] == ["pay"] and again["next_step"] == "pay"
 
 
-def test_send_payment_link_after_the_hold_ran_out_says_hold_expired_and_sends_nothing(world):
-    w = world
+def test_send_payment_link_after_the_hold_ran_out_checks_the_same_stay_and_sends_a_new_link(world):
+    w = world  # fix round 2: was "hold expired, nothing sent" (the AI then explained the expiry to the guest)
     book(w)
     w.clock.advance(minutes=20)  # the hold is 15 minutes
-    result, texts, _ = run(w, "send_payment_link", {"reason": "lost"})
-    assert not result["ok"] and result["facts"] == {"hold_expired": True} and texts == {} and result["sent"] == []
-    assert "update_enquiry" in result["note"]
+    result, texts, _ = run(w, "send_payment_link", {"reason": "lost"}, live=True)
+    assert result["ok"] and result["sent"][-2:] == ["summary", "pay"] and "rooms_ok" not in result["sent"]
+    assert result["next_step"] == "pay" and "http" in texts["pay"]
 
 
 def test_send_payment_link_with_no_booking_or_a_bad_reason(world):
@@ -426,7 +426,7 @@ def test_talk_to_owner_tells_the_guest_the_numbers_and_the_team_the_summary(worl
     run(w, "update_enquiry", {"place": "Alleppey"})
     result, texts, box = run(w, "talk_to_owner", {"reason": "wants a discount of 50 percent"})
     assert result["ok"] and result["sent"] == ["handoff", "staff:alert"]
-    assert texts["handoff"].startswith("Thank you. Please contact the owner directly:")
+    assert texts["handoff"].startswith("Thank you. Please contact the team directly:")
     assert "9497861924" in digits(texts["handoff"]) and "9995855789" in digits(texts["handoff"])
     assert "will contact" not in texts["handoff"]
     staff = next(i for i in box.sent if i.kind == "staff")

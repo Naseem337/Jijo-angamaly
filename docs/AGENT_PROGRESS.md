@@ -85,8 +85,56 @@ Spec: docs/AI_AGENT_DESIGN.md. Commit format: `Step AI-n: ...`. Tests: `.venv\Sc
 - Old-bot tests: 5 in test_never_silent.py (pay terms, expecting the pre-8330e2b text) fail since 8330e2b; the old
   bot is not edited.
 
+## Fix round 2 (2026-11-25): eval failures, no repeats, team wording, policies
+- Root causes found in the round-1 transcripts:
+  - change after a link sent no summary: `update_enquiry` built "the stay on the link" with the NEW dates, so a date-only
+    change looked like the same stay ("unchanged"). It now uses the held booking's own dates. `room_picked` is not sent
+    when the AI only re-passes the room already on the link.
+  - guest_called text: the i18n text was right, but `bot._text` (`_ease_sir`, old-bot code) took "sir" out past the
+    chat's start. The outbox now sends EXACT_KEYS (`guest_called`) word for word (`outbox._send_exact`: English letters,
+    no booking id, logged; no sir easing). The AI's own line is dropped after it.
+  - link_lost: the scenario waits 1 h, so the hold had run out and the AI explained the expiry. `send_payment_link` on
+    an expired hold now re-checks the same stay (`_renew`: name + mobile from the old booking -> update_enquiry's relink):
+    new summary + link, or the owner's no-room text.
+  - day_without_month: the AI left month_given out. It is REQUIRED in the description; a past check-in without it is
+    sent back to the AI (ok=false, nothing to the guest). A future check-in needs nothing (the value changes nothing).
+- Descriptions / prompt: a place name alone IS booking information; language enum with example words per style; a wanted
+  room type -> room_picks, exclude_room_types only for a refused type; link not working / again / lost -> reason lost;
+  policies (pets, alcohol, couples, smoking, visitors, food ...) from FACTS in one line, else talk_to_owner(cannot_answer).
+- Guard (AI's own line only): "How may I assist you" only on the first greeting (mid-chat: sentence dropped, nothing left
+  -> "Hi sir."); "sent / shared / resent / passed your question / informed the owner" dropped when no sending tool ran;
+  hold / expiry talk dropped (expir*, valid for, a minutes count next to link / hold / pay words); "owner" -> "team".
+- No repeats: `Outbox.dedupe()` before every flush: the AI's line goes when it is (nearly, 90%) the same as a tool text;
+  of two (nearly) equal tool texts only the first stays. ONCE_TOOLS (send_payment_link, send_photos, create_booking,
+  check_payment, talk_to_owner, send_map) run once per turn; a second call returns `already_done`, sends nothing.
+- Team wording: `handoff` = "Thank you. Please contact the team directly: {numbers}." in every language variant;
+  ai_down / owner_will_help / pay_failed_link say team too. talk_to_owner: cannot_answer / call_request / other ->
+  only the handoff text (no AI line, no open step / link reminder); guest_called -> exact thank-you + open step, no AI
+  line. Staff alerts only for pay_terms, change_or_cancel_paid and other (no alert for cannot_answer, call_request,
+  guest_called).
+- Judge: sees `BOT:` (the AI's own line, scored) and `SYSTEM:` lines (code's texts, 140 chars, never scored or blamed,
+  but they count as answering the guest).
+- Scenarios: ten_adults expects `ask_extra_beds`; link_lost expects summary + pay; new link_not_working,
+  policy_in_facts, policy_not_in_facts; no staff alert on call_request / three_questions (41 scenarios).
+- Old-bot tests: the 5 pay_terms tests and `test_ok_to_the_owner_numbers...` (flow.py spots its numbers message by
+  "contact the owner") are skipped with a reason; wording-only expectations moved to "team". Old-bot code untouched.
+- Tests: tests/resort/test_agent_fix_round2.py (67). Full tests/resort: 1111 passed, 6 skipped.
+- Eval after round 2 (2026-11-25, sarvam_chat -> groq, 41 scenarios): 24/41 scenarios pass 3/3, 85/123 runs, 6.7 min
+  (round 1: 18/38, 70/114). Now passing: change_dates_after_link, link_lost, link_not_working, ten_adults, call_request,
+  three_questions, policy_in_facts, pay_terms x3, question_with_link_open. Still failing (causes from the transcripts):
+  - past_date (0/3, NEW): "20 Nov 2026" -> the AI left month_given out, was sent back, then passed false -> moved to Dec.
+  - day_without_month (0/3): "20 to 22" -> the AI passes month_given=true (wrong value now, not missing).
+  - question_then_open_step (0/3, NEW): parking is not in FACTS -> talk_to_owner(cannot_answer) -> handoff only, no open
+    step (the new Part-3 rule). The scenario's expectation conflicts with that rule: owner decision needed.
+  - restart (0/3): after restart, "I need a room" gets the greeting again and no update_enquiry.
+  - happy_tanglish / happy_manglish: language still wrong in some runs (None / en / hinglish); "room venam" with 2 open
+    resorts -> the AI passed a place itself (form instead of ask_location).
+  - happy_en 2/3: "Alleppey" alone still missed once. policy_not_in_facts 1/3: pets answered without talk_to_owner.
+  - tone only: photos_* (the AI's line repeats the open step), discount, guest_called 1/3, mid_chat_hi ("Hi sir." is
+    eased to "Hi." by the old send path; the judge calls it cold), thanks_with_link_open, unrelated_question.
+
 ## Next
-- Fix the AI-5 eval failures with general rules (prompt / tool description / tool result), one at a time.
+- Fix the remaining eval failures with general rules (prompt / tool description / tool result), one at a time.
 - AI-6 is now the OWNER TESTING on a test WhatsApp number with `AGENT_MODE=agent` (shadow mode dropped: no live traffic).
 - Then AI-7 switch, AI-8 cleanup.
 

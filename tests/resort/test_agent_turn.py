@@ -164,7 +164,7 @@ def test_an_llm_error_gets_ai_down_and_one_staff_alert_per_30_minutes(world):
     first, _ = go(w, "hello?", LLMError("mock", "down"), live=True)
     assert first.outcome == "ai_down" and first.sent == ["ai_down", "staff:ai_down"] and "down" in first.error
     down = w.wa.texts(GUEST)[-1]
-    assert down.startswith("Sorry") and "contact the owner directly" in down and "9497861924" in down
+    assert down.startswith("Sorry") and "contact the team directly" in down and "9497861924" in down
     alerts = lambda: [m for m in w.wa.texts(STAFF) if m.startswith("Bot could not answer a message from")]  # noqa: E731
     assert len(alerts()) == 1 and "hello?" in alerts()[0]
     second, _ = go(w, "anyone there?", LLMError("mock", "down"), live=True)  # still down, 1 minute later

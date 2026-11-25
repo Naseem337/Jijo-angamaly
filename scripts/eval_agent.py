@@ -42,6 +42,7 @@ from app.providers.llm import ChatMessage, build_llm  # noqa: E402
 from app.resort import photos as ph  # noqa: E402
 from app.resort import seed  # noqa: E402
 from app.resort.agent import gate  # noqa: E402
+from app.resort.agent.outbox import near_same  # noqa: E402
 from app.resort.config import load_resort_config  # noqa: E402
 from app.resort.db import ResortRepo  # noqa: E402
 from app.resort.flow import BookingBot  # noqa: E402
@@ -253,9 +254,11 @@ JUDGE = """You grade one WhatsApp chat between a guest and a resort's front-desk
 4 = good, one small slip. 3 = clearly too long, cold, the wrong language, or it missed a question. 1-2 = bad.
 The right language of a BOT line is the language of the GUEST message just before it, nothing else: an English
 message -> English is correct; Malayalam / Tamil / Hindi written in English letters -> that style in English letters.
-Score ONLY the lines marked "BOT (own words)". Turns marked "[no own words]" are NOT scored at all: skip them.
-The owner's fixed messages (forms, summaries, payment links, owner numbers, room checks) are the owner's exact words:
-never mark them down, but DO mark down own words that repeat what those fixed messages already said.
+Score ONLY the lines that start with "BOT:". A turn with "BOT: (nothing of its own)" is NOT scored: skip it.
+Lines that start with "SYSTEM:" were sent by the system, not by the bot (the owner's fixed texts, forms, the open
+booking step, summaries, payment links, team numbers, photos). NEVER score them and NEVER blame the bot for their
+length, wording or content. They DO count as answering the guest: a link, form or photo the guest asked for that
+went out as SYSTEM is answered. Mark the bot down only when its OWN line repeats a SYSTEM line.
 Answer ONLY with JSON: {"score": <1-5>, "reason": "<one short line>"}"""
 
 
@@ -267,14 +270,15 @@ def judge(llm: Any, sc: dict[str, Any], log: list[dict[str, Any]]) -> tuple[int 
         if "outcome" not in e:
             continue
         lines.append(f"GUEST: {e['guest']}")
-        if not e.get("ai"):  # only the owner's fixed texts (or nothing): this turn is not judged
-            lines.append("[no own words]")
-            continue
-        lines.append(f"BOT (own words): {e['ai']}")
-        if e.get("fixed"):
-            lines.append(f"[then the owner's fixed messages went out: {', '.join(e['fixed'])}]")
+        own = e.get("ai") or ""
+        lines.append(f"BOT: {own}" if own else "BOT: (nothing of its own)")  # only this line is scored
+        for text in e.get("texts") or []:  # what code sent: shown so the judge knows the guest was answered
+            if own and near_same(text, own):
+                continue
+            short = " ".join(text.split())
+            lines.append(f"SYSTEM: {short[:140]}{' …' if len(short) > 140 else ''}")
         if e.get("photos"):
-            lines.append(f"[{e['photos']} photos]")
+            lines.append(f"SYSTEM: [{e['photos']} photos]")
     try:
         r = llm.complete(JUDGE, [ChatMessage("user", "\n".join(lines))], None, 300, temperature=0)
         m = re.search(r"\{.*\}", r.text or "", re.S)

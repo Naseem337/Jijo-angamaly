@@ -161,6 +161,8 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
 
     def own(response: Any) -> str:
         reply = _own_text(response)
+        if tools.quiet:  # talk_to_owner(cannot_answer / call_request / other / guest_called): only the fixed text goes
+            return ""
         if reply and outbox.spoke and guard.repeats_tools(reply):  # g) the tools already said it
             log.info("Guard: the AI's line repeats the tools' messages for %s; dropped", phone[-4:])
             return ""
@@ -210,19 +212,26 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         if reply:
             kept = guard.drop_detail_asks(reply)  # f) the code's open step asks for the details, not the AI
             asked, reply = kept != reply, kept
+        if reply:  # h) i) j) fix round 2
+            reply = guard.drop_hold_talk(reply)  # never explain the hold or when the link expires
+            if not tools.sending_ran:
+                reply = guard.drop_false_sent(reply)  # "sent again" / "informed the team" with nothing sent
+            if not fresh:
+                reply = guard.mid_chat_greeting(reply)  # "How may I assist you?" only as the first greeting
         if reply and guard.is_repeat(bot, phone, reply) and not guard.LINK.search(reply):
             log.info("Guard: the AI's line was already sent to %s; dropped", phone[-4:])  # e)
             reply = ""
         result.reply = reply
         if reply:  # design section 4: the AI's own line first, then the tools' messages in their order
             outbox.prepend_text("ai", reply)
-        if outbox.spoke and (step := due_step(bot, phone, enq, lang, outbox, fresh=fresh and not result.calls,
-                                              asked=asked)):
+        if outbox.spoke and not tools.no_step and (step := due_step(bot, phone, enq, lang, outbox,
+                                                                    fresh=fresh and not result.calls, asked=asked)):
             outbox.text(*step)  # the open booking step always closes the turn (fix round 1)
         if not outbox.spoke:  # never silent: the booking step still open, else a short ask to say it again
             step = pp.open_step(bot, enq, lang)
             outbox.text(*(step or ("say_again", t("say_again", lang))))
             result.outcome = "never_silent"
+    outbox.dedupe()  # never the same (or nearly the same) text twice in one turn
     outbox.flush()
     result.sent = outbox.keys
     return result

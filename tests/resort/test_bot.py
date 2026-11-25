@@ -671,7 +671,7 @@ def test_payment_link_failure_hands_off(world, monkeypatch):
     assert w.repo.list_bookings(phone=GUEST)[0].status == "failed"
     # the bot never pauses itself (owner, 2026-11-20): the guest's 'Hi' afterwards still gets an answer
     assert say(w, "Hi", GUEST, reply("Hi, how can I help?")) != "paused"
-    assert "Please contact the owner directly: 9497861924 / 9995855789." in " ".join(w.wa.texts())
+    assert "Please contact the team directly: 9497861924 / 9995855789." in " ".join(w.wa.texts())
 
 
 # --------------------------------------------------------------------------- languages and voice
@@ -808,7 +808,7 @@ def test_talk_to_owner_sends_the_owner_a_summary_and_the_bot_keeps_answering(wor
     w = world
     say(w, "I want to talk to the owner", GUEST, tool("talk_to_owner", reason="guest asked for the owner"),
         reply("[no reply]"))
-    assert w.wa.texts()[-1] == "Thank you. Please contact the owner directly: 9497861924 / 9995855789."  # never "will contact you"
+    assert w.wa.texts()[-1] == "Thank you. Please contact the team directly: 9497861924 / 9995855789."  # never "will contact you"
     staff = w.wa.texts(STAFF)[-1]
     assert staff.startswith("Guest needs the team: guest asked for the owner") and GUEST in staff
     assert not w.repo.is_paused(GUEST)[0]  # the bot never pauses itself (owner, 2026-11-20)
@@ -1985,7 +1985,7 @@ def test_every_hand_over_line_tells_the_guest_to_contact_the_owner_with_the_numb
         p.contact_numbers = []
         w.repo.save_property(p)
     text = w.bot._owner_msg("handoff", {"lang": "en", "form_place": w.p1.id})
-    assert text == "Thank you. Please contact the owner directly.", text
+    assert text == "Thank you. Please contact the team directly.", text
 
 
 def test_the_ai_is_told_to_hand_over_to_the_owner_when_too_many_things_are_asked(world):

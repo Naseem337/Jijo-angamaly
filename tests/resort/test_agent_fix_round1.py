@@ -170,8 +170,7 @@ def test_talk_to_owner_takes_only_the_six_reasons():
     assert list(OWNER_REASONS) == spec.parameters["properties"]["reason"]["enum"]
 
 
-@pytest.mark.parametrize("reason,key", [("pay_terms", "pay_terms"), ("cannot_answer", "handoff"),
-                                        ("call_request", "handoff"), ("change_or_cancel_paid", "handoff"),
+@pytest.mark.parametrize("reason,key", [("pay_terms", "pay_terms"), ("change_or_cancel_paid", "handoff"),
                                         ("other", "handoff")])
 def test_each_reason_sends_its_fixed_text_and_tells_the_team(world, reason, key):
     run(world, "update_enquiry", {"place": "Alleppey"})
@@ -179,6 +178,14 @@ def test_each_reason_sends_its_fixed_text_and_tells_the_team(world, reason, key)
     assert result["sent"] == [key, "staff:alert"]
     staff = next(i for i in box.sent if i.kind == "staff")
     assert "asks something" in staff.text and STAFF in staff.to
+    assert result["note"].startswith(ALREADY_SENT) and "Write NOTHING" in result["note"]
+
+
+@pytest.mark.parametrize("reason", ["cannot_answer", "call_request"])
+def test_cannot_answer_and_call_request_send_the_handoff_with_no_staff_alert(world, reason):  # fix round 2
+    run(world, "update_enquiry", {"place": "Alleppey"})
+    result, sent, box = run(world, "talk_to_owner", {"reason": reason, "staff_note": "asks something"})
+    assert result["sent"] == ["handoff"] and not [i for i in box.sent if i.kind == "staff"]
     assert result["note"].startswith(ALREADY_SENT) and "Write NOTHING" in result["note"]
 
 
@@ -229,10 +236,9 @@ def test_a_day_without_a_month_moves_with_nights_too(world):
 
 def test_a_past_date_with_its_month_given_is_told_as_past(world):
     late_month(world)
-    for extra in ({"month_given": True}, {}):
-        result, sent, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": "2026-11-20",
-                                                        "check_out": "2026-11-21", "adults": 2, **extra})
-        assert result["sent"] == ["past_date"], extra
+    result, sent, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": "2026-11-20",
+                                                    "check_out": "2026-11-21", "adults": 2, "month_given": True})
+    assert result["sent"] == ["past_date"]
 
 
 def test_a_day_february_does_not_have_skips_to_march(world):

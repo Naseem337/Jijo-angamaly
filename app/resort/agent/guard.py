@@ -12,6 +12,9 @@
        code's open step asks with the owner's words (turn.py)
     g) when a tool sent messages this turn, the AI's line is dropped if it has an amount, a link, a date, the words
        summary / payment / advance / link, or more than 25 words (it would repeat the tools' messages)
+    fix round 2 (sentences dropped from the AI's own line): the hold or the link's expiry explained; "sent / shared /
+       resent / passed your question / informed the team" when no sending tool ran; "How may I assist you" anywhere
+       but the first greeting (nothing left -> "Hi sir."); "owner" is said as "team"
 
 Regex here only reads the AI's own reply and code-made facts; nothing here decides what the GUEST meant (the guest's
 messages are only searched for the same numbers and dates the AI wrote).
@@ -61,6 +64,16 @@ DETAIL = re.compile(r"\b(?:(?:which|what|preferred)\s+(?:resort|place|location|p
                     r"(?:number|details)|whatsapp number)\b", re.IGNORECASE)
 TOOL_WORDS = re.compile(r"\b(?:summary|payment|advance|link)\b", re.IGNORECASE)
 REPEAT_MAX_WORDS = 25
+# fix round 2 (all read the AI's own reply only)
+GREETING_ASK = re.compile(r"\bhow (?:may|can|could) i (?:assist|help)(?: you)?\b", re.IGNORECASE)
+MID_CHAT_HI = "Hi sir."
+SENT_CLAIM = re.compile(r"\b(?:sent|re-?sent|shared|forwarded|passed (?:on )?(?:it|your|the|this)\b|passed it on|"
+                        r"informed the (?:owner|team|manager|staff))", re.IGNORECASE)
+HOLD_TALK = re.compile(r"\b(?:expir\w*|valid (?:for|till|until)|time limit|hold (?:is|will|ends|runs)|"
+                       r"held (?:for|until|till))", re.IGNORECASE)
+MINUTES = re.compile(r"\b\d+\s*(?:more\s+)?min(?:ute)?s?\b", re.IGNORECASE)
+LINK_WORDS = re.compile(r"\b(?:link|hold|held|open|pay\w*|block\w*|reserv\w*)\b", re.IGNORECASE)
+OWNER = re.compile(r"\b(?:the\s+)?owner(?:'s|s)?\b", re.IGNORECASE)
 
 
 @dataclass
@@ -158,7 +171,7 @@ def clean(reply: str, src: Sources) -> str:
         if i % 2:
             pieces.append(piece if piece.rstrip(".,!?)") in code else "")
             continue
-        piece = PROVIDER.sub("", BOOKING_ID.sub("", piece))
+        piece = team_not_owner(PROVIDER.sub("", BOOKING_ID.sub("", piece)))
         for name in src.names:
             piece = re.sub(rf",?[ \t]*\b{re.escape(name)}\b", "", piece, flags=re.IGNORECASE)
         pieces.append(piece)
@@ -206,16 +219,50 @@ def asks_details(sentence: str) -> bool:
     return bool(ASKING.search(sentence) and DETAIL.search(sentence))
 
 
-def drop_detail_asks(reply: str) -> str:
-    """f) Remove the AI's own sentences that ask for booking details: the code's open step asks with the owner's words.
-    '' when nothing is left."""
+def drop_sentences(reply: str, bad: Any) -> str:
+    """The AI's reply without its sentences for which bad(sentence) is true. '' when nothing is left."""
     lines = []
     for line in reply.split("\n"):
-        kept = [s for s in re.split(r"(?<=[.!?])\s+", line) if s.strip() and not asks_details(s)]
+        kept = [s for s in re.split(r"(?<=[.!?])\s+", line) if s.strip() and not bad(s)]
         if kept:
             lines.append(" ".join(kept))
     text = "\n".join(lines).strip()
     return text if re.search(r"[A-Za-z0-9]", text) else ""
+
+
+def drop_detail_asks(reply: str) -> str:
+    """f) Remove the AI's own sentences that ask for booking details: the code's open step asks with the owner's words.
+    '' when nothing is left."""
+    return drop_sentences(reply, asks_details)
+
+
+def drop_hold_talk(reply: str) -> str:
+    """Never explain the hold or when the link expires ('within 15 minutes', 'open for 10 more minutes', 'expired')."""
+    return drop_sentences(reply, lambda s: bool(HOLD_TALK.search(s) or (MINUTES.search(s) and LINK_WORDS.search(s))))
+
+
+def drop_false_sent(reply: str) -> str:
+    """No sending tool ran this turn: a sentence that says something was sent / shared / resent / passed on / the team
+    informed is not true and is dropped."""
+    return drop_sentences(reply, lambda s: bool(SENT_CLAIM.search(s)))
+
+
+def mid_chat_greeting(reply: str) -> str:
+    """'How may I assist you?' is only the first greeting of a conversation: anywhere else that sentence is dropped, and
+    a reply left empty by it becomes a short 'Hi sir.' (the code's open step follows)."""
+    if not GREETING_ASK.search(reply):
+        return reply
+    return drop_sentences(reply, lambda s: bool(GREETING_ASK.search(s))) or MID_CHAT_HI
+
+
+def team_not_owner(reply: str) -> str:
+    """With the guest it is always 'the team', never 'the owner'."""
+    def team(m: re.Match[str]) -> str:
+        said = m.group(0)
+        word = ("the " if said.lower().startswith("the") else "") + "team" + ("'s" if said.lower().endswith("'s") else "")
+        return word[:1].upper() + word[1:] if said[:1].isupper() else word
+
+    return OWNER.sub(team, reply)
 
 
 def repeats_tools(reply: str) -> bool:

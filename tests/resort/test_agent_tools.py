@@ -122,7 +122,8 @@ def test_nights_give_the_check_out(world):
 
 
 def test_a_date_that_just_passed_is_told_and_not_saved(world):
-    result, texts, _ = update(world, {"place": "Alleppey", "check_in": "2026-10-30", "check_out": "2026-11-01", "adults": 2})
+    result, texts, _ = update(world, {"place": "Alleppey", "check_in": "2026-10-30", "check_out": "2026-11-01", "adults": 2,
+                                   "month_given": True})
     assert result["sent"] == ["past_date"]
     assert texts["past_date"] == "30 Oct has already passed. Please send your check-in and check-out dates again."
     enq = Enquiry.load(world.repo, GUEST)
@@ -130,7 +131,7 @@ def test_a_date_that_just_passed_is_told_and_not_saved(world):
 
 
 def test_a_date_months_ago_means_the_next_time_it_comes(world):
-    result, _, _ = update(world, {"place": "Alleppey", "check_in": "2025-12-25", "nights": 2, "adults": 2})
+    result, _, _ = update(world, {"place": "Alleppey", "check_in": "2025-12-25", "nights": 2, "adults": 2, "month_given": True})
     assert (result["facts"]["check_in"], result["facts"]["check_out"]) == ("2026-12-25", "2026-12-27")
 
 

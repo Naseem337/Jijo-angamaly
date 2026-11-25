@@ -33,7 +33,7 @@ def test_still_wrong_after_the_retry_sends_the_handoff_and_alerts_the_staff(worl
     w = world
     res, box = go(w, "is there a pool?", reply("A room is ₹5,000."), reply("A room is ₹6,000."), live=True)
     assert res.outcome == "handoff" and "ai" not in res.sent and res.sent[:2] == ["handoff", "staff:guard"]
-    assert "contact the owner directly" in w.wa.texts(GUEST)[-1]
+    assert "contact the team directly" in w.wa.texts(GUEST)[-1]
     assert not any("5,000" in x or "6,000" in x for x in w.wa.texts(GUEST))
     alert = w.wa.texts(STAFF)[-1]
     assert "failed its checks twice" in alert and "₹6,000" in alert and len(w.llm.calls) == 2

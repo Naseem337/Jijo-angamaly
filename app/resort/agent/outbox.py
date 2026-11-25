@@ -13,8 +13,10 @@ dropped when the same text already went out in this conversation (guard.py e); t
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -29,13 +31,31 @@ class Item:
     to: tuple[str, ...] = ()  # staff alerts: the numbers they go to
 
 
+EXACT_KEYS = ("guest_called",)  # owner texts sent word for word ('sir' is never taken out of them)
+NEAR_SAME = 0.9  # two texts this alike (after case and punctuation) are the same message
+
+
+def _norm(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9₹]+", text.lower()))
+
+
+def near_same(a: str, b: str) -> bool:
+    """The same message: equal after case / punctuation / spaces, or (both 20+ letters) at least 90% alike."""
+    x, y = _norm(a), _norm(b)
+    if not x or not y:
+        return False
+    return x == y or (min(len(x), len(y)) >= 20 and SequenceMatcher(None, x, y).ratio() >= NEAR_SAME)
+
+
 class Outbox:
     def __init__(self, phone: str, send_text: Callable[[str, str], object] | None = None,
                  send_photos: Callable[[str, list[str]], object] | None = None, *, dry_run: bool = False,
-                 send_staff: Callable[[str, str], object] | None = None) -> None:
+                 send_staff: Callable[[str, str], object] | None = None,
+                 send_exact: Callable[[str, str], object] | None = None) -> None:
         self.phone = phone
         self.dry_run = dry_run
         self._send_text, self._send_photos, self._send_staff = send_text, send_photos, send_staff
+        self._send_exact = send_exact
         self.queue: list[Item] = []
         self.sent: list[Item] = []  # what went out (dry run: what WOULD have gone out), in order
 
@@ -72,12 +92,35 @@ class Outbox:
         """The keys sent or queued this turn: the tool result's `sent` list."""
         return [i.key for i in (*self.sent, *self.queue)]
 
+    def dedupe(self) -> list[Item]:
+        """Never the same text twice in one turn (fix round 2): the AI's own line goes when it is (nearly) the same as a
+        tool's message; of two (nearly) equal tool messages only the first stays. Returns what was dropped."""
+        texts = [i for i in (*self.sent, *self.queue) if i.kind == "text"]
+        queued = {id(i) for i in self.queue}
+        gone: set[int] = set()
+        for n, item in enumerate(texts):
+            if id(item) not in queued:
+                continue  # already sent this turn: never taken back
+            if item.key == "ai":
+                others = [o for o in texts if o is not item and o.key != "ai"]
+            else:
+                others = [o for o in texts[:n] if o.key != "ai" and id(o) not in gone]
+            if any(near_same(item.text, o.text) for o in others):
+                gone.add(id(item))
+        dropped = [i for i in self.queue if id(i) in gone]
+        self.queue = [i for i in self.queue if id(i) not in gone]
+        if dropped:
+            log.info("Outbox: %d repeated text(s) dropped for %s", len(dropped), self.phone[-4:])
+        return dropped
+
     def flush(self) -> list[Item]:
         """Send the queue in order. A dry-run outbox only records. Returns what was sent (or would have been)."""
         done: list[Item] = []
         for item in self.queue:
             if not self.dry_run:
-                if item.kind == "text" and self._send_text is not None:
+                if item.kind == "text" and item.key in EXACT_KEYS and self._send_exact is not None:
+                    self._send_exact(self.phone, item.text)
+                elif item.kind == "text" and self._send_text is not None:
                     self._send_text(self.phone, item.text)
                 elif item.kind == "photos" and self._send_photos is not None:
                     self._send_photos(self.phone, list(item.refs))
@@ -97,4 +140,21 @@ def bot_outbox(bot: Any, phone: str, *, dry_run: bool = False) -> Outbox:
     """An outbox that sends through the BookingBot: texts and photos go to WhatsApp and are logged in the chat with the
     WhatsApp id WhatsApp returns, so a swipe-reply to a photo or a room label finds its room (bot._note_quote)."""
     return Outbox(phone, lambda to, text: bot._text(to, text, repeat_ok=True), lambda to, refs: bot._send_photos(to, refs),
-                  dry_run=dry_run, send_staff=lambda to, text: bot.wa.send_text(to, text))
+                  dry_run=dry_run, send_staff=lambda to, text: bot.wa.send_text(to, text),
+                  send_exact=lambda to, text: _send_exact(bot, to, text))
+
+
+def _send_exact(bot: Any, phone: str, text: str) -> bool:
+    """An owner text word for word: like bot._text (English letters only, no booking id, logged with its WhatsApp id) but
+    without taking 'sir' out (bot._ease_sir), because the owner's exact wording has it."""
+    from app.resort.chat import english_letters_only
+    from app.resort.flow import BOOKING_ID
+
+    text = BOOKING_ID.sub("", english_letters_only(text)).replace(" .", ".").strip()
+    try:
+        wamid = bot.wa.send_text(phone, text)
+    except Exception as exc:  # WhatsApp error or network failure: logged, never crashes the turn
+        log.error("Could not send to %s: %s", phone[-4:], exc)
+        return False
+    bot._log(phone, text, wamid=wamid if isinstance(wamid, str) else "")
+    return True
