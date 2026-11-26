@@ -47,6 +47,8 @@ class VoiceResult:
     problem: Problem | None = None
     duration_s: float | None = None
     detail: str = ""
+    language_code: str | None = None  # what speech-to-text detected (e.g. hi-IN), when it says
+    language_probability: float | None = None
 
 
 def is_unclear(t: Transcript) -> bool:
@@ -100,4 +102,6 @@ class VoiceIn:
         if (is_unclear(transcript) if self.strict else not transcript.text.strip()):
             return VoiceResult(problem="unclear", duration_s=duration,
                                detail=f"{transcript.text!r} p={transcript.language_probability}")
-        return VoiceResult(text=transcript.text.strip(), duration_s=duration)
+        return VoiceResult(text=transcript.text.strip(), duration_s=duration,
+                           language_code=getattr(transcript, "language_code", None),
+                           language_probability=getattr(transcript, "language_probability", None))

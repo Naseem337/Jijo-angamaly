@@ -54,9 +54,10 @@ def handle(bot: Any, msg: Any, *, dry_run: bool = False) -> str:
     lang = I18N_LANG[Enquiry.load(bot.repo, phone).language]
 
     text, source = (msg.text or "").strip(), "text"
+    voice_note = ""
     if msg.type == "audio":
         _mark_read(bot, msg)
-        text, why = _transcribe(bot, msg)
+        text, why, spoken = _transcribe(bot, msg)
         if not text:
             log.error("Voice note not understood for %s: %s", mask_phone(phone), why)
             bot.repo.add_chat(Chat(phone, "in", f"[voice note: not understood ({why})]", now, "voice"))
@@ -64,6 +65,7 @@ def handle(bot: Any, msg: Any, *, dry_run: bool = False) -> str:
             box.flush()
             return "voice_problem"
         source = "voice"
+        voice_note = _voice_note(bot, phone, msg, text, spoken)
     elif msg.type == "image":
         bot.repo.add_chat(Chat(phone, "in", f"[image] {text}".strip(), now, "text", msg.id))
         text = IMAGE_NOTE + (f": {text}" if text else "")
@@ -96,7 +98,8 @@ def handle(bot: Any, msg: Any, *, dry_run: bool = False) -> str:
         if cmd == "restart":
             return _restart(bot, phone, box)
         llm = bot._llm() if bot._llm else None
-        result = run_turn(bot, llm, phone, text, box, swipe=swipe_note(bot, phone, msg.context_id))
+        note = "\n".join(n for n in (voice_note, swipe_note(bot, phone, msg.context_id)) if n)
+        result = run_turn(bot, llm, phone, text, box, swipe=note)
         return result.outcome
 
 
@@ -127,11 +130,42 @@ def _mark_read(bot: Any, msg: Any) -> None:
         pass
 
 
-def _transcribe(bot: Any, msg: Any) -> tuple[str, str]:
-    """(text, '') or ('', why). The existing voice-in service, with one retry for a download / speech-to-text hiccup."""
+# the spoken language speech-to-text detected -> the reply language and the script its transcript should be in
+SPOKEN = {"hi": ("Hinglish", "ऀ", "ॿ"), "ml": ("Manglish", "ഀ", "ൿ"),
+          "ta": ("Tanglish", "஀", "௿"), "en": ("English", "", "")}
+SCRIPTS = {"Hindi": ("ऀ", "ॿ"), "Malayalam": ("ഀ", "ൿ"), "Tamil": ("஀", "௿")}
+
+
+def _voice_note(bot: Any, phone: str, msg: Any, text: str, spoken: tuple[str, float | None]) -> str:
+    """Owner, 2026-11-26: the language speech-to-text detected is saved with the message and told to the AI; the reply
+    is in that spoken language (English letters). A transcript in another script than the detected language is
+    logged and flagged (Sarvam once wrote a Hindi note in Malayalam letters)."""
+    code, prob = spoken
+    if not code:
+        return ""
+    st = bot.repo.get_state(phone)
+    st["voice_langs"] = (list(st.get("voice_langs") or []) + [{"wamid": msg.id, "lang": code, "p": prob}])[-20:]
+    bot.repo.set_state(phone, st)
+    base = code.split("-")[0].lower()
+    note = f"[voice note, detected language: {code}]"
+    if base in SPOKEN:
+        note += f" Reply in {SPOKEN[base][0]} (English letters), pass that language."
+        _, lo, hi = SPOKEN[base]
+        found = [name for name, (a, b) in SCRIPTS.items() if any(a <= ch <= b for ch in text)]
+        wrong = [f for f in found if not (lo and SCRIPTS[f][0] == lo)]
+        if wrong:
+            log.warning("Voice note for %s: detected %s but the transcript is in %s script", mask_phone(phone), code,
+                        "/".join(wrong))
+            note += " The transcript may be in the wrong script; read it phonetically."
+    return note
+
+
+def _transcribe(bot: Any, msg: Any) -> tuple[str, str, tuple[str, float | None]]:
+    """(text, '', (detected language, probability)) or ('', why, ('', None)). The existing voice-in service, with one
+    retry for a download / speech-to-text hiccup. Sarvam auto-detects the language (language_code 'unknown')."""
     voice = bot._voice_in()
     if voice is None:
-        return "", "voice notes are switched off (no speech-to-text key)"
+        return "", "voice notes are switched off (no speech-to-text key)", ("", None)
     why = ""
     for _ in range(2):
         try:
@@ -140,12 +174,13 @@ def _transcribe(bot: Any, msg: Any) -> tuple[str, str]:
             why = f"crash: {type(exc).__name__}: {str(exc)[:120]}"
             continue
         if (result.text or "").strip():
-            return result.text.strip(), ""
+            return result.text.strip(), "", (str(getattr(result, "language_code", "") or ""),
+                                             getattr(result, "language_probability", None))
         problem = getattr(result, "problem", None)
         why = f"{problem or 'empty'}: {(getattr(result, 'detail', '') or '')[:120]}".strip(": ")
         if problem == "too_long":
             break  # the same audio gives the same answer: no retry (an empty transcript is tried twice, 2026-11-26)
-    return "", why
+    return "", why, ("", None)
 
 
 def _opt(bot: Any, phone: str, cmd: str, box: Outbox, lang: str) -> str:
