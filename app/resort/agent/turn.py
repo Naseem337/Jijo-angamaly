@@ -36,7 +36,7 @@ from app.resort.agent import usage
 from app.resort.agent.outbox import Outbox, near_same
 from app.resort.agent.prompt import build_system_prompt
 from app.resort.agent.state import Enquiry
-from app.resort.agent.tools import I18N_LANG, TOOL_SCHEMAS, AgentTools
+from app.resort.agent.tools import I18N_LANG, TOOL_SCHEMAS, AgentTools, towns_or
 from app.resort.chat import RESTART_MARK
 from app.resort.i18n import t
 
@@ -279,6 +279,22 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             outbox.text("ai", part)
         result.reply = (result.reply + "\n" + reply).strip()
 
+    def refused(reasons: list[str]) -> dict[str, Any]:
+        """Owner, 2026-11-27 (safety): the guards left nothing worth sending. The AI gets ONE more try with the
+        reasons; after that the open step (or the big-group message) goes, never 'say that again'."""
+        if not repeats:
+            repeats.append("; ".join(reasons))
+            log.info("Agent: reply for %s removed (%s); the AI answers again", phone[-4:], "; ".join(reasons))
+            return {"ok": False, "facts": {"problem": reasons},
+                    "note": f"Your reply was removed because: {'; '.join(reasons)}. Answer the guest's last message "
+                            "again without that."}
+        line = fallback_line(bot, phone, tools, I18N_LANG[words.now])
+        log.warning("Agent fallback for %s: '%s' (removed twice: %s | %s)", phone[-4:], line[:80], repeats[0],
+                    "; ".join(reasons))
+        result.outcome = "fallback"
+        outbox.text("fallback", line)
+        return {"ok": True, "facts": {"sent_to_guest": True}, "note": "A short answer went. Do not call reply() again."}
+
     def do_reply(args: dict[str, Any]) -> dict[str, Any]:
         """reply(text): the guest's message, through the guards (a, b: one retry; c: stripped)."""
         if tools.code_final:  # code already sent the owner's complete answer (big group): the AI adds nothing
@@ -287,46 +303,40 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         if tools.lang is not None:
             tools.lang.take(args.get("language"))  # the reply's language is this turn's language
         src = sources()
-        reply = guard.clean(str(args.get("text") or "").strip(), src)
+        raw = str(args.get("text") or "").strip()
+        reply = guard.clean(raw, src)
+        removed: list[str] = []  # owner, 2026-11-27: every removal is logged with its reason
+        if reply != raw:
+            removed.append("internal words, a link, a booking id or a pay ask that does not fit were taken out")
         # a line code already sent this turn (the availability line, the rooms sentence ...) is never written again
         code_lines = [ln for i in outbox.queue + outbox.sent if i.kind == "text" and i.key != "ai"
                       for ln in i.text.split("\n") if ln.strip()]
         if code_lines and reply:
             kept = "\n".join(ln for ln in reply.split("\n")
                              if not (ln.strip() and any(near_same(ln, c) for c in code_lines))).strip()
-            if not kept:
-                return {"ok": False, "facts": {"problem": "every line repeats what code already sent"},
-                        "note": "Those lines already went. Call reply() with ONLY the next step (e.g. the extra-bed "
-                                "question or the name and mobile ask)."}
+            if kept != reply:
+                removed.append("lines repeated what code already sent this turn")
+            if not kept and outbox.spoke:  # code already answered this turn: nothing more is needed
+                log.info("Agent: reply for %s only repeated code's messages; nothing more sent", phone[-4:])
+                return {"ok": True, "facts": {"sent_to_guest": True}, "note": "Code's messages already answer it."}
             reply = kept
-        if not reply:
-            return {"ok": False, "facts": {"problem": "the text is empty"}, "note": "Call reply() with your answer."}
-        # owner, 2026-11-27: the team's numbers once. Given in the last 5 bot messages -> every sentence carrying them
-        # goes, unless the guest explicitly asked for the number / contact (the AI says so: guest_asked_contact)
+        # owner, 2026-11-27: the team's numbers may be in 2 of the bot's last 5 messages; a 3rd time only the NUMBERS
+        # are replaced (never the sentence); the guest asking for them (guest_asked_contact) always gets them
         tails = guard.team_tails(bot)
-        if not args.get("guest_asked_contact") and guard.numbers_given_recently(bot, phone, tails):
-            stripped = guard.strip_team_numbers(reply, tails)
-            if stripped != reply:
-                log.info("Agent: team numbers already given to %s; removed from the reply", phone[-4:])
-                if not stripped:
-                    repeats.append(reply)
-                    if len(repeats) > 1:
-                        stripped = "Okay 👍"
-                    else:
-                        return {"ok": False, "facts": {"problem": "the team's numbers were already given"},
-                                "note": "The team's numbers are in your last messages: never give them again unless "
-                                        "the guest explicitly asks for the number or how to contact (then "
-                                        "guest_asked_contact=true). Reply one short line in your own words ('ok' / "
-                                        "'thanks' → 'Okay 👍'; another discount ask → 'The price is fixed, sorry.')."}
-                reply = stripped
-        # owner, 2026-11-27: never a text identical to one of the bot's last 3 messages (the handoff line three times)
-        if any(near_same(reply, old) for old in pp.recent_texts(bot, phone, RECENT)):
-            repeats.append(reply)
-            if len(repeats) > 1:
-                return {"ok": False, "facts": {"problem": "the same text again"}, "note": "Nothing was sent."}
-            return {"ok": False, "facts": {"problem": "this exact text is among your last 3 messages"},
-                    "note": "Never send the same line again. Answer what the guest asked NOW in your own words; a price "
-                            "question → get_price (or the form it returns), never the team handoff."}
+        if reply and not args.get("guest_asked_contact") \
+                and guard.numbers_count_recent(bot, phone, tails) >= guard.NUMBERS_ALLOWED:
+            swapped = guard.replace_team_numbers(reply, tails)
+            if swapped != reply:
+                removed.append("the team's numbers were already given twice")
+                reply = swapped
+        # never a text identical to one of the bot's last 3 messages
+        if reply and any(near_same(reply, old) for old in pp.recent_texts(bot, phone, RECENT)):
+            removed.append("it repeats one of your last 3 messages word for word")
+            reply = ""
+        if removed:
+            log.info("Guard for %s: %s", phone[-4:], "; ".join(removed))
+        if not reply or (removed and LONE_ACK.fullmatch(reply.strip())):
+            return refused(removed or ["the reply was empty"])
         found = guard.problems(reply, src)
         if found and not result.retried:  # ONE retry with the reason
             result.retried, result.guard = True, result.guard + found
@@ -338,8 +348,8 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             result.guard = result.guard + found
             reply = guard.drop_bad(reply, src)
             log.info("Guard: removed flagged sentence(s) for %s: %s", phone[-4:], found)
-            if not reply:
-                return {"ok": False, "facts": {"problem": found}, "note": "Nothing was sent."}
+            if not reply or LONE_ACK.fullmatch(reply.strip()):
+                return refused(found)
         send(reply)
         return {"ok": True, "facts": {"sent_to_guest": True}, "note": "Sent. Do not call reply() again this turn."}
 
@@ -407,14 +417,18 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         _alert_ai_down(bot, outbox, phone, text, enq)
     outbox.dedupe()  # never the same (or nearly the same) text twice in one turn
     drop_recent(bot, phone, outbox, link_asked="send_payment_link" in tools.ran)
-    if failure is None and not outbox.spoke:  # truly empty twice: the one fixed fallback, logged with the reason
-        result.outcome = "say_again"
-        log.warning("Agent: 'say again' for %s: the AI sent nothing twice (notes: %s)", phone[-4:],
-                    " | ".join(result.notes)[:300] or "none")
+    if failure is None and not outbox.spoke:  # truly empty twice: a fallback, logged with the reason
         if SWIPE_MARK in swipe:  # a swipe-reply never gets 'say that again' (owner, 2026-11-26)
+            result.outcome = "say_again"
             outbox.text("say_again_short", WHICH_ROOM)
-        else:
+        elif unreadable(text):  # owner, 2026-11-27: 'say that again' ONLY for a message with nothing to read
+            result.outcome = "say_again"
             outbox.text("say_again_short", t("say_again_short", lang))
+        else:
+            result.outcome = "fallback"
+            outbox.text("fallback", fallback_line(bot, phone, tools, lang))
+        log.warning("Agent: %s for %s: the AI sent nothing twice (notes: %s)", result.outcome, phone[-4:],
+                    " | ".join(result.notes)[:300] or "none")
     outbox.flush()
     result.sent = outbox.keys
     usage.record(bot, phone, result, dry_run=outbox.dry_run)
@@ -534,10 +548,38 @@ def form_recent(bot: Any, phone: str, form: str) -> bool:
     return False
 
 
+def unreadable(text: str) -> bool:
+    """Nothing to read: empty, or no letter or digit in any script (random symbols)."""
+    return not any(ch.isalnum() for ch in (text or ""))
+
+
+def fallback_line(bot: Any, phone: str, tools: Any, lang: str) -> str:
+    """What goes when the AI's answer could not be used twice: the big-group message again (this enquiry), else the
+    open step of the enquiry, else the greeting's question. Never 'say that again'."""
+    enq = Enquiry.load(bot.repo, phone)
+    prop = bot.repo.get_property(enq.place) if enq.place else None
+    rec = tools._big_group()
+    if prop is not None and rec and enq.check_in and (rec.get("prop"), rec.get("ci"), rec.get("co")) == (
+            prop.id, enq.check_in.isoformat(), enq.check_out.isoformat() if enq.check_out else None):
+        return t("group_too_big", lang, free_rooms=rec["free"], max_people=rec["most"], numbers=tools._numbers(prop))
+    step = enq.next_step
+    if step == "ask_location":
+        return t("ask_location", lang, towns=towns_or(bot))
+    if step == "ask_details":
+        return t("form", lang)
+    if step == "ask_extra_bed":
+        return "Do you need an extra bed?"
+    if step == "ask_contact":
+        return t("ask_contact", lang)
+    if step == "pay":
+        return t("pay_nudge", lang)
+    return "How may I assist you?"
+
+
 RECENT = 3  # a TOOL text (nearly) the same as one of our last 3 messages is dropped (room labels, glimpse ...)
 LINK_KEYS = ("pay", "hold_pay")
 # the AI's reply, an outage notice, the last fallback and the big-group answer (the AI adds nothing to it) always go
-ALWAYS = ("ai", "ai_down", "say_again_short", "group_too_big")
+ALWAYS = ("ai", "ai_down", "say_again_short", "group_too_big", "fallback")
 
 
 def drop_recent(bot: Any, phone: str, outbox: Outbox, *, link_asked: bool = False) -> list[Any]:

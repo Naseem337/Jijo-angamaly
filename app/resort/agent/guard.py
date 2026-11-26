@@ -202,6 +202,22 @@ def numbers_given_recently(bot: Any, phone: str, tails: set[str]) -> bool:
     return bool(tails) and any(has_team_number(t, tails) for t in pp.recent_texts(bot, phone, NUMBERS_WINDOW))
 
 
+NUMBERS_ALLOWED = 2  # owner, 2026-11-27: the numbers may be in 2 of the last 5 bot messages; a 3rd time they go
+NUM_RUN = re.compile(r"\+?\d[\d \-]{8,}\d(?:\s*(?:/|,|and|or)\s*\+?\d[\d \-]{8,}\d)*")
+
+
+def numbers_count_recent(bot: Any, phone: str, tails: set[str]) -> int:
+    """In how many of the bot's last NUMBERS_WINDOW messages the team's numbers were given."""
+    from app.resort.agent import photos_plan as pp
+    return sum(1 for t in pp.recent_texts(bot, phone, NUMBERS_WINDOW) if has_team_number(t, tails)) if tails else 0
+
+
+def replace_team_numbers(reply: str, tails: set[str]) -> str:
+    """Only the numbers part goes (never the sentence): 'call 98470 11111 / 98470 22222' -> 'call the number shared
+    above'."""
+    return NUM_RUN.sub(lambda m: "the number shared above" if has_team_number(m.group(0), tails) else m.group(0), reply)
+
+
 def strip_team_numbers(reply: str, tails: set[str]) -> str:
     """The reply without the sentences that carry a team number."""
     lines = []

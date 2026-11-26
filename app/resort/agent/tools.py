@@ -981,15 +981,18 @@ class AgentTools:
             facts_big = {"available": False, "group_too_big": True, "free_rooms": free_n, "max_people": most}
             if self._big_group().get("key") == key:
                 # owner, 2026-11-27: the message goes ONCE per enquiry; after that the AI answers in its own words
-                return done(True, {**facts_big, "group_message_already_sent": True, "numbers": self._numbers(prop)},
+                return done(True, {**facts_big, "adults": adults, "group_message_already_sent": True,
+                                   "numbers": self._numbers(prop)},
                             "The owner's message about the free rooms already went, with the question 'Do you want to "
                             "book the available {free_rooms} rooms for {max_people} people?': never send either again. "
                             "Only an explicit yes to that question or an explicit request ('book the available rooms', "
                             "'book those 4 rooms') → update_enquiry with accept_free_rooms=true (and rooms if they said a "
                             "number). 'ok' / 'fine' / 'hmm' / 'thanks' are NOT a yes: a short reply only, no booking. "
-                            "'No' → ask briefly what they'd like (other dates, fewer people, or call the team). Answer "
-                            "anything else short, in your own words; no link, no pay ask; the team numbers in one short "
-                            "line only if they ask.")
+                            "'No' → ask briefly what they'd like (other dates, fewer people, or call the team). The "
+                            "guest asks again for rooms / the whole group → answer in your own words with these "
+                            "numbers, e.g. 'For {adults} people we can offer {free_rooms} rooms (up to {max_people} "
+                            "people). Do you want to book those, or talk to the team for more?' Never a bare team "
+                            "handoff, never 'Okay 👍' to a question; no link, no pay ask.")
             self._save_big_group({"key": key, "prop": prop.id, "ci": ci.isoformat(), "co": co.isoformat(),
                                   "adults": adults, "free": free_n, "most": most, "asked": True})
             self.out.text("group_too_big", t("group_too_big", lang, free_rooms=free_n, max_people=most,
@@ -1902,7 +1905,7 @@ class AgentTools:
                                                                else OWNER_REASONS[reason])
         self._staff(staff_line, prop.id if prop else None, lang)
         from app.resort.agent import guard
-        if guard.numbers_given_recently(bot, self.phone, guard.team_tails(bot)):
+        if guard.numbers_count_recent(bot, self.phone, guard.team_tails(bot)) >= guard.NUMBERS_ALLOWED:
             return self._result(True, {"team_told": True, "reason": reason, "numbers_already_given": True}, start, enq,
                                 "The team's numbers are already in your last messages: never give them again. Reply "
                                 "one short line without them (another discount ask → 'The price is fixed, sorry.').")
