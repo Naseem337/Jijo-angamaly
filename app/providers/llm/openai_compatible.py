@@ -119,6 +119,7 @@ class OpenAICompatibleLLM:
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 1024,
         temperature: float | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
         body: dict[str, Any] = {
             "model": self.model,
@@ -134,6 +135,8 @@ class OpenAICompatibleLLM:
                  "function": {"name": t.name, "description": t.description, "parameters": t.parameters}}
                 for t in tools
             ]
+            if tool_choice == "required":  # the model must call a tool
+                body["tool_choice"] = "required"
         try:
             resp = self._http.post(self._url, json=body, headers=self._headers)
         except httpx.HTTPError as exc:

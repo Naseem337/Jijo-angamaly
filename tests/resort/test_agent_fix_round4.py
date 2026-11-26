@@ -29,8 +29,7 @@ def test_choosing_a_room_sends_room_picked_and_the_new_rooms_sentence(world):
     call(world, "update_enquiry", STAY, said="Alleppey 10 to 12 nov 2 adults")
     result, sent, _ = call(world, "update_enquiry", {**STAY, "room_picks": [{"room_type": "Family Suite"}]},
                            said="family suite venam")
-    assert result["sent"][:2] == ["room_picked", "rooms_plain"] and result["sent"][-1] == "ask_contact"
-    assert sent["room_picked"] == "Sure, Family Suite is free for your dates."
+    assert result["facts"]["room_picked"] == "Family Suite" and result["next_step"] == "ask_contact"
     assert result["facts"]["rooms_offered"] == "1 Family Suite"
 
 
@@ -38,7 +37,7 @@ def test_choosing_a_room_by_its_number_picks_its_room_type(world):
     numbered(world, world.family, ["201", "202"])
     call(world, "update_enquiry", STAY, said="Alleppey 10 to 12 nov 2 adults")
     result, _, _ = call(world, "update_enquiry", {**STAY, "room_picks": [{"room_number": "202"}]}, said="room 202")
-    assert "room_picked" in result["sent"] and result["facts"]["rooms_offered"] == "1 Family Suite"
+    assert result["facts"]["room_picked"] == "Family Suite" and result["facts"]["rooms_offered"] == "1 Family Suite"
 
 
 def test_choosing_a_room_after_the_link_closes_it_then_new_summary_and_link(world):
@@ -47,7 +46,7 @@ def test_choosing_a_room_after_the_link_closes_it_then_new_summary_and_link(worl
     world.clock.advance(minutes=1)
     result, sent, _ = call(world, "update_enquiry", {**STAY, "room_picks": [{"room_type": "Family Suite"}]},
                            said="change to family suite", live=True)
-    assert result["sent"] == ["room_picked", "rooms_plain", "summary", "pay"]
+    assert result["sent"] == ["summary", "pay"] and result["facts"]["room_picked"] == "Family Suite"
     assert world.repo.get_booking(old.id).status != "hold"  # the old link is closed
     new = world.repo.list_bookings(phone=GUEST, status="hold", limit=1)[0]
     assert new.id != old.id and new.room_type_id == world.family.id
@@ -59,7 +58,7 @@ def test_the_code_picking_by_priority_never_sends_room_picked(world):
 
 
 def test_the_prompt_and_room_picks_say_what_choosing_is():
-    assert "Only a clear CHOICE ('take X', 'change to X', 'X venam', 'book X', 'room 103', a\n  swipe-reply" in SYSTEM
+    assert "a room choice → update_enquiry" in SYSTEM
     desc = spec("update_enquiry").parameters["properties"]["room_picks"]["description"]
     assert "'book X', 'room 103'" in desc and "send_photos, never room_picks" in desc
 
@@ -68,8 +67,7 @@ def test_the_prompt_and_room_picks_say_what_choosing_is():
 
 
 def test_the_photo_rule_is_in_the_prompt_and_the_tool():
-    assert "Guest asks to see rooms or the resort in any words (pics?, how does it look, photo undo?) → call send_photos" \
-        in SYSTEM and PHOTO_RULE in SYSTEM
+    assert "Photos → send_photos, any stage" in SYSTEM
     assert PHOTO_RULE in spec("send_photos").description and "after payment" in spec("send_photos").description
 
 
@@ -125,8 +123,7 @@ def test_a_recent_past_date_sends_past_date_with_the_owners_words(world):
     result, sent, _ = call(world, "update_enquiry", {"place": "Alleppey", "check_in": {"day": 20, "month": 11},
                                                      "check_out": {"day": 22, "month": 11}, "adults": 2},
                            said="Alleppey 20 Nov to 22 Nov, 2 adults")
-    assert result["sent"] == ["past_date"]
-    assert sent["past_date"] == "20 Nov has already passed. Please send your check-in and check-out dates again."
+    assert result["sent"] == [] and result["facts"]["problem"] == "the check-in date 20 Nov has passed"
     assert Enquiry.load(world.repo, GUEST).check_in is None
 
 
@@ -152,8 +149,9 @@ def test_the_new_eval_checks(monkeypatch):
     assert ev.check_turn({"max_words": 3}, "answered", [], [], [], "") == []
     assert ev.check_turn({"ai_empty": True}, "answered", [], [], [], "Done.")
     assert ev.check_turn({"ai_required": True}, "answered", [], [], [], "")
-    assert ev.check_turn({"only_sent": ["handoff"]}, "answered", [], ["handoff", "staff:alert"], []) == []
-    assert ev.check_turn({"only_sent": ["handoff"]}, "answered", [], ["ai", "handoff"], [])
+    # an owner text is now the AI's reply: only_sent [handoff] = only the AI's line (staff alerts aside)
+    assert ev.check_turn({"only_sent": ["handoff"]}, "answered", [], ["ai", "staff:alert"], []) == []
+    assert ev.check_turn({"only_sent": ["handoff"]}, "answered", [], ["ai", "map"], [])
     assert ev.check_turn({"no_duplicates": True}, "answered", [], [], ["Yes, secure.", "yes secure"])
 
 

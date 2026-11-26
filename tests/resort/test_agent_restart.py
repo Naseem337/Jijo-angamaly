@@ -8,7 +8,7 @@ import pytest
 from test_agent_fix_round5 import book_live
 from test_agent_gate import agent, m, send  # noqa: F401  (agent is a fixture)
 from test_agent_turn import ASK, STAY, go
-from test_bot import GUEST, reply, tool, world  # noqa: F401  (world is a fixture)
+from test_bot import GUEST, answer, reply, tool, world  # noqa: F401  (world is a fixture)
 
 from app.providers.llm.base import CACHE_SPLIT
 from app.resort.agent import conversation
@@ -87,7 +87,7 @@ def test_the_ai_sees_nothing_from_before_the_restart(agent):
     w = agent
     book_live(w)
     restart(w)
-    send(w, m("is there a pool?"), reply("Yes, there is a pool."))
+    send(w, m("is there a pool?"), answer("Yes, there is a pool."))
     call = w.llm.calls[-1]
     seen = " ".join(str(x.content) for x in call.messages)
     assert ASK not in seen and "Asha" not in seen and "[earlier result]" not in seen
@@ -110,7 +110,7 @@ def test_guest_records_keep_only_confirmed_bookings_after_restart(agent):
     go(w, "Asha, same number", tool("create_booking", guest_name="Asha", mobile="same"), reply(""), live=True)
     assert live_link(w.bot, GUEST) is not None  # a second, unpaid enquiry
     restart(w)
-    send(w, m("my booking?"), reply("You have a confirmed booking."))
+    send(w, m("my booking?"), answer("You have a confirmed booking."))
     part = dynamic(w.llm.calls[-1])
     assert "2026-11-10 to 2026-11-12" in part and "2026-11-20" not in part
 
@@ -176,5 +176,5 @@ def test_reset_all_deletes_this_testers_bookings_and_memory(agent):
 def test_reset_all_is_a_normal_message_for_non_testers(agent):
     w = agent  # no AGENT_TEST_PHONES: everyone is answered, nobody is a listed tester
     book_live(w)
-    assert send(w, m("reset all"), reply("Sorry?")) != "reset_all"
+    assert send(w, m("reset all"), answer("Sorry?")) != "reset_all"
     assert w.repo.list_bookings(phone=GUEST) != []

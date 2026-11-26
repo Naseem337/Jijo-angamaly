@@ -12,6 +12,17 @@ Put this file in the repo as `docs/AI_AGENT_DESIGN.md`. Claude in VS Code builds
 - Code owns: availability, prices, totals, advance, links, payment status, the owner's exact texts, the photo order.
 - When the agent fails on a message, fix it with (a) a general prompt rule, (b) a better tool description, or (c) a better tool result. Never a special case for one sentence. Every fix adds an eval scenario.
 
+### 0.1 AI-first simplification (2026-11-26): this overrides sections 3, 4 and 6 where they differ
+
+The live chat showed real answers replaced by "Sorry, could you say that again?" and the AI's reasoning sent to the guest. So:
+
+- **reply(text, language)** is the only way the AI writes to the guest. Any other text it writes is a private note (logged, never sent). A round with a successful reply() ends the turn. No reply and nothing sent → the AI is asked once more ("Call reply() …"); empty twice → "Sorry, could you say that again?" (logged).
+- **Tools return facts only.** Code still sends exactly: the booking summary, the payment link message, the paid confirmation, photos, room labels, the glimpse and the map link. Everything else (greeting, location question, form, rooms available, name ask, extra-bed question, not ours / closed, past date, payment not received, handoff, cash terms, "guest called") is written by the AI in the owner's wording from the prompt's OWNER'S WORDS. The greet and repeat_step tools are gone. talk_to_owner only alerts the team (staff_note) and sends the guest nothing.
+- **Guard (guard.py), only:** a) a ₹ amount must appear in a tool result, FACTS or the guest's messages anywhere in this conversation; b) no booked / confirmed / reserved before payment; a) and b) get one retry, then only the offending sentence is removed; c) the payment provider's name, booking ids and links no tool gave are stripped. A non-empty answer is never replaced by a fallback.
+- **Removed:** the open-step appender, the "Sure." / [ack] logic, the length limit, the banned-phrase list, fix_style, the booking-talk check, the repeats-tools drop, the sent-claim check, drop_recent for the AI's text.
+- **Old reminder:** with AGENT_MODE=agent, web.py's sweep skips the old flow's "still open for N more minutes" reminder; payment confirmation and hold release keep running.
+- The prompt is under 60 lines with 5 example chats (prompt.py).
+
 ---
 
 ## 1. Architecture

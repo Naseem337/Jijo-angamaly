@@ -7,7 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from test_agent_photos import pw  # noqa: F401  (fixture: the test resort with a glimpse and photos)
-from test_bot import GUEST, STAFF, reply, tool, world  # noqa: F401  (world is a fixture)
+from test_bot import GUEST, STAFF, answer, reply, tool, world  # noqa: F401  (world is a fixture)
 
 from app.providers.llm import LLMError, LLMResponse, ToolCall
 from app.resort.agent import prompt as prompt_module
@@ -52,30 +52,30 @@ def texts(box):
 
 def test_a_tool_call_is_run_its_result_is_fed_back_and_the_final_text_is_the_answer(world):
     w = world
-    res, box = go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), reply("Yes, there is a pool."))
-    assert res.outcome == "answered" and res.rounds == 1 and res.reply == "Yes, there is a pool."
-    assert [c["name"] for c in res.calls] == ["update_enquiry"] and res.calls[0]["result"]["ok"]
-    assert len(w.llm.calls) == 2
+    res, box = go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), answer("Yes, there is a pool."))
+    assert res.outcome == "answered" and res.rounds == 2 and res.reply == "Yes, there is a pool."
+    assert [c["name"] for c in res.calls] == ["update_enquiry", "reply"] and res.calls[0]["result"]["ok"]
+    assert len(w.llm.calls) == 2  # the round with reply() ends the turn
     second = w.llm.calls[1].messages
     assert [m.role for m in second[-2:]] == ["assistant", "tool"]  # the AI's call, then what the tool answered
     assert second[-2].tool_calls[0].name == "update_enquiry" and second[-1].tool_call_id == second[-2].tool_calls[0].id
-    fed = json.loads(second[-1].content)
+    fed = res.calls[0]["result"]
     assert set(fed) == {"ok", "facts", "sent", "next_step", "note"} and fed["ok"] is True
-    assert fed["sent"] == ["rooms_ok", "rooms_plain", "room_label", "ask_contact"] and fed["next_step"] == "ask_contact"
+    assert fed["sent"] == ["room_label"] and fed["next_step"] == "ask_contact"
     assert not second[-1].is_error
 
 
 def test_a_failed_tool_result_is_fed_back_as_an_error(world):
     w = world
-    res, _ = go(w, "where is it?", tool("send_map"), reply("Which resort, sir?"))  # no resort known: it fails
-    assert w.llm.calls[1].messages[-1].is_error and json.loads(w.llm.calls[1].messages[-1].content)["ok"] is False
+    res, _ = go(w, "where is it?", tool("send_map"), answer("Which resort, sir?"))  # no resort known: it fails
+    assert w.llm.calls[1].messages[-1].is_error and res.calls[0]["result"]["ok"] is False
 
 
 def test_several_tool_calls_in_one_reply_all_run_in_order(world):
     w = world
     two = LLMResponse("", [ToolCall("a", "update_enquiry", STAY), ToolCall("b", "get_price", {})], "tool_calls")
-    res, box = go(w, ASK + " and the price", two, reply("There you go."))
-    assert [c["name"] for c in res.calls] == ["update_enquiry", "get_price"] and res.rounds == 1
+    res, box = go(w, ASK + " and the price", two, answer("There you go."))
+    assert [c["name"] for c in res.calls] == ["update_enquiry", "get_price", "reply"] and res.rounds == 2
     tool_msgs = [m for m in w.llm.calls[1].messages if m.role == "tool"]
     assert [m.tool_call_id for m in tool_msgs] == ["a", "b"]
 
@@ -83,51 +83,50 @@ def test_several_tool_calls_in_one_reply_all_run_in_order(world):
 def test_at_most_4_rounds_of_tool_calls_run(world):
     w = world
     script = [tool("send_map", call_id=f"c{i}") for i in range(MAX_ROUNDS + 1)]  # the AI never stops asking
-    res, box = go(w, "where is it?", *script)
+    res, box = go(w, "where is it?", *script, reply(""))
     assert MAX_ROUNDS == 4 and res.rounds == 4 and res.hit_limit
     assert len(res.calls) == 4 and w.llm.script == []  # the 5th reply's call is not run
-    assert len(w.llm.calls) == 6  # 5 + the never-silent second ask (live test 2026-11-25)
+    assert len(w.llm.calls) == 6  # 5 + the one 'call reply()' ask
     assert len([m for m in w.llm.calls[4].messages if m.role == "tool"]) == 4
-    assert res.outcome == "never_silent"  # nothing was said: the open step goes
+    assert res.outcome == "say_again"  # nothing was said twice: the one fixed fallback
 
 
 def test_a_bad_tool_call_from_the_ai_is_reported_back_and_never_crashes(world):
     w = world
     broken = LLMResponse("", [ToolCall("x", "update_enquiry", {}, arguments_error="arguments must be a JSON object")],
                          "tool_calls")
-    res, box = go(w, "hello", broken, tool("no_such_tool"), reply("Sorry, could you say it again?"))
-    assert res.outcome == "answered" and res.rounds == 2 and box.keys == ["ai"]
-    first, second = (json.loads(c["result"] and json.dumps(c["result"])) for c in res.calls)
+    res, box = go(w, "hello", broken, tool("no_such_tool"), answer("Sorry, could you say it again?"))
+    assert res.outcome == "answered" and res.rounds == 3 and box.keys == ["ai"]
+    first, second = (json.loads(c["result"] and json.dumps(c["result"])) for c in res.calls[:2])
     assert not first["ok"] and "JSON object" in first["facts"]["problem"] and not second["ok"]
 
 
 # --------------------------------------------------------------------------- the output order (design section 4)
 
 
-def test_the_ais_own_line_goes_first_then_the_tool_messages_in_order(world):
+def test_the_messages_go_in_the_order_they_were_made_tools_then_the_reply(world):
     w = world
-    res, box = go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), reply("Yes, there is a pool."))
-    assert res.sent == ["ai", "rooms_ok", "rooms_plain", "room_label", "ask_contact"]
-    assert [i.text for i in box.sent][0] == "Yes, there is a pool." and box.sent[1].text == "Yes, rooms are available for your dates."
+    res, box = go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), answer("Yes, there is a pool."))
+    assert res.sent == ["room_label", "ai"]
+    assert [i.text for i in box.sent] == ["*Deluxe*", "Yes, there is a pool."]
 
 
 def test_the_order_holds_when_it_goes_out_live(world):
     w = world
-    go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), reply("Yes, there is a pool."), live=True)
-    assert w.wa.texts(GUEST) == ["Yes, there is a pool.", "Yes, rooms are available for your dates.",
-                                 "For 2 persons: 1 room(s).", "*Deluxe*", "Please share your name and mobile number to proceed."]
+    go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), answer("Yes, there is a pool."), live=True)
+    assert w.wa.texts(GUEST) == ["*Deluxe*", "Yes, there is a pool."]
 
 
-def test_the_ais_line_comes_before_photos_too(pw):
+def test_the_reply_comes_after_the_photos(pw):
     w = pw
-    res, box = go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), reply("Yes, there is a pool."))
-    assert res.sent[0] == "ai" and res.sent[1:4] == ["rooms_ok", "rooms_plain", "glimpse"] and "photos:3" in res.sent
+    res, box = go(w, ASK + ", is there a pool?", tool("update_enquiry", **STAY), answer("Yes, there is a pool."))
+    assert res.sent[0] == "glimpse" and "photos:3" in res.sent and res.sent[-1] == "ai"
 
 
-def test_no_reply_marker_from_the_ai_is_not_sent(world):
+def test_final_text_after_a_tool_is_a_note_never_sent(world):
     w = world
     res, box = go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"))
-    assert res.reply == "" and res.sent == ["rooms_ok", "rooms_plain", "room_label", "ask_contact"]
+    assert res.reply == "" and res.sent == ["room_label"] and res.notes == ["[no reply]"]
 
 
 # --------------------------------------------------------------------------- never silent
@@ -135,11 +134,11 @@ def test_no_reply_marker_from_the_ai_is_not_sent(world):
 
 def test_nothing_sent_never_means_a_fixed_step_text(world):
     w = world
-    res, box = go(w, "hmm", reply("[no reply]"))  # nothing is open (live test 2026-11-25): never silent -> say again
-    assert res.outcome == "never_silent" and res.sent == ["say_again_short"]
+    res, box = go(w, "hmm", reply("[no reply]"), reply(""))  # nothing for the guest twice -> say again
+    assert res.outcome == "say_again" and res.sent == ["say_again_short"]
     Enquiry(place=w.p1.id).save(w.repo, GUEST)
-    again, box = go(w, "hmm", reply(""))
-    assert again.outcome == "never_silent" and again.sent == ["say_again_short"]
+    again, box = go(w, "hmm", reply(""), reply(""))
+    assert again.outcome == "say_again" and again.sent == ["say_again_short"]
 
 
 def test_nothing_sent_and_nothing_open_asks_to_say_it_again(world):
@@ -147,13 +146,13 @@ def test_nothing_sent_and_nothing_open_asks_to_say_it_again(world):
     from datetime import date
     Enquiry(place=w.p1.id, check_in=date(2026, 11, 10), check_out=date(2026, 11, 12), adults=2, booking_id="x",
             paid=True, checked={"available": True}).save(w.repo, GUEST)
-    res, box = go(w, "hmm", reply(""))
-    assert res.outcome == "never_silent" and res.sent == ["say_again_short"]
+    res, box = go(w, "hmm", reply(""), reply(""))
+    assert res.outcome == "say_again" and res.sent == ["say_again_short"]
     assert texts(box)["say_again_short"] == "Sorry, could you say that again?"
 
 
 def test_an_answer_alone_is_enough_no_extra_step(world):
-    res, box = go(world, "is there a pool?", reply("Yes, there is a pool."))
+    res, box = go(world, "is there a pool?", answer("Yes, there is a pool."))
     assert res.outcome == "answered" and res.sent == ["ai"]
 
 
@@ -195,7 +194,7 @@ def test_no_llm_at_all_is_ai_down(world):
 def test_the_llm_failing_after_a_tool_already_spoke_does_not_add_ai_down_text(world):
     w = world
     res, box = go(w, ASK, tool("update_enquiry", **STAY), LLMError("mock", "down"))
-    assert res.outcome == "ai_down" and res.sent == ["rooms_ok", "rooms_plain", "room_label", "staff:ai_down", "ask_contact"]
+    assert res.outcome == "ai_down" and res.sent == ["room_label", "staff:ai_down"]
 
 
 # --------------------------------------------------------------------------- what the AI sees
@@ -204,7 +203,7 @@ def test_the_llm_failing_after_a_tool_already_spoke_does_not_add_ai_down_text(wo
 def test_the_swipe_note_is_a_line_just_before_the_guest_message(world):
     w = world
     note = "[Guest swiped-replied to the photo of Room 108 — Beach View Standard]"
-    go(w, "this one venam", reply("Sure."), swipe=note)
+    go(w, "this one venam", answer("Sure."), swipe=note)
     last = w.llm.calls[0].messages[-1]
     assert last.role == "user" and last.content.splitlines()[-2:] == [note, "this one venam"]
 
@@ -212,13 +211,14 @@ def test_the_swipe_note_is_a_line_just_before_the_guest_message(world):
 def test_the_swipe_note_goes_only_on_the_latest_of_several_messages(world):
     w = world
     w.repo.add_chat(ChatMessage(GUEST, "in", "rooms for 4", w.clock.now(), "text"))
-    go(w, "this one venam", reply("Sure."), swipe="[NOTE]")
+    go(w, "this one venam", answer("Sure."), swipe="[NOTE]")
     assert w.llm.calls[0].messages[-1].content == "rooms for 4\n[NOTE]\nthis one venam"
 
 
 def test_swipe_note_finds_the_room_of_a_photo_a_label_and_other_messages(pw):
     w = pw
-    go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
+    go(w, ASK, tool("update_enquiry", **STAY), answer("Please share your name and mobile number to proceed."),
+       live=True)
     rows = w.repo.list_chat(GUEST, limit=300)
     photo = next(m for m in rows if m.text == f"[photo] {w.refs['deluxe'][0]}")
     assert swipe_note(w.bot, GUEST, photo.wamid) == "[Guest swiped-replied to the photo of Deluxe]"
@@ -229,15 +229,15 @@ def test_swipe_note_finds_the_room_of_a_photo_a_label_and_other_messages(pw):
 
 def test_the_prompt_has_no_rupee_amount_and_all_its_blocks(world):
     w = world
-    go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"))
-    go(w, "ok", reply("Fine."))  # a second turn: the checked stay is now in CURRENT ENQUIRY
+    go(w, ASK, tool("update_enquiry", **STAY), reply(""))
+    go(w, "ok", answer("Fine."))  # a second turn: the checked stay is now in CURRENT ENQUIRY
     for call in w.llm.calls:
         system = call.system
         assert "₹" not in system and "Rs " not in system and "rupee" not in system.lower()
         for amount in ("4000", "4,000", "8000", "8,000", "9500"):
             assert amount not in system
         assert "Resort Booking Assistant" in system and "{brand}" not in system
-        for block in ("TRUTH", "BOOKING", "HOW YOU TALK", "OWNER RULES", "TODAY\nToday is Mon 2 Nov 2026 (2026-11-02)", "FACTS\n",
+        for block in ("TRUTH", "BOOKING FLOW", "TONE", "OWNER'S WORDS", "EXAMPLES", "TODAY\nToday is Mon 2 Nov 2026 (2026-11-02)", "FACTS\n",
                       "GUEST RECORDS", "CURRENT ENQUIRY"):
             assert block in system, block
     last = w.llm.calls[-1].system
@@ -247,19 +247,19 @@ def test_the_prompt_has_no_rupee_amount_and_all_its_blocks(world):
 
 def test_the_owner_rules_are_in_the_prompt(world):
     w = world
-    go(w, "hi", reply("Hi, How may I assist you?"))
+    go(w, "hi", answer("Hi, How may I assist you?"))
     system = w.llm.calls[0].system
-    for line in ("FIRST time the guest asks for a lower price", 'SECOND time, talk_to_owner(reason="other")', "3 or more separate questions",
-                 "state only the charge in if_cancelled_today", "wants a NEW booking", "Please bring your ID proof while coming."):
+    for line in ("Discount: first ask", "second ask → talk_to_owner(other)", "state only if_cancelled_today",
+                 "a NEW booking", "Please bring your ID proof while coming."):
         assert line in system, line
 
 
 def test_every_call_offers_the_13_tools_at_low_temperature(world):
     w = world
-    go(w, ASK, tool("update_enquiry", **STAY), reply("Done."))
+    go(w, ASK, tool("update_enquiry", **STAY), answer("Done."))
     assert len(w.llm.calls) == 2
     for call in w.llm.calls:
-        assert call.tools == TOOL_SCHEMAS and len(call.tools) == 14
+        assert call.tools == TOOL_SCHEMAS and len(call.tools) == 13
         assert call.temperature == 0.2 and call.max_tokens == 300
 
 
@@ -290,7 +290,7 @@ def test_the_ai_sees_the_last_12_real_messages_ending_with_the_new_one(world):
     w = world
     for i in range(30):
         say(w, "in" if i % 2 == 0 else "out", f"message {i}", 100 - i)
-    go(w, "the new one", reply("ok"))
+    go(w, "the new one", answer("ok"))
     messages = w.llm.calls[0].messages
     assert messages[0].role == "user" and messages[-1].content.endswith("the new one")
     lines = [ln for m in messages for ln in m.content.splitlines()]
@@ -300,8 +300,8 @@ def test_the_ai_sees_the_last_12_real_messages_ending_with_the_new_one(world):
 
 def test_the_new_message_is_added_once_whether_or_not_it_was_stored(world):
     w = world
-    go(w, "stored one", reply("ok"))
-    go(w, "not stored", reply("ok"), save=False)
+    go(w, "stored one", answer("ok"))
+    go(w, "not stored", answer("ok"), save=False)
     first, second = w.llm.calls
     assert first.messages[-1].content.count("stored one") == 1
     assert second.messages[-1].content.endswith("not stored") and second.messages[-1].content.count("not stored") == 1
@@ -319,7 +319,7 @@ def test_photos_are_one_note_and_links_and_log_lines_never_reach_the_ai(world):
     say(w, "in", "[image]", 26)
     say(w, "out", "[template pending] hello", 25)
     say(w, "in", "hi", 23)
-    go(w, "price?", reply("ok"))
+    go(w, "price?", answer("ok"))
     blob = "\n".join(m.content for m in w.llm.calls[0].messages)
     assert "[photos sent: 3]" in blob and "/resort/media/" not in blob
     assert "rzp.io" not in blob and "http" not in blob and "[link]" in blob
@@ -332,7 +332,7 @@ def test_a_24_hour_gap_starts_a_new_conversation(world):
     say(w, "in", "old question about cottages", 60 * 24 * 3)
     say(w, "out", "old answer", 60 * 24 * 3 - 1)
     say(w, "in", "recent hello", 5)
-    go(w, "price?", reply("ok"))
+    go(w, "price?", answer("ok"))
     blob = "\n".join(m.content for m in w.llm.calls[0].messages)
     assert "recent hello" in blob and "old question" not in blob and "old answer" not in blob
 
@@ -345,5 +345,5 @@ def test_a_full_dry_run_turn_through_the_loop_makes_zero_whatsapp_calls(pw):
     spy = Spy()
     w.bot.wa = spy
     res, box = go(w, ASK + ", photos?", tool("update_enquiry", **STAY), tool("send_photos", kind="all_rooms"),
-                  reply("Here you are."))
-    assert res.sent[0] == "ai" and any(k.startswith("photos:") for k in res.sent) and spy.calls == []
+                  answer("Here you are."))
+    assert res.sent[-1] == "ai" and any(k.startswith("photos:") for k in res.sent) and spy.calls == []

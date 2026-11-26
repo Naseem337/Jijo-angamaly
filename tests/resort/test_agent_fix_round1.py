@@ -32,72 +32,6 @@ def one_resort(w):
 # --------------------------------------------------------------------------- 1. the open step comes from code
 
 
-def test_a_wish_to_book_with_no_details_gets_the_owners_location_question(world):
-    res, box = go(world, "I need a room", tool("update_enquiry"), reply("[no reply]"))
-    assert res.sent == ["ask_location"] and texts(box)["ask_location"].startswith("Sure, Kindly confirm the Location")
-
-
-def test_the_ais_own_question_for_the_place_is_booking_talk_and_never_the_owner_text_again(world):
-    # fix round 5: asking which place is booking talk -> one retry, still no update_enquiry -> dropped; AI-first
-    # rebalance (2026-11-25): the fallback is the AI once more, then 'say that again', never a re-sent owner text
-    res, box = go(world, "I need a room", reply("Sure! Which resort or place are you looking for?"),
-                  reply("Sure! Which resort or place are you looking for?"))
-    assert res.retried and res.sent == ["say_again_short"]
-
-
-def test_the_ais_own_reminder_of_an_open_step_is_kept(world):  # AI-first rebalance: the detail-ask guard is gone
-    w = world
-    go(w, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
-    w.clock.advance(minutes=1)
-    line = "Please send your name and mobile number to continue."
-    res, box = go(w, "what", reply(line), live=True)
-    assert res.sent == ["ai"] and texts(box)["ai"] == line
-
-
-def test_an_answer_never_gets_the_open_step_appended(world):
-    w = world
-    go(w, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
-    for q, a in (("is there a pool?", "Yes, there is a pool."), ("and wifi?", "Yes, there is wifi."),
-                 ("and parking?", "Yes, free parking is available."), ("ac?", "Yes, every room has AC.")):
-        w.clock.advance(minutes=1)
-        res, _ = go(w, q, reply(a), live=True)
-        assert res.sent == ["ai"]
-    assert w.wa.texts(GUEST).count(t("ask_contact", "en")) == 1
-
-
-def test_the_open_step_is_not_added_when_its_text_went_this_turn(world):
-    res, _ = go(world, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY), reply("[no reply]"))
-    assert res.sent.count("ask_contact") == 1
-
-
-def test_a_first_hi_never_gets_a_booking_step(world):
-    res, box = go(world, "hi", reply("Hi, How may I assist you?"))
-    assert res.sent == ["ai"]
-
-
-def test_an_open_payment_link_is_sent_again_after_an_answer(world):
-    w = world
-    go(w, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
-    w.clock.advance(minutes=1)
-    go(w, "Asha, same number", tool("create_booking", guest_name="Asha", mobile="same"), reply("[no reply]"), live=True)
-    link = w.wa.texts(GUEST)[-1]
-    assert "http" in link
-    w.clock.advance(minutes=1)
-    res, _ = go(w, "is there wifi?", reply("Yes, there is wifi."), live=True)
-    assert res.sent == ["ai"]  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
-    w.clock.advance(minutes=1)
-    res, _ = go(w, "hold it, I pay tonight", tool("send_payment_link", reason="hold"), reply("[no reply]"), live=True)
-    assert res.sent == ["hold_pay"]  # the hold text IS the payment step: no second link
-
-
-def test_one_resort_only_never_asks_the_place(world):
-    w = world
-    one_resort(w)
-    res, box = go(w, "I need a room", tool("update_enquiry"), reply("[no reply]"))
-    assert "ask_location" not in res.sent and res.sent == ["form"]
-    assert Enquiry.load(w.repo, GUEST).place == w.p1.id
-
-
 def test_one_resort_only_sends_photos_without_the_location_question(world):
     one_resort(world)
     result, sent, _ = run(world, "send_photos", {"kind": "resort"})
@@ -107,89 +41,7 @@ def test_one_resort_only_sends_photos_without_the_location_question(world):
 # --------------------------------------------------------------------------- 2. no repeats of what tools sent
 
 
-@pytest.mark.parametrize("line", [
-    "The total is ₹8,000.", "Here is the link https://x.y/z", "Your stay is 10 Nov to 12 Nov.",
-    "Your summary was sent.", "Please pay the advance.", " ".join(["word"] * 26)])
-def test_a_line_that_repeats_the_tools_is_found(line):
-    assert guard.repeats_tools(line)
-
-
-def test_a_short_extra_answer_is_not_a_repeat():
-    assert not guard.repeats_tools("Yes, there is a pool.")
-
-
-def test_the_ais_line_is_dropped_when_it_repeats_the_tools_messages(world):
-    res, box = go(world, "Alleppey 10 nov to 12 nov 2 persons", tool("update_enquiry", **STAY),
-                  reply("Rooms are available from 10 Nov to 12 Nov. Please share your name and mobile."))
-    assert "ai" not in res.sent and not res.retried and res.sent == ["rooms_ok", "rooms_plain", "room_label", "ask_contact"]
-
-
-def test_a_short_answer_to_another_question_stays_after_the_tools(world):
-    res, box = go(world, "Alleppey 10 nov to 12 nov 2 persons, pool?", tool("update_enquiry", **STAY),
-                  reply("Yes, there is a pool."))
-    assert res.sent[0] == "ai" and texts(box)["ai"] == "Yes, there is a pool."
-
-
-def test_every_tool_that_sent_something_says_already_sent_first(world):
-    for name, args in (("update_enquiry", {}), ("update_enquiry", STAY), ("get_price", {}),
-                       ("talk_to_owner", {"reason": "cannot_answer"})):
-        result, _, _ = run(world, name, args)
-        assert result["sent"] and result["note"].startswith(ALREADY_SENT), name
-    result, _, _ = run(world, "my_bookings")
-    assert not result["sent"] and not result["note"].startswith(ALREADY_SENT)
-
-
 # --------------------------------------------------------------------------- 3. talk_to_owner reasons
-
-
-def test_talk_to_owner_takes_only_the_six_reasons():
-    spec = next(s for s in TOOL_SCHEMAS if s.name == "talk_to_owner")
-    assert spec.parameters["properties"]["reason"]["enum"] == ["pay_terms", "guest_called", "cannot_answer",
-                                                               "call_request", "change_or_cancel_paid", "other"]
-    assert "staff_note" in spec.parameters["properties"] and spec.parameters["required"] == ["reason", "language"]
-    assert list(OWNER_REASONS) == spec.parameters["properties"]["reason"]["enum"]
-
-
-@pytest.mark.parametrize("reason,key", [("pay_terms", "pay_terms"), ("change_or_cancel_paid", "handoff"),
-                                        ("other", "handoff")])
-def test_each_reason_sends_its_fixed_text_and_tells_the_team(world, reason, key):
-    run(world, "update_enquiry", {"place": "Alleppey"})
-    result, sent, box = run(world, "talk_to_owner", {"reason": reason, "staff_note": "asks something"})
-    assert result["sent"] == [key, "staff:alert"]
-    staff = next(i for i in box.sent if i.kind == "staff")
-    assert "asks something" in staff.text and STAFF in staff.to
-    assert result["note"].startswith(ALREADY_SENT) and "Write NOTHING" in result["note"]
-
-
-@pytest.mark.parametrize("reason", ["cannot_answer", "call_request"])
-def test_cannot_answer_and_call_request_send_the_handoff_with_no_staff_alert(world, reason):  # fix round 2
-    run(world, "update_enquiry", {"place": "Alleppey"})
-    result, sent, box = run(world, "talk_to_owner", {"reason": reason, "staff_note": "asks something"})
-    assert result["sent"] == ["handoff"] and not [i for i in box.sent if i.kind == "staff"]
-    assert result["note"].startswith(ALREADY_SENT) and "Write NOTHING" in result["note"]
-
-
-def test_guest_called_thanks_alerts_no_one_and_the_open_step_follows(world):
-    run(world, "update_enquiry", STAY)
-    result, sent, box = run(world, "talk_to_owner", {"reason": "guest_called"})
-    assert result["sent"] == ["guest_called", "ask_contact"] and not [i for i in box.sent if i.kind == "staff"]
-
-
-def test_a_free_text_reason_is_other_with_the_text_for_the_staff(world):
-    result, sent, box = run(world, "talk_to_owner", {"reason": "wants a refund"})
-    staff = next(i for i in box.sent if i.kind == "staff")
-    assert result["sent"] == ["handoff", "staff:alert"] and "wants a refund" in staff.text
-    assert result["facts"]["reason"] == "other"
-
-
-def test_the_prompt_owner_rules_name_the_reasons(world):
-    go(world, "hi", reply("Hi, How may I assist you?"))
-    system = world.llm.calls[0].system
-    for value in OWNER_REASONS:
-        assert f'reason="{value}"' in system or value in system, value
-    assert "The system asks FIRST for place, dates, adults, rooms, name and mobile" in system
-    assert "If tools sent messages this turn, write NOTHING" in system
-    assert "even with no details at all" in system
 
 
 # --------------------------------------------------------------------------- 4. dates in code
@@ -212,14 +64,6 @@ def test_a_day_without_a_month_moves_with_nights_too(world):
     result, _, _ = run(world, "update_enquiry", {"place": "Alleppey", "check_in": {"day": 20}, "nights": 3,
                                                  "adults": 2})
     assert result["facts"]["check_in"] == "2026-12-20" and result["facts"]["check_out"] == "2026-12-23"
-
-
-def test_a_past_date_with_its_month_given_is_told_as_past(world):
-    late_month(world)
-    result, sent, _ = run(world, "update_enquiry", {"place": "Alleppey",
-                                                    "check_in": {"day": 20, "month": 11, "year": 2026},
-                                                    "check_out": {"day": 21}, "adults": 2})
-    assert result["sent"] == ["past_date"]
 
 
 def test_a_day_february_does_not_have_skips_to_march(world):

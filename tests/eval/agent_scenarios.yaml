@@ -28,7 +28,6 @@
   lang: en
   turns:
     - guest: "hi"
-      expect_tools: [greet]  # the greet tool sends the owner's greeting
       expect_text: "Hi, How may I assist you?"
     - guest: "I need a room"
       expect_sent: [ask_location]
@@ -351,11 +350,9 @@
     - guest: "Hi"
     - guest: "Alleppey Dec 10-12, 2 adults"
     - guest: "I already called the owner"
-      expect_tools: [talk_to_owner]
-      expect_args: {talk_to_owner: {reason: guest_called}}
-      expect_sent: [guest_called, ask_contact]
-      not_sent: [staff, handoff]
-      expect_text: "Thank you sir. Please let me know if you need any help with your booking."
+      expect_sent: [guest_called]
+      not_sent: [handoff]
+      expect_text: "Thank you. Please let me know if you need any help with your booking."
       must_not: ["no record", "didn't catch", "call you back", "will contact you"]
 
 # ───────────────────────── conversation ─────────────────────────
@@ -564,7 +561,6 @@
     - guest: "paid"
       expect_tools: [check_payment]
       expect_sent: [pay_wait]
-      ai_empty: true
 
 - id: is_it_secure
   turns:
@@ -592,12 +588,10 @@
 - id: greetings_in_any_words  # live test 2026-11-25 (Haiku): 'hi' got 'Hi.', 'hello' got 'Sure.'
   turns:
     - guest: "hi"
-      expect_tools: [greet]
       only_sent: [greet]
       expect_text: "Hi, How may I assist you?"
     - guest: "is there parking?"
     - guest: "hello"
-      expect_tools: [greet]
       only_sent: [hello]
       not_sent: [sure]
     - guest: "ok thanks"
@@ -605,7 +599,6 @@
     - guest: "Alleppey dec 10 to 12, 2 adults"
       expect_sent: [rooms_ok]
     - guest: "namaskaram"
-      expect_tools: [greet]
       expect_sent: [hello_back]
       not_sent: [sure, greet]
 
@@ -667,7 +660,7 @@
       not_sent: [ask_contact]
 
 # ───────────────────────── form with a reason (owner, 2026-11-26) ─────────────────────────
-- id: price_ask_sends_price_form  # place known, no dates: get_price / update_enquiry(reason=price) send the form
+- id: price_ask_sends_price_form  # place known, no dates: get_price -> form_reason price -> the AI writes the form
   turns:
     - guest: "Alleppey"
       expect_sent: [form]
@@ -675,3 +668,28 @@
     - guest: "let me know the price"
       expect_text: "To check the price, please share these details:"
       must_not: ["₹"]
+
+# ───────────────────────── AI-first simplification (live chat 2026-11-26) ─────────────────────────
+- id: live_chat_discount_and_confused  # real answers were replaced by "Sorry, could you say that again?"
+  turns:
+    - guest: "Alleppey dec 10 to 12, 2 adults"
+    - guest: "Meera 9847044444"
+      expect_sent: [summary, pay]
+    - guest: "Okay"
+      not_sent: [say_again_short]
+    - guest: "Can we get it for 8000?"
+      ai_required: true
+      not_sent: [say_again_short]
+    - guest: "Instead of 9000 is it possible to get it for 8000"
+      not_sent: [say_again_short]
+    - guest: "Should i make the call or the team will call?"
+      ai_required: true
+      not_sent: [say_again_short]
+      must_not: ["will call you", "get back to you", "will contact you"]
+    - guest: "What sure"
+      ai_required: true
+      not_sent: [say_again_short]
+    - guest: "Dont call my father"
+      expect_tools: [talk_to_owner]
+      ai_required: true
+      not_sent: [say_again_short]

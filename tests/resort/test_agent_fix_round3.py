@@ -15,7 +15,7 @@ from test_agent_photos import keys
 from test_agent_photos import run as prun
 from test_agent_tools_2c import book
 from test_agent_turn import STAY, go, texts
-from test_bot import GUEST, reply, tool, world  # noqa: F401  (world is a fixture)
+from test_bot import GUEST, answer, reply, tool, world  # noqa: F401  (world is a fixture)
 
 from app.resort.agent import guard
 from app.resort.agent import photos_plan as pp
@@ -82,7 +82,7 @@ def test_a_day_alone_goes_to_the_next_time_it_comes_with_its_check_out(world):
     result, sent, _ = call(world, "update_enquiry", {"place": "Alleppey", "check_in": {"day": 30},
                                                      "check_out": {"day": 2}, "adults": 2}, said="Alleppey 30 to 2")
     assert (result["facts"]["check_in"], result["facts"]["check_out"]) == ("2026-11-30", "2026-12-02")
-    assert "rooms_ok" in sent
+    assert result["facts"]["available"] is True
 
 
 def test_nights_still_work_instead_of_check_out(world):
@@ -95,7 +95,7 @@ def test_a_full_date_that_passed_is_told(world):
     late_month(world)
     result, sent, _ = call(world, "update_enquiry", {"place": "Alleppey", "check_in": {"day": 20, "month": 11, "year": 2026},
                                                      "nights": 1, "adults": 2}, said="Alleppey 20 Nov 2026")
-    assert result["sent"] == ["past_date"]
+    assert result["sent"] == [] and "has passed" in result["facts"]["problem"]
 
 
 def test_a_bad_date_object_goes_back_to_the_ai_and_nothing_to_the_guest(world):
@@ -108,14 +108,14 @@ def test_a_bad_date_object_goes_back_to_the_ai_and_nothing_to_the_guest(world):
 
 def test_a_place_the_guest_never_wrote_is_ignored_so_the_location_question_goes(world):
     result, sent, _ = call(world, "update_enquiry", {"place": "Alleppey"}, said="I need a room")
-    assert result["sent"] == ["ask_location"] and "Alleppey" in result["facts"]["place_ignored"]
+    assert result["facts"]["missing"] == ["place"] and "Alleppey" in result["facts"]["place_ignored"]
     assert Enquiry.load(world.repo, GUEST).place is None
 
 
 @pytest.mark.parametrize("said", ["alepey", "Pozhiyoram please", "room in allepy for 2"])
 def test_a_misspelt_name_or_alias_the_guest_wrote_counts(world, said):
     result, sent, _ = call(world, "update_enquiry", {"place": "Alleppey"}, said=said)
-    assert result["sent"] == ["form"] and Enquiry.load(world.repo, GUEST).place == world.p1.id
+    assert result["facts"]["form_lines"] and Enquiry.load(world.repo, GUEST).place == world.p1.id
 
 
 def test_a_place_the_guest_wrote_earlier_in_the_chat_counts(world):
@@ -134,14 +134,8 @@ def test_outside_a_guest_turn_the_place_is_not_checked(world):
 
 def test_a_town_we_have_no_resort_in_gets_not_our_place_then_the_location_question(world):
     result, sent, _ = call(world, "update_enquiry", {"place": "Kochi"}, said="I am looking for a property in kochi")
-    assert result["sent"] == ["not_our_place", "ask_location"]
-    assert sent["not_our_place"] == "Sorry, we have properties only in Alleppey and Munnar."
-
-
-def test_the_location_question_is_not_repeated_when_it_is_the_last_message(world):
-    call(world, "update_enquiry", {}, said="I need a room", live=True)  # the location question goes
-    res, box = go(world, "kochi", tool("update_enquiry", place="Kochi"), reply(""))
-    assert [k for k in res.sent if k != pp_marker()] == ["not_our_place"]
+    assert result["sent"] == [] and result["facts"]["ours"] is False
+    assert result["facts"]["towns"] == "Alleppey and Munnar"  # the AI says "Sorry, we have properties only in ..."
 
 
 def pp_marker():
@@ -156,12 +150,8 @@ def test_not_our_place_lists_only_the_open_resorts_from_the_dashboard(world):
         text = t("not_our_place", lang, towns="Alleppey")
         assert "Alleppey" in text
     result, sent, _ = call(world, "update_enquiry", {"place": "Goa"}, said="goa")
-    assert sent["not_our_place"] == "Sorry, we have properties only in Alleppey."  # one resort: it goes on with it
+    assert result["facts"]["place_not_ours"] == "Goa" and result["facts"]["towns"] == "Alleppey"  # it goes on
     assert Enquiry.load(world.repo, GUEST).place == world.p1.id
-
-
-def test_the_prompt_has_no_place_example_any_more():  # fix round 5: the AI copied it instead of calling the tool
-    assert "kochi" not in SYSTEM.lower() and "we have properties" not in SYSTEM
 
 
 # --------------------------------------------------------------------------- 0c) restart
@@ -171,19 +161,12 @@ def test_after_restart_the_ai_sees_its_greeting_and_it_is_not_a_fresh_start(worl
     go(world, "Alleppey 10 to 12 nov 2 adults", tool("update_enquiry", **STAY), reply(""), live=True)
     world.repo.add_chat(ChatMessage(GUEST, "in", "restart", world.clock.now(), "text"))
     _restart(world.bot, GUEST, bot_outbox(world.bot, GUEST))
-    res, box = go(world, "I need a room", tool("update_enquiry"), reply(""), live=True)
+    res, box = go(world, "I need a room", tool("update_enquiry"), answer("Sure, Kindly confirm the Location"),
+                  live=True)
     first = world.llm.calls[-2]
     assert first.messages[0].content == '[You already said: "Hi, How may I assist you?"]\nI need a room'
     assert "same conversation continuing" in first.system
-    assert res.sent == ["ask_location"]
-
-
-def test_a_greeting_the_ai_repeats_after_restart_is_never_sent_again(world):
-    world.repo.add_chat(ChatMessage(GUEST, "in", "restart", world.clock.now(), "text"))
-    _restart(world.bot, GUEST, bot_outbox(world.bot, GUEST))
-    res, _ = go(world, "I need a room", reply("Hi, How may I assist you?"), live=True)
-    assert res.reply == "Hi."  # not a first greeting any more: the mid-chat rule applies
-    assert world.wa.texts(GUEST).count("Hi, How may I assist you?") == 1
+    assert res.calls[0]["result"]["facts"]["missing"] == ["place"] and res.sent == ["ai"]
 
 
 # --------------------------------------------------------------------------- 0d) language
@@ -201,35 +184,12 @@ def test_a_missing_or_invalid_language_keeps_the_last_one(world, given, saved, w
 # --------------------------------------------------------------------------- 0e) 0f) a question not in FACTS
 
 
-def test_a_question_not_in_facts_gets_the_handoff_and_never_the_step_again(world):
-    go(world, "Alleppey 10 to 12 nov 2 adults", tool("update_enquiry", **STAY), reply(""), live=True)
-    res, _ = go(world, "is there parking?", tool("talk_to_owner", reason="cannot_answer"), reply("Yes, parking."),
-                live=True)
-    assert res.sent == ["handoff"] and res.reply == ""  # AI-first rebalance: the name ask went already
-
-
-def test_with_a_link_open_the_handoff_never_resends_the_link(world):
-    book(world, live=True)
-    world.clock.advance(minutes=1)
-    res, _ = go(world, "do you allow pets?", tool("talk_to_owner", reason="cannot_answer"), reply(""), live=True)
-    assert [k for k in res.sent if not k.startswith("staff:")] == ["handoff"]
-
-
-def test_the_policy_rule_is_in_the_prompt():
-    assert ("If the answer is not written in FACTS, you do NOT know it. Call talk_to_owner(cannot_answer). Never answer "
-            "policy\n  questions") in SYSTEM
-
-
 # --------------------------------------------------------------------------- 0g) sir
 
 
 def test_the_old_send_paths_sir_filter_never_touches_the_first_reply(world):  # 'sir' stays in the FIRST reply
-    go(world, "is there a pool?", reply("Yes sir, there is a pool."), live=True)
+    go(world, "is there a pool?", answer("Yes sir, there is a pool."), live=True)
     assert world.wa.texts(GUEST) == ["Yes sir, there is a pool."]
-
-
-def test_the_prompt_says_sir_only_in_the_very_first_reply():
-    assert "Say 'sir' (or 'madam') only in your very first reply of the chat. Never again after that." in SYSTEM
 
 
 # --------------------------------------------------------------------------- 0h) the judge
@@ -263,40 +223,9 @@ def test_the_eval_checks_the_date_code_built_not_the_ais_object(monkeypatch):
 # --------------------------------------------------------------------------- Part 1: short, human replies
 
 
-def test_a_long_reply_gets_one_retry_with_the_short_ask(world):
-    long = ("Yes, we do have a swimming pool at the resort. It is open every day for our guests. You can use it any "
-            "time during your stay with us.")
-    res, box = go(world, "is there a pool?", reply(long), reply("Yes sir, there is a pool."))
-    assert res.retried and guard.TOO_LONG in world.llm.calls[-1].messages[-1].content
-    assert texts(box)["ai"] == "Yes sir, there is a pool."
-
-
-def test_still_too_long_after_the_retry_keeps_the_first_sentence(world):
-    long = "Yes, there is a pool. It is open daily. Towels are given. Kids love it."
-    res, box = go(world, "is there a pool?", reply(long), reply(long))
-    assert res.outcome == "answered" and texts(box)["ai"] == "Yes, there is a pool."
-
-
-@pytest.mark.parametrize("phrase", ["anything else", "Feel free", "don't hesitate", "other options", "As an AI",
-                                    "the system", "automatically", "owner"])
-def test_banned_phrases_are_found(phrase):
-    assert guard.banned_in(f"Sure. {phrase} here.")
-
-
-def test_a_banned_phrase_gets_one_retry_then_its_sentence_goes(world):
-    res, box = go(world, "is there a pool?", reply("Yes, there is a pool. Feel free to ask anything else."),
-                  reply("Yes, there is a pool. Feel free to ask."))
-    assert res.retried and texts(box)["ai"] == "Yes, there is a pool."
-
-
 def test_a_short_fine_reply_is_not_retried(world):
-    res, box = go(world, "is there a pool?", reply("Yes sir, there is a pool."))
+    res, box = go(world, "is there a pool?", answer("Yes sir, there is a pool."))
     assert not res.retried and texts(box)["ai"] == "Yes sir, there is a pool."
-
-
-def test_the_new_talk_rules_are_in_the_prompt():
-    assert "Reply like a busy, warm front-desk person on WhatsApp, not a bot." in SYSTEM
-    assert "Guest: is there a pool? (FACTS says yes) → Yes, there is a pool." in SYSTEM
 
 
 # --------------------------------------------------------------------------- Part 2: rooms, labels, photos
@@ -312,7 +241,7 @@ def test_every_offered_room_gets_its_label_even_with_no_photo(world):
     result, sent, box = call(world, "update_enquiry", {**STAY, "adults": 4}, said="Alleppey 10 to 12 nov 4 adults")
     labels = [i.text for i in box.sent if i.key == "room_label"]
     assert labels == ["*Room 108 - Deluxe*", "*Room 109 - Deluxe*"]
-    assert result["sent"][-1] == "ask_contact" and result["sent"].index("room_label") > result["sent"].index("rooms_ok")
+    assert result["next_step"] == "ask_contact" and "rooms_ok" not in result["sent"]
 
 
 def test_room_labels_with_different_numbers_are_never_deduped():
@@ -335,17 +264,17 @@ def test_the_guests_own_hold_never_counts_as_taken_for_their_room_number(world):
 def test_a_room_the_code_picked_never_gets_room_picked(world):
     call(world, "update_enquiry", STAY, said="Alleppey 10 to 12 nov 2 adults")
     result, sent, _ = call(world, "update_enquiry", {**STAY, "exclude_room_types": ["Deluxe"]}, said="no deluxe")
-    assert "room_picked" not in result["sent"] and result["facts"]["rooms_offered"] == "1 Family Suite"
+    assert "room_picked" not in result["facts"] and result["facts"]["rooms_offered"] == "1 Family Suite"
     result, _, _ = call(world, "update_enquiry", {**STAY, "room_picks": [{"room_type": "Deluxe"}]}, said="deluxe please")
-    assert "room_picked" in result["sent"]
+    assert result["facts"]["room_picked"] == "Deluxe"
 
 
 def test_another_room_is_shown_never_switched(pw):  # noqa: F811
     w = pw
     prun(w, "update_enquiry", STAY)
     result, items, _ = prun(w, "send_photos", {"kind": "other_room"})
-    assert keys(items)[:3] == ["other_room_free", "room_label", "photos:2"]
-    assert items[0][1].startswith("Yes, Family Suite is also free for your dates.")
+    assert keys(items)[:2] == ["room_label", "photos:2"]
+    assert result["facts"]["also_free_for_your_dates"] == "Family Suite"
     assert Enquiry.load(w.repo, GUEST).checked["summary"] == "1 Deluxe"  # the offer is still the Deluxe
 
 

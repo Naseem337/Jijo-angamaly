@@ -68,7 +68,8 @@ CACHE = {"type": "ephemeral"}
 
 
 def request(model: str, system: str, messages: list[ChatMessage], tools: list[ToolSpec] | None, max_tokens: int,
-            temperature: float | None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+            temperature: float | None, extra: dict[str, Any] | None = None,
+            tool_choice: str | None = None) -> dict[str, Any]:
     """The Messages API request. Claude reads tools -> system -> messages, so the order of the cached prefix is:
     tool definitions [breakpoint 1: shared by every guest] -> the static system part [breakpoint 2] -> the dynamic
     system part (after CACHE_SPLIT: changes every turn, never cached) -> the chat.
@@ -85,6 +86,8 @@ def request(model: str, system: str, messages: list[ChatMessage], tools: list[To
     if tools:
         kwargs["tools"] = [{"name": t.name, "description": t.description, "input_schema": t.parameters} for t in tools]
         kwargs["tools"][-1]["cache_control"] = CACHE
+        if tool_choice == "required":  # the model must call a tool (Anthropic's name for it is "any")
+            kwargs["tool_choice"] = {"type": "any"}
     return kwargs
 
 
@@ -113,8 +116,9 @@ class AnthropicLLM:
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 1024,
         temperature: float | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
-        kwargs = request(self.model, system, messages, tools, max_tokens, temperature, self._extra)
+        kwargs = request(self.model, system, messages, tools, max_tokens, temperature, self._extra, tool_choice)
         try:
             response = self._client.messages.create(**kwargs)
         except anthropic.RateLimitError as exc:

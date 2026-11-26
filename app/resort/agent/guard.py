@@ -28,6 +28,8 @@ BOOKED = re.compile(r"\b(?:booked|confirmed|reserved|booking is confirm\w*|confi
                     re.IGNORECASE)
 # a sentence that says it is NOT (yet) booked, or only after payment, is true and allowed
 NOT_YET = re.compile(r"\b(?:not|n't|until|till|once|after|when|only|yet|before|illa|alla|nahi)\b", re.IGNORECASE)
+# "pay ... to confirm your booking", "it will be confirmed": the future, true before payment (live replay 2026-11-26)
+FUTURE = re.compile(r"\b(?:to|will(?: be)?|can be|would be)\s+$", re.IGNORECASE)
 PROVIDER = re.compile(r"[ \t]*\b(?:(?:via|through|using|on|by)[ \t]+)?(?:razor[ \t]?pay|rzp)\b", re.IGNORECASE)
 LINK = re.compile(r"https?://\S+")
 SENTENCE = re.compile(r"(?<=[.!?])\s+")
@@ -68,7 +70,8 @@ def sentence_problem(sentence: str, src: Sources, known: set[float] | None = Non
         if (value := _num(raw)) is not None and value not in known:
             return (f"₹{raw} is not in any tool result, FACTS or guest message of this conversation. Amounts come only "
                     "from tools (get_price); never calculate one.")
-    if not src.paid and (hit := BOOKED.search(sentence)) and not NOT_YET.search(sentence):
+    if not src.paid and (hit := BOOKED.search(sentence)) and not NOT_YET.search(sentence) \
+            and not FUTURE.search(sentence[:hit.start()]):
         return (f'"{hit.group(0)}": nothing is paid yet. Never say booked, confirmed or reserved before the payment is '
                 "received.")
     return ""

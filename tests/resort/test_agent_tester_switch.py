@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from test_agent_gate import agent, m, send  # noqa: F401  (agent is a fixture)
-from test_bot import GUEST, STAFF, reply, world  # noqa: F401  (world is a fixture)
+from test_bot import GUEST, STAFF, answer, reply, world  # noqa: F401  (world is a fixture)
 
 from app.resort.agent.gate import is_tester, staff_override
 from app.resort.config import ResortConfig, load_resort_config
@@ -22,19 +22,19 @@ def with_config(w, **values):
 
 def test_no_testers_listed_means_the_agent_answers_everyone(agent):  # noqa: F811
     assert agent.bot.config.agent_test_phones == []
-    assert send(agent, m("is there a pool?"), reply("Yes sir, there is a pool.")) == "answered"
+    assert send(agent, m("is there a pool?"), answer("Yes sir, there is a pool.")) == "answered"
 
 
 def test_a_listed_tester_gets_the_agent(agent):  # noqa: F811
     with_config(agent, agent_test_phones=f"{TESTER_2}, {GUEST}")
-    assert send(agent, m("is there a pool?"), reply("Yes sir, there is a pool.")) == "answered"
+    assert send(agent, m("is there a pool?"), answer("Yes sir, there is a pool.")) == "answered"
     assert agent.wa.texts(GUEST) == ["Yes sir, there is a pool."]
 
 
 def test_any_other_phone_gets_no_reply_and_a_log_line(agent, caplog):  # noqa: F811
     with_config(agent, agent_test_phones=TESTER_2)
     with caplog.at_level(logging.INFO, logger="app.resort.agent.gate"):
-        assert send(agent, m("is there a pool?"), reply("Yes sir, there is a pool.")) == "not_a_tester"
+        assert send(agent, m("is there a pool?"), answer("Yes sir, there is a pool.")) == "not_a_tester"
     assert agent.wa.texts(GUEST) == [] and agent.llm.calls == []
     assert any("is not a tester" in r.getMessage() for r in caplog.records)
     assert GUEST not in caplog.text  # the phone is masked in the log

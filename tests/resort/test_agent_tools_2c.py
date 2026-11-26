@@ -67,37 +67,18 @@ def test_a_staff_alert_is_only_recorded_in_a_dry_run_and_sent_when_live(world):
     assert w.wa.to(STAFF) == [] and w.wa.to(GUEST) == []  # dry run: nothing sent
     run(w, "talk_to_owner", {"reason": "wants a refund"}, live=True)
     assert [m for m in w.wa.texts(STAFF) if m.startswith("Guest needs the team: wants a refund")]  # live: the team hears
-    assert w.wa.texts(GUEST)[-1].startswith("Thank you. Please contact the team directly:")
-
-
-def test_guest_called_sends_the_owners_thank_you_and_alerts_no_one(world):
-    w = world
-    result, texts, box = run(w, "talk_to_owner", {"reason": "guest_called"})
-    assert result["ok"] and result["sent"] == ["guest_called"]
-    assert texts["guest_called"] == "Thank you sir. Please let me know if you need any help with your booking."
-    assert [i for i in box.sent if i.kind == "staff"] == []
-    run(w, "talk_to_owner", {"reason": "guest_called"}, live=True)
-    assert w.wa.to(STAFF) == []  # live: still no staff alert
-    assert w.wa.texts(GUEST)[-1] == "Thank you sir. Please let me know if you need any help with your booking."
+    assert w.wa.to(GUEST) == []  # the guest gets nothing from the tool: the AI writes the reply
 
 
 def test_pay_terms_sends_the_owners_exact_text_with_the_numbers_and_tells_the_team(world):
     w = world
     run(w, "update_enquiry", STAY)
     result, texts, box = run(w, "talk_to_owner", {"reason": "pay_terms"})
-    assert result["ok"] and result["sent"] == ["pay_terms", "staff:alert"]
-    assert texts["pay_terms"] == ("For More detailed discussion, kindly call to the below numbers: "
-                                  "9497861924 / 9995855789")
+    assert result["ok"] and result["sent"] == ["staff:alert"] and set(texts) == {"staff:alert"}
+    assert result["facts"]["numbers"] == "9497861924 / 9995855789"  # the AI says 'For more detailed discussion ...'
+
     assert "other payment terms" in [i for i in box.sent if i.kind == "staff"][0].text
     assert "pay_terms" in (t := next(x for x in TOOL_SCHEMAS if x.name == "talk_to_owner")).description and t
-
-
-def test_guest_called_with_an_open_step_sends_the_step_after_the_thank_you(world):
-    w = world
-    run(w, "update_enquiry", STAY)
-    result, texts, box = run(w, "talk_to_owner", {"reason": "guest_called", "language": "en"})
-    assert result["sent"][0] == "guest_called" and len(result["sent"]) == 2  # the thank-you, then the open step
-    assert [i for i in box.sent if i.kind == "staff"] == []
 
 
 def test_a_payment_failure_alerts_the_team_through_the_outbox(world):
@@ -109,8 +90,8 @@ def test_a_payment_failure_alerts_the_team_through_the_outbox(world):
 
     w.pay.create_payment_link = boom
     result, texts, box = run(w, "create_booking", {"guest_name": "Asha", "mobile": "same"})
-    assert not result["ok"] and result["sent"] == ["pay_failed_link", "staff:alert"]
-    assert "9497861924" in digits(texts["pay_failed_link"]) and w.wa.sent == []
+    assert not result["ok"] and result["sent"] == ["staff:alert"]
+    assert "9497861924" in digits(result["facts"]["numbers"]) and w.wa.sent == []
     live, _, _ = run(w, "create_booking", {"guest_name": "Asha", "mobile": "same"}, live=True)
     assert any(m.startswith("Guest needs the team: payment link could not be created") for m in w.wa.texts(STAFF))
 
@@ -194,7 +175,7 @@ def test_sold_out_in_the_agent_path_does_not_read_the_chat_log(world, monkeypatc
     monkeypatch.setattr(w.repo, "create_hold", taken)
     monkeypatch.setattr(w.repo, "last_outbound_text", never)
     result, texts, _ = run(w, "create_booking", {"guest_name": "Asha", "mobile": "same"})
-    assert not result["ok"] and texts["rooms_none"] == "Sorry, rooms are not available for your dates."
+    assert not result["ok"] and texts == {} and result["facts"]["problem"]
 
 
 # --------------------------------------------------------------------------- create_booking
@@ -210,7 +191,7 @@ def test_create_booking_with_same_mobile_sends_the_summary_and_the_link(world):
     assert b.status == "hold" and b.payment_link_url in texts["pay"] and "Mobile: 9847012345" in b.notes
     enq = Enquiry.load(w.repo, GUEST)
     assert enq.booking_id == b.id and enq.link_open and result["next_step"] == "pay"
-    assert result["facts"] == {"booked": True, "hold_minutes": 15} and b.id not in json.dumps(result)
+    assert result["facts"] == {"summary_and_link_sent": True} and b.id not in json.dumps(result)
 
 
 def test_create_booking_with_the_guests_own_number(world):
@@ -252,12 +233,12 @@ def test_check_payment_with_no_open_link_says_what_is_missing(world):
     assert result["next_step"] == "ask_location"
 
 
-def test_check_payment_not_paid_sends_pay_wait(world):
+def test_check_payment_not_paid_is_a_fact(world):
     w = world
     book(w)
     w.bot._pay_checked = {}
     result, texts, _ = run(w, "check_payment")
-    assert result["facts"] == {"paid": False} and texts["pay_wait"].startswith("We have not received the payment yet.")
+    assert result["facts"] == {"paid": False, "payment_received": False} and texts == {}
     assert "confirmed" not in result["sent"] and w.repo.list_bookings(phone=GUEST)[0].status == "hold"
 
 
@@ -270,8 +251,8 @@ def test_check_payment_is_throttled_to_once_every_15_seconds(world, monkeypatch)
     monkeypatch.setattr(w.pay, "link_status", lambda link_id: asked.append(link_id) or real(link_id))
     first, _, _ = run(w, "check_payment")
     second, texts, _ = run(w, "check_payment")
-    assert first["facts"] == {"paid": False} and second["facts"] == {"paid": False, "throttled": True}
-    assert len(asked) == 1 and "pay_wait" in texts  # the provider was asked once; the guest still gets an answer
+    assert first["facts"] == second["facts"] == {"paid": False, "payment_received": False}
+    assert len(asked) == 1 and texts == {}  # the provider was asked once; the AI still answers
     w.bot._pay_checked[GUEST] -= 16  # 16 seconds later
     run(w, "check_payment")
     assert len(asked) == 2
@@ -358,11 +339,11 @@ def test_send_payment_link_with_no_booking_or_a_bad_reason(world):
 # --------------------------------------------------------------------------- send_map
 
 
-def test_send_map_sends_the_link_then_the_open_step(world):
+def test_send_map_sends_only_the_link(world):
     w = world
     run(w, "update_enquiry", {"place": "Alleppey"})
     result, texts, _ = run(w, "send_map")
-    assert result["ok"] and result["sent"] == ["map", "form"]
+    assert result["ok"] and result["sent"] == ["map"]
     assert texts["map"] == "\U0001F4CD Pozhiyoram Resort\nhttps://maps.app.goo.gl/abc"
 
 
@@ -372,7 +353,7 @@ def test_send_map_needs_a_resort_and_a_saved_link(world):
     assert not unknown["ok"] and texts == {}  # two resorts and none chosen
     run(w, "update_enquiry", {"place": "Munnar"})
     no_link, texts, _ = run(w, "send_map")
-    assert no_link["ok"] and no_link["facts"] == {"map": False} and "map" not in texts
+    assert no_link["ok"] and no_link["facts"]["map"] is False and "map" not in texts
 
 
 # --------------------------------------------------------------------------- my_bookings (read only)
@@ -407,11 +388,11 @@ def test_my_bookings_for_a_booking_on_hold_and_for_a_new_guest(world):
 # --------------------------------------------------------------------------- change_name
 
 
-def test_change_name_updates_the_bookings_and_tells_the_guest(world):
+def test_change_name_updates_the_bookings(world):
     w = world
     book(w, name="Test Guest")
     result, texts, _ = run(w, "change_name", {"name": "demo guest k"})
-    assert result["ok"] and result["facts"] == {"bookings_changed": 1} and texts == {"name_changed": "Done, the name is changed to Demo Guest K."}
+    assert result["ok"] and result["facts"] == {"name_changed_to": "Demo Guest K", "bookings_changed": 1} and texts == {}
     assert w.repo.list_bookings(phone=GUEST)[0].guest_name == "Demo Guest K"
     assert w.repo.get_guest(GUEST).name == "Demo Guest K"
     bad, texts, _ = run(w, "change_name", {"name": "12345"})
@@ -421,14 +402,12 @@ def test_change_name_updates_the_bookings_and_tells_the_guest(world):
 # --------------------------------------------------------------------------- talk_to_owner
 
 
-def test_talk_to_owner_tells_the_guest_the_numbers_and_the_team_the_summary(world):
+def test_talk_to_owner_gives_the_ai_the_numbers_and_the_team_the_summary(world):
     w = world
     run(w, "update_enquiry", {"place": "Alleppey"})
     result, texts, box = run(w, "talk_to_owner", {"reason": "wants a discount of 50 percent"})
-    assert result["ok"] and result["sent"] == ["handoff", "staff:alert"]
-    assert texts["handoff"].startswith("Thank you. Please contact the team directly:")
-    assert "9497861924" in digits(texts["handoff"]) and "9995855789" in digits(texts["handoff"])
-    assert "will contact" not in texts["handoff"]
+    assert result["ok"] and result["sent"] == ["staff:alert"] and set(texts) == {"staff:alert"}
+    assert "9497861924" in digits(result["facts"]["numbers"]) and "9995855789" in digits(result["facts"]["numbers"])
     staff = next(i for i in box.sent if i.kind == "staff")
     assert staff.text.startswith("Guest needs the team: wants a discount of 50 percent") and STAFF in staff.to
 
@@ -458,11 +437,11 @@ def test_recall_old_chat_with_nothing_earlier(world):
 # --------------------------------------------------------------------------- the schemas and the dispatcher
 
 
-def test_there_are_14_schemas_that_say_when_to_use_each_tool():
+def test_there_are_13_schemas_that_say_when_to_use_each_tool():
     names = [x.name for x in TOOL_SCHEMAS]
     assert names == ["update_enquiry", "get_price", "send_photos", "send_map", "create_booking", "check_payment",
-                     "send_payment_link", "my_bookings", "change_name", "talk_to_owner", "repeat_step",
-                     "greet", "set_language", "recall_old_chat"]
+                     "send_payment_link", "my_bookings", "change_name", "talk_to_owner", "set_language", "reply",
+                     "recall_old_chat"]
     assert tools_module.TOOLS is TOOL_SCHEMAS
     for spec in TOOL_SCHEMAS:
         assert 40 < len(spec.description) < 700, spec.name  # WHEN to use it, short (lean requests)
@@ -476,7 +455,8 @@ def test_there_are_14_schemas_that_say_when_to_use_each_tool():
 def test_every_tool_has_a_handler_and_an_unknown_one_is_a_normal_result(world):
     w = world
     for spec in TOOL_SCHEMAS:
-        assert callable(getattr(AgentTools, spec.name)), spec.name
+        if spec.name != "reply":  # reply() is handled by the turn (turn.py), with the guards
+            assert callable(getattr(AgentTools, spec.name)), spec.name
     result, texts, _ = run(w, "no_such_tool")
     assert set(result) == SHAPE and not result["ok"] and texts == {}
 

@@ -144,6 +144,38 @@ def key_hit(want: str, keys: list[str]) -> bool:
     return any(k == want or k.startswith(want + ":") for k in keys)
 
 
+# AI-first simplification (2026-11-26): the AI writes these owner texts itself with reply(), so a scenario's key is
+# checked as the owner's wording in what the guest got. expect_sent: any of the markers; not_sent: the exact sentence.
+OWNER_WORDS: dict[str, tuple[str, ...]] = {
+    "ask_contact": ("name and mobile",), "ask_extra_bed": ("extra bed",), "ask_extra_beds": ("extra bed",),
+    "ask_location": ("confirm the location",), "closed_place": ("not available",), "form": ("share these details",),
+    "guest_called": ("let me know if you need any help",), "handoff": ("contact the team directly", "call them directly"),
+    "greet": ("how may i assist you",), "hello": ("hi",), "hello_back": ("hi",), "min_rooms": ("room",),
+    "not_our_place": ("properties only in",), "other_room_free": ("also free",), "past_date": ("passed",),
+    "pay_terms": ("detailed discussion",), "pay_wait": ("not received the payment",), "photos_sent": ("photos",),
+    "price_answer": ("₹",), "rooms_ok": ("available",), "rooms_plain": ("room",), "rooms_note": ("room",),
+    "rooms_beds": ("extra bed",), "sure": ("sure.",),
+}
+OWNER_SENTENCE = {"ask_contact": "please share your name and mobile number to proceed",
+                  "ask_location": "kindly confirm the location", "form": "please share these details",
+                  "greet": "how may i assist you", "handoff": "please contact the team directly",
+                  "not_our_place": "we have properties only in", "past_date": "has already passed",
+                  "rooms_ok": "yes, rooms are available for your dates", "sure": "sure."}
+
+
+def owner_hit(want: str, keys: list[str], texts: list[str], calls: list[dict[str, Any]], exact: bool = False) -> bool:
+    """A scenario key: a code-sent key as before; an owner text the AI now writes, by its wording; room_picked by the
+    tool fact."""
+    if want == "room_picked":
+        return any("room_picked" in ((c.get("result") or {}).get("facts") or {}) for c in calls)
+    if want not in OWNER_WORDS:
+        return key_hit(want, keys)
+    blob = "\n".join(texts).lower()
+    if exact:
+        return OWNER_SENTENCE.get(want, OWNER_WORDS[want][0]) in blob
+    return any(w in blob for w in OWNER_WORDS[want])
+
+
 def check_turn(turn: dict[str, Any], outcome: str, calls: list[dict[str, Any]], keys: list[str],
                texts: list[str], ai: str = "") -> list[str]:
     bad: list[str] = []
@@ -170,10 +202,10 @@ def check_turn(turn: dict[str, Any], outcome: str, calls: list[dict[str, Any]], 
             if not arg_ok(got.get(k), v):
                 bad.append(f"{name}.{k} = {got.get(k)!r}, expected {v!r}")
     for want in turn.get("expect_sent") or []:
-        if not key_hit(want, keys):
+        if not owner_hit(want, keys, texts, calls):
             bad.append(f"'{want}' not sent (sent: {keys or 'nothing'})")
     for nope in turn.get("not_sent") or []:
-        if key_hit(nope, keys):
+        if owner_hit(nope, keys, texts, calls, exact=True):
             bad.append(f"'{nope}' was sent")
     blob = "\n".join(texts)
     for word in turn.get("must_not") or []:  # the AI's OWN words only: the owner's fixed texts are his exact wording
@@ -187,7 +219,8 @@ def check_turn(turn: dict[str, Any], outcome: str, calls: list[dict[str, Any]], 
         bad.append("the AI wrote no line of its own")
     if want_order := turn.get("in_order"):  # these keys, in this order (other keys may come between)
         at = 0
-        for want in want_order:
+        for want in [w for w in want_order if not any(x in OWNER_WORDS or x == "room_picked"
+                                                       for x in str(w).split("|"))]:  # code-sent keys keep their order
             hit = next((i for i in range(at, len(keys)) if any(key_hit(w, [keys[i]]) for w in str(want).split("|"))),
                        None)
             if hit is None:
@@ -195,8 +228,9 @@ def check_turn(turn: dict[str, Any], outcome: str, calls: list[dict[str, Any]], 
                 break
             at = hit + 1
     if (only := turn.get("only_sent")) is not None:  # the guest got exactly these keys (staff alerts aside)
-        got = [k for k in keys if not k.startswith("staff:")]
-        if sorted(got) != sorted(only):
+        got = sorted({k for k in keys if not k.startswith("staff:")})
+        only = sorted({"ai" if k in OWNER_WORDS else k for k in only})  # an owner text is now the AI's reply
+        if got != only:
             bad.append(f"sent {got}, expected only {only}")
     if turn.get("no_duplicates"):
         for i, a in enumerate(texts):

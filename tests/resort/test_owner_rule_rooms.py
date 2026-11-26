@@ -73,7 +73,7 @@ def test_agent_3_adults_no_room_count_is_2_rooms_and_no_question(world):
     result, texts = update(world, adults=3)
     assert result["facts"]["rooms"] == 2 and result["facts"]["extra_beds"] == 0
     assert result["facts"]["extra_bed_question"] is False and "ask_extra_bed" not in texts
-    assert result["next_step"] == "ask_contact" and result["sent"][-1] == "ask_contact"
+    assert result["next_step"] == "ask_contact" and result["sent"] == ["room_label"]
 
 
 def test_agent_3_adults_2_rooms_is_2_rooms_and_no_question(world):
@@ -85,7 +85,7 @@ def test_agent_3_adults_1_room_asks_the_question_and_waits(world):
     w = world
     result, texts = update(w, adults=3, rooms=1)
     assert result["facts"]["rooms"] == 1 and result["facts"]["rooms_offered"] == "1 Deluxe"
-    assert result["sent"] == ["rooms_ok", "rooms_plain", "room_label", "ask_extra_bed"] and texts["ask_extra_bed"] == QUESTION
+    assert result["sent"] == ["room_label"] and result["facts"]["extra_beds_max"] == 1  # the AI asks QUESTION
     assert "ask_contact" not in texts and result["next_step"] == "ask_extra_bed" and result["facts"]["extra_bed_question"]
     assert result["facts"]["price"]["total"] == 8000  # nothing added by itself
     # the booking waits for the answer
@@ -95,14 +95,14 @@ def test_agent_3_adults_1_room_asks_the_question_and_waits(world):
     # asked once: the same stay again does not ask again
     again, texts = update(w, adults=3, rooms=1)
     assert again["sent"] == [] and again["next_step"] == "ask_extra_bed"
+    assert again["facts"]["extra_bed_question_already_asked"]
 
 
 def test_agent_yes_adds_the_extra_bed_charged_per_bed_per_night(world):
     w = world
     update(w, adults=3, rooms=1)
     result, texts = update(w, adults=3, rooms=1, extra_beds=1)
-    assert result["sent"] == ["rooms_beds", "ask_contact"] and result["next_step"] == "ask_contact"
-    assert texts["rooms_beds"] == "For 3 persons: 1 room(s) + 1 extra bed(s) (₹500 per extra bed per night)."
+    assert result["sent"] == [] and result["next_step"] == "ask_contact"
     assert result["facts"]["extra_beds"] == 1 and result["facts"]["price"]["total"] == 9000  # 8000 + 500 x 1 bed x 2 nights
     made, texts = agent(w, {"guest_name": "Asha", "mobile": "same"}, "create_booking")
     assert made["ok"] and "Extra Bed - 1,000" in texts["summary"] and "Total Cost - 9,000" in texts["summary"]
@@ -114,7 +114,7 @@ def test_agent_no_keeps_the_room_as_is_with_no_charge(world):
     w = world
     update(w, adults=3, rooms=1)
     result, texts = update(w, adults=3, rooms=1, extra_beds=0)
-    assert result["sent"] == ["ask_contact"] and result["next_step"] == "ask_contact"
+    assert result["sent"] == [] and result["next_step"] == "ask_contact"
     assert result["facts"]["extra_beds"] == 0 and result["facts"]["price"]["total"] == 8000
     made, texts = agent(w, {"guest_name": "Asha", "mobile": "same"}, "create_booking")
     assert made["ok"] and "Extra Bed" not in texts["summary"] and w.repo.list_bookings(phone=GUEST)[0].total == 8000
@@ -122,18 +122,18 @@ def test_agent_no_keeps_the_room_as_is_with_no_charge(world):
 
 def test_agent_4_adults_1_room_is_not_allowed(world):
     result, texts = update(world, adults=4, rooms=1)
-    assert result["sent"][0] == "min_rooms" and texts["min_rooms"] == "Max 3 persons per room, so 4 persons need at least 2 rooms."
+    assert result["facts"]["min_rooms_for_persons"] == 2
     assert result["facts"]["rooms"] == 2 and "ask_extra_bed" not in texts  # 2 + 2: no room holds 3
 
 
 def test_agent_5_adults_2_rooms_asks_the_question_once(world):
     w = world
     result, texts = update(w, adults=5, rooms=2)
-    assert result["facts"]["rooms"] == 2 and result["sent"][-1] == "ask_extra_bed" and result["next_step"] == "ask_extra_bed"
+    assert result["facts"]["rooms"] == 2 and result["facts"]["extra_bed_question"] and result["next_step"] == "ask_extra_bed"
     again, _ = update(w, adults=5, rooms=2)
     assert again["sent"] == []  # never twice
     answered, texts = update(w, adults=5, rooms=2, extra_beds=1)  # one room has 3 adults
-    assert answered["facts"]["price"]["total"] == 16000 + 1000 and answered["sent"] == ["rooms_beds", "ask_contact"]
+    assert answered["facts"]["price"]["total"] == 16000 + 1000 and answered["sent"] == []
 
 
 HOW_MANY = "How many extra beds do you need?"
@@ -141,13 +141,13 @@ HOW_MANY = "How many extra beds do you need?"
 
 def test_agent_3_adults_in_1_room_asks_yes_no_not_how_many(world):
     result, texts = update(world, adults=3, rooms=1)
-    assert texts["ask_extra_bed"] == QUESTION and "ask_extra_beds" not in texts and result["facts"]["extra_beds_max"] == 1
+    assert result["facts"]["extra_bed_question"] and result["facts"]["extra_beds_max"] == 1  # one room: QUESTION
 
 
 def test_agent_10_adults_in_4_rooms_asks_how_many(world):
     result, texts = update(world, adults=10, rooms=4)  # 3 + 3 + 2 + 2: two rooms hold 3 adults
     assert result["facts"]["rooms"] == 4 and result["facts"]["extra_beds_max"] == 2
-    assert texts["ask_extra_beds"] == HOW_MANY and "ask_extra_bed" not in texts and "ask_contact" not in texts
+    assert result["facts"]["extra_bed_question"] and "ask_extra_beds" not in texts  # the AI asks HOW_MANY
     assert result["next_step"] == "ask_extra_bed"
     again, _ = update(world, adults=10, rooms=4)
     assert again["sent"] == []  # asked once
@@ -160,9 +160,9 @@ def test_agent_how_many_answer(world, answer, beds, capped):
     result, texts = update(world, adults=10, rooms=4, extra_beds=answer)
     assert result["ok"] and result["facts"]["extra_beds"] == beds
     assert result["facts"]["price"]["total"] == base + 500 * 2 * beds  # 500 per bed per night, 2 nights
-    assert result["next_step"] == "ask_contact" and ("extra_beds_max" in texts) is capped
+    assert result["next_step"] == "ask_contact" and ("extra_beds_capped_to" in result["facts"]) is capped
     if capped:
-        assert texts["extra_beds_max"] == "The maximum is 2 extra bed(s) for your rooms, so 2 added."
+        assert result["facts"]["extra_beds_capped_to"] == 2
 
 
 def test_agent_how_many_no_means_none(world):
@@ -175,15 +175,13 @@ def test_how_many_question_is_in_every_language(world):
     assert t("ask_extra_beds", "en") == HOW_MANY
     assert MN["ask_extra_beds"] == "Ethra extra bed venam?" and TN["ask_extra_beds"] == "Evvalavu extra bed venum?"
     assert HN["ask_extra_beds"] == "Aapko kitne extra bed chahiye?"
-    result, texts = update(world, adults=10, rooms=4, language="manglish")
-    assert texts["ask_extra_beds"] == "Ethra extra bed venam?"
 
 
 def test_agent_a_bed_the_guest_asks_for_is_added_and_charged_without_a_question(world):
     w = world
     result, texts = update(w, adults=2, extra_beds=1)  # 2 adults, 1 room, they want a bed
     assert result["facts"]["extra_beds"] == 1 and result["facts"]["price"]["total"] == 9000
-    assert "ask_extra_bed" not in texts and result["sent"] == ["rooms_ok", "rooms_beds", "room_label", "ask_contact"]
+    assert "ask_extra_bed" not in texts and result["sent"] == ["room_label"] and not result["facts"]["extra_bed_question"]
     too_many, texts = update(w, adults=2, extra_beds=2)  # at most one per room
     assert not too_many["ok"] and "at most one extra bed per room" in too_many["facts"]["problem"] and texts == {}
 
@@ -195,7 +193,7 @@ def test_agent_a_new_layout_asks_again_but_the_same_layout_keeps_the_answer(worl
     moved, texts = update(w, adults=3, rooms=1, check_in="2026-11-20", check_out="2026-11-22")  # other dates, same layout
     assert moved["facts"]["extra_beds"] == 1 and "ask_extra_bed" not in texts
     new_layout, texts = update(w, adults=5, rooms=2, check_in="2026-11-20", check_out="2026-11-22")
-    assert new_layout["facts"]["extra_beds"] == 0 and new_layout["sent"][-1] == "ask_extra_bed"
+    assert new_layout["facts"]["extra_beds"] == 0 and new_layout["facts"]["extra_bed_question"]
 
 
 def test_agent_a_resort_with_no_extra_beds_never_asks(world):
@@ -213,8 +211,6 @@ def test_agent_the_question_is_in_every_language(world):
     assert MN["ask_extra_bed"] == "Extra bed venamo?" and TN["ask_extra_bed"] == "Extra bed venumaa?"
     assert HN["ask_extra_bed"] == "Kya aapko extra bed chahiye?"
     assert t("ask_extra_bed", "ml") == t("ask_extra_bed", "mn") and t("ask_extra_bed", "hi") == t("ask_extra_bed", "hn")
-    result, texts = update(world, adults=3, rooms=1, language="manglish")
-    assert texts["ask_extra_bed"] == "Extra bed venamo?"
 
 
 def test_agent_a_layout_change_after_the_link_closes_the_old_link_at_once_then_a_new_link_after_the_answer(world):
@@ -224,7 +220,7 @@ def test_agent_a_layout_change_after_the_link_closes_the_old_link_at_once_then_a
     old = w.repo.list_bookings(phone=GUEST)[0]
     assert old.status == "hold" and old.payment_link_id
     result, texts = update(w, adults=3, rooms=1)  # 3 adults in the one room: the question
-    assert result["sent"][-1] == "ask_extra_bed" and "pay" not in texts and "summary" not in texts
+    assert result["facts"]["extra_bed_question"] and "pay" not in texts and "summary" not in texts
     # the old link is closed AT ONCE, before the answer ('old link closed on any change'): it can no longer be paid
     assert w.repo.get_booking(old.id).status == "expired" and old.payment_link_id in w.pay.cancelled
     assert not [b for b in w.repo.list_bookings(phone=GUEST) if b.status == "hold"]
@@ -279,12 +275,12 @@ def test_agent_the_same_stay_as_the_open_link_closes_nothing(world):
 def test_the_form_asks_for_adults_above_6_years(world):
     w = world
     assert t("form", "en") == NEW_FORM and all(t("form", lang) == NEW_FORM for lang in ("ml", "ta", "hi", "mn", "tn", "hn"))
-    result, texts = agent(w, {"place": "Alleppey"})
-    assert texts["form"] == NEW_FORM
+    result, texts = agent(w, {"place": "Alleppey"})  # the AI writes the form from form_lines (prompt)
+    assert result["facts"]["form_lines"] == NEW_FORM.split("\n")[2:]
     result, texts = agent(w, {"place": "Alleppey", "check_in": "2026-11-10"})  # missing-lines logic is the same
-    assert texts["form"] == "Please share these details:\n\nCheck out :\nNumber of adults (above 6 years) :\nNumber of rooms:"
+    assert result["facts"]["form_lines"] == ["Check out :", "Number of adults (above 6 years) :", "Number of rooms:"]
     result, texts = agent(w, {"place": "Alleppey", "check_in": "2026-11-10", "check_out": "2026-11-12"})
-    assert texts["form"] == "Please share these details:\n\nNumber of adults (above 6 years) :\nNumber of rooms:"
+    assert result["facts"]["form_lines"] == ["Number of adults (above 6 years) :", "Number of rooms:"]
 
 
 def test_no_children_question_anywhere(world):
@@ -300,7 +296,7 @@ def test_no_children_question_anywhere(world):
             for text in table.get(key, {}).values():
                 assert "child" not in text.lower() and "kid" not in text.lower(), (key, text)
     prompt = build_system_prompt(w.bot, GUEST, Enquiry())
-    assert "ADULTS above 6 years" in prompt and "never ask about or count children" in prompt
+    assert "Adults above 6 years only" in prompt and "never ask about children" in prompt
     assert "Number of children" not in prompt and "Number of persons" not in prompt
     result, texts = update(w, adults=2)
     assert "children" not in result["facts"] and "child" not in json.dumps(result).lower()

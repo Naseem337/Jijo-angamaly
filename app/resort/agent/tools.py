@@ -751,6 +751,8 @@ class AgentTools:
                  "extra_bed_question": pending, "early_checkin": early, "price": price}
         if threes:
             facts["extra_beds_max"] = threes
+        if pending and not ask_now:  # asked before for this layout: the AI must not ask again
+            facts["extra_bed_question_already_asked"] = True
         last = (cur.checked or {}).get("key", "").split("|")
         changed = (cur.checked or {}).get("key") != key
         same_dates = last[:3] == key.split("|")[:3] or (
@@ -765,6 +767,10 @@ class AgentTools:
                           for p in (picks_arg or []))
         picked_now = (guest_chose and bool(pref) and picked_before != pref
                       and not (held and {b.room_type_id for b in held} == {pref}))
+        if picked_now:
+            facts["room_picked"] = offered[0].name
+        if capped:  # more beds than rooms that hold 3 adults: capped to the maximum
+            facts["extra_beds_capped_to"] = capped
 
         held_same = False  # is this the stay on the open link?
         if held:
@@ -794,18 +800,12 @@ class AgentTools:
             return self._relink(enq, prop, bk, parts, mix, [], lang, facts, start, contact=enq.contact)
         if not changed:
             return done(True, facts, UNCHANGED_NOTE)
-        if capped:  # more beds than rooms that hold 3 adults: capped to the maximum
-            facts["extra_beds_capped_to"] = capped
-        if picked_now:
-            facts["room_picked"] = offered[0].name
         if answered_only:  # only the answer to the extra-bed question came: nothing new to show
             return done(True, facts, SENT_NOTE)
         shown = list((cur.checked or {}).get("labels") or [])  # the room labels the last room check sent
         # new dates: the glimpse and the general photos, then each room's label and photos; only persons, rooms or the
         # room type changed: a new room's label and photos
         self._stay_photos(enq, prop, parts, bool(mix), price, not same_dates, shown)
-        if pending and not ask_now:
-            facts["extra_bed_question_already_asked"] = True
         return done(True, facts, SENT_NOTE + (" The old payment link is closed: a new summary and link follow the guest's "
                                               "answer to the extra-bed question." if closed_link else ""))
 

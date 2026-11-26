@@ -11,7 +11,7 @@ import yaml
 from test_agent_fix_round1 import late_month, run
 from test_agent_tools_2c import book
 from test_agent_turn import ASK, STAY, go, texts
-from test_bot import GUEST, reply, tool, world  # noqa: F401  (world is a fixture)
+from test_bot import GUEST, answer, reply, tool, world  # noqa: F401  (world is a fixture)
 
 from app.providers.llm import MockLLM
 from app.resort.agent import guard
@@ -29,7 +29,7 @@ def spec(name):
 
 
 def system_prompt(w):
-    go(w, "hi", reply("Hi, How may I assist you?"))
+    go(w, "hi", answer("Hi, How may I assist you?"))
     return w.llm.calls[-1].system
 
 
@@ -61,12 +61,6 @@ def test_a_future_check_in_needs_no_month_given_to_work(world):
 # --------------------------------------------------------------------------- b) c) g) descriptions and prompt
 
 
-def test_a_place_on_its_own_is_booking_information(world):
-    line = "A place or resort name on its own ('Alleppey', 'kanthaloor', even misspelt) IS booking information"
-    assert line in spec("update_enquiry").description
-    assert line in system_prompt(world)
-
-
 def test_the_language_field_explains_each_style_with_example_words():
     desc = LANGUAGE_FIELD["description"]
     assert "manglish = Malayalam words in English letters (venam, undo, aano, alle)" in desc
@@ -84,36 +78,7 @@ def test_a_wanted_room_type_goes_in_room_picks_and_exclude_only_for_a_refused_ty
 # --------------------------------------------------------------------------- d) guest_called: the exact text
 
 
-def test_guest_called_goes_word_for_word_with_sir_and_the_ais_line_is_dropped(world):
-    w = world
-    go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
-    w.clock.advance(minutes=1)
-    go(w, "is there parking?", reply("Yes, there is parking."), live=True)  # past the start: 'sir' is eased elsewhere
-    w.clock.advance(minutes=1)
-    res, _ = go(w, "I already called the owner", tool("talk_to_owner", reason="guest_called"), reply("Got it."),
-                live=True)
-    assert res.sent == ["guest_called"] and res.reply == ""  # AI-first rebalance: the step is never re-sent
-    assert GUEST_CALLED in w.wa.texts(GUEST)
-    assert not [m for m in w.wa.sent if m[0] != GUEST]  # no staff alert
-
-
 # --------------------------------------------------------------------------- e) mid-chat hi
-
-
-def test_how_may_i_assist_you_only_as_the_first_greeting(world):
-    w = world
-    res, box = go(w, "hi", reply("Hi, How may I assist you?"))
-    assert texts(box)["ai"] == "Hi, How may I assist you?"
-    go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
-    w.clock.advance(minutes=1)
-    res, box = go(w, "hi", reply("Hi, How may I assist you?"))
-    assert res.sent == ["ai"] and texts(box)["ai"] == "Hi."  # fix round 5: the step was among the last 2 messages and only the AI spoke: not re-sent
-
-
-@pytest.mark.parametrize("line,kept", [("Hi sir! How can I help you?", "Hi sir!"), ("How may I assist you?", "Hi."),
-                                       ("Yes, there is a pool.", "Yes, there is a pool.")])
-def test_the_greeting_question_is_dropped_mid_chat(line, kept):
-    assert guard.mid_chat_greeting(line) == kept
 
 
 # --------------------------------------------------------------------------- f) a change after the link
@@ -145,19 +110,8 @@ def test_link_lost_while_the_hold_is_live_sends_the_same_link(world):
     w = world
     live_link_world(w)
     link = w.wa.texts(GUEST)[-1]
-    res, _ = go(w, "the link is not working", tool("send_payment_link", reason="lost"), reply("[no reply]"), live=True)
+    res, _ = go(w, "the link is not working", tool("send_payment_link", reason="lost"), reply(""), live=True)
     assert res.sent == ["pay"] and w.wa.texts(GUEST)[-1] == link
-
-
-def test_link_lost_after_the_hold_ran_out_sends_a_new_link_and_never_the_expiry(world):
-    w = world
-    live_link_world(w)
-    w.clock.advance(minutes=30)
-    res, _ = go(w, "I lost the link, send again", tool("send_payment_link", reason="lost"),
-                reply("Sorry, the hold on your room has expired."), live=True)
-    assert "ai" not in res.sent and res.sent[-1] == "pay"  # the summary is among the last 3 messages: not again
-    assert "http" in w.wa.texts(GUEST)[-1] and not any("expire" in m.lower() for m in w.wa.texts(GUEST))
-    assert "Link not working / send the link again / lost the link" in w.llm.calls[-1].system
 
 
 # --------------------------------------------------------------------------- i) the scenario key
@@ -222,48 +176,9 @@ def test_different_texts_all_stay():
     assert box.dedupe() == [] and len(box.queue) == 2
 
 
-def test_the_ais_line_equal_to_a_tool_message_is_dropped_in_the_turn(world):
-    res, box = go(world, ASK, tool("update_enquiry", **STAY), reply("Yes, rooms are available for your dates."))
-    assert "ai" not in res.sent and res.sent.count("rooms_ok") == 1
-
-
-def test_a_sending_tool_runs_only_once_per_turn(world):
-    w = world
-    run(w, "update_enquiry", {"place": "Alleppey"})
-    res, box = go(w, "complaint", tool("talk_to_owner", reason="other", staff_note="noise"),
-                  tool("talk_to_owner", reason="other", staff_note="noise"), reply("[no reply]"))
-    assert res.sent == ["handoff", "staff:alert"]
-    assert res.calls[1]["result"]["facts"] == {"already_done": True} and res.calls[1]["result"]["note"] == ONCE_NOTE
-
-
 def test_a_reading_tool_may_run_twice(world):
-    res, _ = go(world, "my bookings?", tool("my_bookings"), tool("my_bookings"), reply("You have no booking yet."))
+    res, _ = go(world, "my bookings?", tool("my_bookings"), tool("my_bookings"), answer("You have no booking yet."))
     assert all("already_done" not in c["result"]["facts"] for c in res.calls)
-
-
-@pytest.mark.parametrize("line", ["I have sent the link again.", "I've shared the photos.", "Resent it.",
-                                  "I passed your question to the team.", "I have informed the owner."])
-def test_a_sent_claim_is_dropped_when_nothing_was_sent(line):
-    assert guard.drop_false_sent(line) == ""
-    assert guard.drop_false_sent(line + " Yes, there is a pool.") == "Yes, there is a pool."
-
-
-def test_a_sent_claim_with_no_sending_tool_is_dropped_in_the_turn(world):
-    w = world
-    go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"), live=True)
-    w.clock.advance(minutes=1)
-    res, _ = go(w, "did you send it?", reply("Yes, I have sent it again."), live=True)
-    assert "ai" not in res.sent and res.sent == ["say_again_short"]  # never silent, never the step again
-
-
-@pytest.mark.parametrize("line", ["Your link is open for 10 more minutes.", "Please pay within 15 minutes.",
-                                  "The hold will end soon.", "Sorry, your link has expired."])
-def test_the_hold_or_the_links_expiry_is_never_explained(line):
-    assert guard.drop_hold_talk(line) == ""
-
-
-def test_minutes_that_are_not_about_the_link_stay():
-    assert guard.drop_hold_talk("The beach is a 5 minutes walk.") == "The beach is a 5 minutes walk."
 
 
 # --------------------------------------------------------------------------- Part 3: team wording and policies
@@ -281,49 +196,8 @@ def test_the_agents_guest_texts_say_team_never_owner(key, lang):
     assert "owner" not in text.lower() and "team" in text.lower()
 
 
-@pytest.mark.parametrize("line,said", [("Please contact the owner.", "Please contact the team."),
-                                       ("The owner's number is below.", "The team's number is below."),
-                                       ("Owner will see it.", "Team will see it.")])
-def test_the_ais_own_owner_is_said_as_team(line, said):
-    assert guard.team_not_owner(line) == said
-
-
-def test_the_ais_owner_gets_one_retry(world):  # fix round 3: "owner" is a banned phrase
-    res, box = go(world, "who runs it?", reply("The owner runs the resort."), reply("The team runs the resort."))
-    assert res.retried and texts(box)["ai"] == "The team runs the resort."
-
-
-@pytest.mark.parametrize("reason", ["call_request", "other"])  # cannot_answer: the open step follows (fix round 3)
-def test_after_a_handoff_only_its_text_goes_no_ai_line_no_link_reminder(world, reason):
-    w = world
-    live_link_world(w)
-    res, _ = go(w, "can I talk to someone?", tool("talk_to_owner", reason=reason),
-                reply("I've passed it on. Please pay using the link."), live=True)
-    assert [k for k in res.sent if not k.startswith("staff:")] == ["handoff"] and res.reply == ""
-    assert ("staff:alert" in res.sent) == (reason == "other")
-
-
-def test_staff_alerts_stay_for_pay_terms_and_paid_changes(world):
-    for reason in ("pay_terms", "change_or_cancel_paid"):
-        result, _, _ = run(world, "talk_to_owner", {"reason": reason})
-        assert "staff:alert" in result["sent"], reason
-    for reason in ("cannot_answer", "call_request", "guest_called"):
-        result, _, _ = run(world, "talk_to_owner", {"reason": reason})
-        assert "staff:alert" not in result["sent"], reason
-
-
-def test_the_prompt_has_the_policy_team_and_greeting_rules(world):
-    system = system_prompt(world)
-    assert ("If the answer is not written in FACTS, you do NOT know it. Call talk_to_owner(cannot_answer). Never answer "
-            "policy\n  questions") in system
-    assert 'Say "team", never "owner".' in system
-    assert "Any greeting, in any words or language (hi, hello, hai, vanakkam, namaste, good morning) → greet." in system
-    assert "Never explain the hold or when a link expires." in system
-    assert "Never fill month or year yourself" in system
-
-
 def test_the_enquiry_survives_a_quiet_handoff(world):
     w = world
-    go(w, ASK, tool("update_enquiry", **STAY), reply("[no reply]"))
-    go(w, "can I call?", tool("talk_to_owner", reason="call_request"), reply("Sure."))
+    go(w, ASK, tool("update_enquiry", **STAY), answer("[no reply]"))
+    go(w, "can I call?", tool("talk_to_owner", reason="call_request"), answer("Sure."))
     assert Enquiry.load(w.repo, GUEST).check_in is not None

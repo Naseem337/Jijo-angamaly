@@ -212,7 +212,10 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     latest: list[tuple[ChatMessage, str]] = []  # the last round's tool results (full) and their one-line summaries
 
     def complete() -> Any:
-        response = llm.complete(system, messages, TOOL_SCHEMAS, MAX_REPLY_TOKENS, temperature=TEMPERATURE)
+        # while nothing has reached the guest this turn the AI MUST call a tool (live replay 2026-11-26: Haiku answered
+        # in plain text, a private note, and the guest got 'say that again'); afterwards it may end with no call
+        must = {} if outbox.spoke else {"tool_choice": "required"}
+        response = llm.complete(system, messages, TOOL_SCHEMAS, MAX_REPLY_TOKENS, temperature=TEMPERATURE, **must)
         result.add_usage(response)
         return response
 
@@ -222,7 +225,8 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             log.info("Agent note for %s (not sent): %s", phone[-4:], raw[:300])
 
     def sources() -> guard.Sources:
-        return guard.sources(bot, phone, Enquiry.load(bot.repo, phone), result.calls, outbox.texts, text,
+        facts_calls = [c for c in result.calls if c["name"] != "reply"]  # the guard's own retry note is no source
+        return guard.sources(bot, phone, Enquiry.load(bot.repo, phone), facts_calls, outbox.texts, text,
                              conv["started_at"])
 
     def send(reply: str) -> None:

@@ -6,7 +6,7 @@ import itertools
 from datetime import datetime
 
 import pytest
-from test_bot import GUEST, STAFF, reply, tool, world  # noqa: F401  (world is a fixture)
+from test_bot import GUEST, STAFF, answer, reply, tool, world  # noqa: F401  (world is a fixture)
 
 from app.conversation.voice_in import VoiceResult
 from app.resort.agent import gate
@@ -57,7 +57,7 @@ def test_agent_mode_agent_routes_every_message_to_the_gate(agent, monkeypatch):
 
 
 def test_in_agent_mode_the_ai_answers(agent):
-    assert send(agent, m("is there a pool?"), reply("Yes, there is a pool.")) == "answered"
+    assert send(agent, m("is there a pool?"), answer("Yes, there is a pool.")) == "answered"
     assert agent.wa.texts() == ["Yes, there is a pool."] and len(agent.llm.calls) == 1
 
 
@@ -66,7 +66,7 @@ def test_in_agent_mode_the_ai_answers(agent):
 
 def test_the_same_message_id_is_answered_once(agent):
     first = m("is there a pool?", id="wamid.same")
-    assert send(agent, first, reply("Yes, there is a pool.")) == "answered"
+    assert send(agent, first, answer("Yes, there is a pool.")) == "answered"
     assert agent.bot.handle(m("is there a pool?", id="wamid.same")) == "duplicate"
     assert len(agent.llm.calls) == 1 and len(agent.wa.texts()) == 1
 
@@ -91,8 +91,8 @@ def test_stop_and_start_are_answered_by_code_with_no_ai(agent):
 
 
 def test_start_when_not_stopped_and_stop_in_a_sentence_go_to_the_ai(agent):
-    assert send(agent, m("START"), reply("Sure, how may I help?")) == "answered"
-    assert send(agent, m("stop sending photos"), reply("Okay.")) == "answered"
+    assert send(agent, m("START"), answer("Sure, how may I help?")) == "answered"
+    assert send(agent, m("stop sending photos"), answer("Okay.")) == "answered"
     assert len(agent.llm.calls) == 2 and not agent.repo.get_state(GUEST).get("opted_out")
 
 
@@ -118,7 +118,7 @@ def test_a_paused_chat_gets_no_reply_and_resumes_after_24_hours(agent):
     assert agent.wa.texts() == [] and agent.llm.calls == []
     assert agent.repo.list_chat(GUEST)[-1].text == "hello?"  # still saved for the staff
     agent.clock.advance(hours=25)
-    assert send(agent, m("anyone?"), reply("Yes, how may I help?")) == "answered"
+    assert send(agent, m("anyone?"), answer("Yes, how may I help?")) == "answered"
     assert agent.repo.is_paused(GUEST)[0] is False and agent.wa.texts() == ["Yes, how may I help?"]
 
 
@@ -140,7 +140,7 @@ class Voice:
 def test_a_voice_note_becomes_text_for_the_ai(agent):
     voice = Voice(VoiceResult(text="is there a pool"))
     agent.bot._voice_in = lambda: voice
-    assert send(agent, m(kind="audio", media_id="a1"), reply("Yes, there is a pool.")) == "answered"
+    assert send(agent, m(kind="audio", media_id="a1"), answer("Yes, there is a pool.")) == "answered"
     assert last_user(agent).endswith("is there a pool") and voice.calls == 1
     row = [r for r in agent.repo.list_chat(GUEST) if r.direction == "in"][-1]
     assert row.text == "is there a pool" and row.source == "voice"
@@ -149,7 +149,7 @@ def test_a_voice_note_becomes_text_for_the_ai(agent):
 def test_a_voice_hiccup_is_retried_once(agent):
     voice = Voice(RuntimeError("download timed out"), VoiceResult(text="price please"))
     agent.bot._voice_in = lambda: voice
-    assert send(agent, m(kind="audio", media_id="a1"), reply("Sure.")) == "answered" and voice.calls == 2
+    assert send(agent, m(kind="audio", media_id="a1"), answer("Sure.")) == "answered" and voice.calls == 2
 
 
 def test_a_failed_voice_note_gets_voice_problem_and_no_ai(agent):
@@ -170,20 +170,20 @@ def test_an_unclear_voice_note_is_not_retried(agent):
 
 
 def test_an_image_reaches_the_ai_as_a_note_and_it_may_check_the_payment(agent):
-    out = send(agent, m(kind="image", media_id="img1"), tool("check_payment"), reply("I could not see a payment yet."))
+    out = send(agent, m(kind="image", media_id="img1"), tool("check_payment"), answer("I could not see a payment yet."))
     assert out == "answered" and IMAGE_NOTE in agent.llm.calls[0].messages[-1].content
     assert agent.llm.calls[1].messages[-2].tool_calls[0].name == "check_payment"
     assert agent.repo.list_chat(GUEST)[0].text == "[image]"
 
 
 def test_an_image_with_a_caption_keeps_the_caption(agent):
-    send(agent, m("payment done", kind="image", media_id="img1"), reply("Let me see."))
+    send(agent, m("payment done", kind="image", media_id="img1"), answer("Let me see."))
     assert last_user(agent).endswith(IMAGE_NOTE + ": payment done")
 
 
 def test_an_image_never_confirms_a_booking(agent):
-    out = send(agent, m(kind="image", media_id="img1"), reply("Your booking is confirmed!"),
-               reply("I could not see a payment yet."))
+    out = send(agent, m(kind="image", media_id="img1"), answer("Your booking is confirmed!"),
+               answer("I could not see a payment yet."))
     assert out == "answered" and agent.wa.texts() == ["I could not see a payment yet."]
 
 
@@ -204,7 +204,7 @@ def test_location_contact_and_video_get_the_unsupported_line(agent, kind):
 
 def test_a_swipe_reply_puts_the_note_line_before_the_guest_message(agent):
     agent.repo.add_chat(ChatMessage(GUEST, "out", "Do you need an extra bed?", agent.clock.now(), "text", "wamid.q1"))
-    send(agent, m("yes", context_id="wamid.q1"), reply("Okay."))
+    send(agent, m("yes", context_id="wamid.q1"), answer("Okay."))
     assert last_user(agent).splitlines()[-2:] == ['[Guest swiped-replied to your message: "Do you need an extra bed?"]',
                                                  "yes"]
 
@@ -214,13 +214,11 @@ def test_a_swipe_reply_puts_the_note_line_before_the_guest_message(agent):
 
 def test_a_full_turn_gate_ai_tools_guard_outbox_in_order(agent):
     out = send(agent, m("Alleppey 10 nov to 12 nov 2 persons, is there a pool?"), tool("update_enquiry", **STAY),
-               tool("get_price"), reply("Yes, there is a pool."))
+               tool("get_price"), answer("Yes, there is a pool."))
     assert out == "answered"
     texts = agent.wa.texts()
-    assert texts[0] == "Yes, there is a pool."  # the AI's line first
-    assert texts[1:4] == ["Yes, rooms are available for your dates.", "For 2 persons: 1 room(s).", "*Deluxe*"]
-    assert texts[4].startswith("Deluxe: ₹4,000 per room per night.")  # the tool messages in queue order
-    assert texts[5] == "Please share your name and mobile number to proceed."  # the open step always goes last
+    # tools first (the room label; get_price only gives facts), then the AI's reply(), which it wrote after the results
+    assert texts == ["*Deluxe*", "Yes, there is a pool."]
     assert agent.wa.texts(STAFF) == []
     stored = [r.text for r in agent.repo.list_chat(GUEST) if r.direction == "out"]
     assert stored == texts
@@ -234,6 +232,6 @@ def test_the_gate_with_a_dry_run_sends_nothing(agent):
             return lambda *a, **k: Spy.calls.append(name) or "wamid.spy"
 
     agent.bot.wa = Spy()
-    agent.llm.script.append(reply("Yes, there is a pool."))
+    agent.llm.script.append(answer("Yes, there is a pool."))
     assert gate.handle(agent.bot, m("is there a pool?"), dry_run=True) == "answered"
     assert [c for c in Spy.calls if c != "mark_read"] == []

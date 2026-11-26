@@ -57,8 +57,11 @@ class FallbackLLM:
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 1024,
         temperature: float | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
         extra = {} if temperature is None else {"temperature": temperature}  # providers that never heard of it still work
+        if tool_choice is not None:
+            extra["tool_choice"] = tool_choice
         failures: list[str] = []
         refusal: LLMResponse | None = None
         for attempt in range(2):

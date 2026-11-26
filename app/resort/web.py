@@ -151,8 +151,32 @@ async def razorpay_webhook(request: Request, background: BackgroundTasks) -> dic
 
 
 def sweep(now=None, services: ResortServices | None = None) -> dict[str, int]:
-    """Expire unpaid holds and message those guests; remind holds about to expire."""
-    return (services or get_services()).bot.sweep(now)
+    """Expire unpaid holds and message those guests; remind holds about to expire.
+
+    AGENT_MODE=agent (2026-11-26): the old flow's "Your payment link is still open for N more minutes" reminder is
+    skipped; payment confirmation, hold release and the ID-proof jobs keep running (flow.py is not changed)."""
+    bot = (services or get_services()).bot
+    if bot.config.agent_mode != "agent":
+        return bot.sweep(now)
+    return agent_sweep(bot, now)
+
+
+def agent_sweep(bot, now=None) -> dict[str, int]:
+    """BookingBot.sweep() without its hold-expiry reminder: the same steps, in the same order."""
+    now = now or bot.clock.now()
+    found = bot.check_payments()
+    expired = bot.repo.expire_holds(now)  # released quietly: no "expired" message to the guest
+    out = {"expired": len(expired), "reminded": 0}
+    if found:
+        out["paid_found"] = found
+    try:
+        if reminders := bot.remind_ids(now):
+            out["id_reminders"] = reminders
+        if purged := bot._purge_id_proofs(now):
+            out["id_purged"] = purged
+    except Exception:
+        log.exception("ID reminder / purge failed")
+    return out
 
 
 def start_sweeper(services: ResortServices, every_seconds: int = 15) -> Callable[[], None]:

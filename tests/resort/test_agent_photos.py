@@ -70,7 +70,8 @@ def block(w, rt, rooms, check_in=date(2026, 11, 10), check_out=date(2026, 11, 12
 def test_after_a_room_check_the_owners_order_goes(pw):
     w = pw
     result, items, _ = run(w, "update_enquiry", STAY)
-    assert result["sent"] == ["rooms_ok", "rooms_plain", "glimpse", "photos:3", "room_label", "photos:2", "ask_contact"]
+    # the AI writes 'rooms available' and the name ask itself; code sends the glimpse, photos and label in order
+    assert result["sent"] == ["glimpse", "photos:3", "room_label", "photos:2"] and result["next_step"] == "ask_contact"
     by = {k: (text, refs) for k, text, refs in items}
     assert by["glimpse"][0] == "Beachfront from ₹4,000 a night in the Deluxe."
     assert by["room_label"][0] == "*Deluxe*"
@@ -83,7 +84,7 @@ def test_the_glimpse_goes_once_and_a_second_check_sends_no_photo_twice(pw):
     w = pw
     run(w, "update_enquiry", STAY)
     result, items, _ = run(w, "update_enquiry", {**STAY, "check_in": "2026-11-20", "check_out": "2026-11-22"})  # new dates
-    assert result["sent"] == ["rooms_ok", "rooms_plain", "ask_contact"]  # glimpse, photos and label once
+    assert result["sent"] == [] and result["facts"]["available"]  # glimpse, photos and label once
     assert photo_rows(w) == w.general + w.refs["deluxe"]
 
 
@@ -91,8 +92,8 @@ def test_a_new_room_after_a_change_gets_only_its_own_photos(pw):
     w = pw
     run(w, "update_enquiry", STAY)
     result, items, _ = run(w, "update_enquiry", {**STAY, "room_picks": [{"room_type": "Family Suite"}]})  # same dates
-    assert result["sent"] == ["room_picked", "rooms_plain", "room_label", "photos:2", "ask_contact"]
-    assert items[2][1] == "*Family Suite*" and photo_rows(w)[-2:] == w.refs["family"]
+    assert result["sent"] == ["room_label", "photos:2"] and result["facts"]["room_picked"] == "Family Suite"
+    assert items[0][1] == "*Family Suite*" and photo_rows(w)[-2:] == w.refs["family"]
 
 
 def test_a_group_split_over_two_room_types_shows_both(pw):
@@ -127,7 +128,7 @@ def test_kind_default_gives_the_offered_room_then_the_next_free_one_then_photos_
     # Deluxe already went; the name ask went with the room check (AI-first rebalance: a step's text goes once)
     assert keys(items) == ["room_label", "photos:2"] and items[0][1] == "*Family Suite*"
     two, items, _ = run(w, "send_photos", {"kind": "default"})
-    assert keys(items) == ["photos_sent"] and items[0][1] == "All the photos are sent above."
+    assert keys(items) == [] and two["facts"]["all_photos_already_sent"] is True
 
 
 def test_kind_more_goes_on_with_the_next_photos(pw):
@@ -142,11 +143,12 @@ def test_kind_room_type_sends_that_rooms_photos_when_it_is_free(pw):
     checked(w)
     result, items, _ = run(w, "send_photos", {"kind": "room_type", "room_type": "family"})
     # fix round 3: not the offered room (Deluxe) -> 'also free' first, then its label and photos; nothing switches
-    assert result["ok"] and keys(items) == ["other_room_free", "room_label", "photos:2"]
-    assert items[1][1] == "*Family Suite*" and items[2][2] == w.refs["family"]
+    assert result["ok"] and keys(items) == ["room_label", "photos:2"]
+    assert result["facts"]["also_free_for_your_dates"] == "Family Suite"
+    assert items[0][1] == "*Family Suite*" and items[1][2] == w.refs["family"]
     assert Enquiry.load(w.repo, GUEST).checked["summary"] == "1 Deluxe"
     again, items, _ = run(w, "send_photos", {"kind": "room_type", "room_type": "family"})
-    assert keys(items) == ["other_free"]  # its photos already went: only 'Yes, Family Suite is also free ...'
+    assert keys(items) == [] and again["facts"]["also_free_for_your_dates"] == "Family Suite"  # photos already went
 
 
 def test_kind_resort_sends_only_the_general_photos_with_no_label(pw):
@@ -154,18 +156,17 @@ def test_kind_resort_sends_only_the_general_photos_with_no_label(pw):
     run(w, "update_enquiry", {"place": "Alleppey"})  # resort known, no dates: the general photos were not sent yet
     w.wa.sent.clear()
     result, items, _ = run(w, "send_photos", {"kind": "resort"})
-    assert [k for k in keys(items) if k != "dates_for_availability"][:1] == ["photos:3"] and items[0][2] == w.general
-    assert "room_label" not in keys(items)
+    assert keys(items) == ["photos:3"] and items[0][2] == w.general
     again, items, _ = run(w, "send_photos", {"kind": "resort"})
-    assert keys(items) == ["photos_sent"]
+    assert keys(items) == [] and again["facts"]["all_photos_already_sent"]
 
 
 def test_kind_other_room_says_it_is_free_then_sends_its_photos(pw):
     w = pw
     checked(w)
     result, items, _ = run(w, "send_photos", {"kind": "other_room"})
-    assert keys(items) == ["other_room_free", "room_label", "photos:2"]
-    assert items[0][1] == "Yes, Family Suite is also free for your dates. Photos below; tell me if you want this room."
+    assert keys(items) == ["room_label", "photos:2"]
+    assert result["facts"]["also_free_for_your_dates"] == "Family Suite"
     assert photo_rows(w)[-2:] == w.refs["family"]
 
 
@@ -174,8 +175,7 @@ def test_kind_other_room_when_its_photos_already_went_says_it_is_free(pw):
     checked(w)
     run(w, "send_photos", {"kind": "other_room"})
     result, items, _ = run(w, "send_photos", {"kind": "other_room"})
-    assert keys(items) == ["other_free"]
-    assert items[0][1] == "Yes, Family Suite is also free for your dates. Tell me if you want this room."
+    assert keys(items) == [] and result["facts"]["also_free_for_your_dates"] == "Family Suite"
 
 
 def test_kind_all_rooms_sends_every_free_room_not_shown_yet_one_after_another(pw):
@@ -197,7 +197,7 @@ def test_photos_already_sent_say_so(pw):
     checked(w)
     run(w, "send_photos", {"kind": "all_rooms"})
     result, items, _ = run(w, "send_photos", {"kind": "default"})
-    assert result["ok"] and keys(items) == ["photos_sent"] and items[0][1] == t("photos_sent", "en")
+    assert result["ok"] and keys(items) == [] and result["facts"]["all_photos_already_sent"]
 
 
 def test_another_room_that_is_not_free_says_no_other_room(pw):
@@ -205,7 +205,7 @@ def test_another_room_that_is_not_free_says_no_other_room(pw):
     block(w, w.family, 3)
     checked(w)
     result, items, _ = run(w, "send_photos", {"kind": "other_room"})
-    assert keys(items) == ["no_other_room"] and items[0][1] == "Sorry, no other room is free on your dates."
+    assert keys(items) == [] and result["facts"]["no_other_room_free_for_your_dates"]
 
 
 def test_a_named_room_that_is_not_free_says_room_not_free(pw):
@@ -213,7 +213,7 @@ def test_a_named_room_that_is_not_free_says_room_not_free(pw):
     block(w, w.family, 3)
     checked(w)
     result, items, _ = run(w, "send_photos", {"kind": "room_type", "room_type": "Family Suite"})
-    assert keys(items) == ["room_not_free"] and items[0][1] == "Sorry, Family Suite is not free on your dates."
+    assert keys(items) == [] and result["facts"]["room_not_free_for_your_dates"] == "Family Suite"
     assert photo_rows(w) == w.general + w.refs["deluxe"]  # nothing more went
 
 
@@ -238,27 +238,23 @@ def test_no_photo_uploaded_at_all_sends_nothing(world):
 def test_photos_asked_before_any_resort_ask_the_location_first_and_keep_the_request(pw):
     w = pw
     result, items, _ = run(w, "send_photos", {"kind": "room_type", "room_type": "Family Suite"})
-    assert keys(items) == ["ask_location"] and items[0][1] == "Sure, Kindly confirm the Location 📍\nAlleppey or Munnar ?"
-    assert result["facts"]["waiting_for"] == "location" and result["next_step"] == "ask_location"
+    assert keys(items) == [] and result["facts"]["towns"] == "Alleppey or Munnar"
+    assert result["facts"]["missing"] == ["place"] and result["next_step"] == "ask_location"
     assert Enquiry.load(w.repo, GUEST).photo_wish == {"kind": "room_type", "room_type": "Family Suite"}
     assert photo_rows(w) == []
-    # the guest answers: the photos go right after, then the dates line and the form (once)
+    # the guest answers: the photos go right after; the AI then asks for the details (form_lines)
     answer, items, _ = run(w, "update_enquiry", {"place": "Alleppey"})
-    assert keys(items) == ["room_label", "photos:2", "dates_for_availability", "form"]
+    assert keys(items) == ["room_label", "photos:2"] and answer["facts"]["form_lines"]
     assert items[0][1] == "*Family Suite*" and photo_rows(w) == w.refs["family"]
-    assert items[2][1] == "To check which rooms are available, we need your check-in and check-out dates."
-    assert items[3][1].startswith("Please share these details")
     assert Enquiry.load(w.repo, GUEST).photo_wish is None  # asked once, answered once
 
 
-def test_photos_before_the_dates_send_the_dates_line_and_the_form_once(pw):
+def test_photos_before_the_dates_go_without_any_code_text(pw):
     w = pw
     Enquiry(place=w.p1.id).save(w.repo, GUEST)  # the resort is known, no form has gone yet
     result, items, _ = run(w, "send_photos", {"kind": "default"})
-    assert keys(items) == ["room_label", "photos:2", "dates_for_availability", "form"]
-    assert items[2][1] == t("dates_for_availability", "en") and items[3][1].startswith("Please share these details")
+    assert keys(items) == ["room_label", "photos:2"]  # the AI asks for the dates in its own reply
     more, items, _ = run(w, "send_photos", {"kind": "more"})
-    # no second dates line and no second form: AI-first rebalance, a step's owner text goes once
     assert keys(items) == ["room_label", "photos:2"]
 
 
@@ -290,7 +286,7 @@ def test_each_photo_and_label_keeps_its_whatsapp_id_so_a_swipe_reply_finds_its_r
 def test_a_dry_run_sends_nothing_and_logs_nothing(pw):
     w = pw
     result, items, _ = run(w, "update_enquiry", STAY, live=False)
-    assert result["sent"][2:5] == ["glimpse", "photos:3", "room_label"] and w.wa.sent == [] and photo_rows(w) == []
+    assert result["sent"][:3] == ["glimpse", "photos:3", "room_label"] and w.wa.sent == [] and photo_rows(w) == []
 
 
 # --------------------------------------------------------------------------- audit: the reused helpers read nothing old
@@ -329,7 +325,8 @@ def test_a_failed_payment_link_in_a_change_goes_through_the_outbox_not_straight_
     tools = AgentTools(w.bot, GUEST, Outbox(GUEST, dry_run=True))
     result = tools.update_enquiry({**STAY, "adults": 4})
     texts = {i.key: i.text for i in tools.out.queue}
-    assert not result["ok"] and "pay_failed_link" in texts and "9497861924" in texts["pay_failed_link"]
+    assert not result["ok"] and "9497861924" in result["facts"]["numbers"]
+    assert [i.key for i in tools.out.queue if i.kind == "text"] == []  # the AI tells the guest
     assert w.wa.to(GUEST) == []  # nothing went to the guest past the outbox (a dry run sends nothing)
     staff = [i for i in tools.out.queue if i.kind == "staff"]  # the team's alert goes through the outbox too
     assert staff and STAFF in staff[0].to and staff[0].text.startswith("Guest needs the team: payment link could not be created")
@@ -348,7 +345,7 @@ def test_a_sold_out_race_in_a_change_tells_the_guest_through_the_outbox(pw):
     tools = AgentTools(w.bot, GUEST, Outbox(GUEST, dry_run=True))
     result = tools.update_enquiry({**STAY, "adults": 4})
     texts = {i.key: i.text for i in tools.out.queue}
-    assert not result["ok"] and texts.get("rooms_none") == "Sorry, rooms are not available for your dates."
+    assert not result["ok"] and texts == {} and result["facts"]["problem"]
     assert w.wa.to(GUEST) == []
 
 

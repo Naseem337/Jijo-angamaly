@@ -116,6 +116,13 @@ def say(w, text, phone=GUEST, *script):
 tool, reply = MockLLM.tool, MockLLM.text
 
 
+def answer(text, language=None, call_id="reply_1"):
+    """The agent's reply() tool call (AI-first simplification, 2026-11-26): the only way the AI writes to the guest."""
+    from app.providers.llm import LLMResponse, ToolCall
+    args = {"text": text, **({"language": language} if language else {})}
+    return LLMResponse("", [ToolCall(call_id, "reply", args)], "tool_calls", provider="mock", model="mock")
+
+
 def last_tool(w) -> dict:
     """The newest tool result the AI was shown."""
     return json.loads([m for m in w.llm.calls[-1].messages if m.role == "tool"][-1].content)

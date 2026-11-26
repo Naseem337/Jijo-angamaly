@@ -18,6 +18,7 @@ class RecordedCall:
     tools: list[ToolSpec]
     max_tokens: int
     temperature: float | None = None
+    tool_choice: str | None = None
 
 
 class MockLLM:
@@ -46,8 +47,9 @@ class MockLLM:
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 1024,
         temperature: float | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
-        self.calls.append(RecordedCall(system, list(messages), list(tools or []), max_tokens, temperature))
+        self.calls.append(RecordedCall(system, list(messages), list(tools or []), max_tokens, temperature, tool_choice))
         if not self.script:
             raise AssertionError(f"MockLLM '{self.name}' has no scripted reply left")
         item = self.script.pop(0)

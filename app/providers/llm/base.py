@@ -121,7 +121,10 @@ class LLMProvider(Protocol):
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 1024,
         temperature: float | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
         """One model call. Raises LLMError on any failure (network, HTTP, bad payload). temperature: only when a caller
-        needs a steady answer (the resort agent uses 0.3); None leaves the provider's own setting."""
+        needs a steady answer (the resort agent uses 0.3); None leaves the provider's own setting. tool_choice:
+        "required" = the model must call one of the tools (the resort agent, while nothing reached the guest); None =
+        the provider's default (it may answer in text)."""
         ...

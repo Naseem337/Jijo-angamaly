@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import anthropic
 import httpx
 from test_agent_turn import ASK, STAY, go
-from test_bot import GUEST, reply, tool, world  # noqa: F401  (world is a fixture)
+from test_bot import GUEST, answer, reply, tool, world  # noqa: F401  (world is a fixture)
 
 from app.providers.llm import AnthropicLLM, FallbackLLM, MockLLM, build_llm
 from app.providers.llm.anthropic import request
@@ -36,7 +36,7 @@ def test_the_cache_breakpoints_are_after_the_tools_and_after_the_static_system(w
     kw = request("model-from-env", system_of(world), [ChatMessage("user", "hi")], TOOL_SCHEMAS, 300, 0.2)
     static, dynamic = kw["system"]
     assert static["cache_control"] == {"type": "ephemeral"} and "cache_control" not in dynamic
-    assert "OWNER RULES" in static["text"] and "FACTS" in static["text"]  # FACTS stays in the cached part
+    assert "OWNER'S WORDS" in static["text"] and "FACTS" in static["text"]  # FACTS stays in the cached part
     today = world.bot._today().isoformat()
     assert "\nTODAY\n" not in static["text"] and "\nCURRENT ENQUIRY\n" not in static["text"] and today not in static["text"]
     assert today in dynamic["text"]
@@ -49,7 +49,7 @@ def test_the_cache_breakpoints_are_after_the_tools_and_after_the_static_system(w
 def test_nothing_per_guest_or_per_turn_is_in_the_cached_part(world):
     w = world
     first = static_prompt(w.bot)
-    go(w, ASK, tool("update_enquiry", **STAY), reply("Done."))  # this guest now has an enquiry
+    go(w, ASK, tool("update_enquiry", **STAY), answer("Done."))  # this guest now has an enquiry
     w.clock.advance(hours=30)  # another day
     assert static_prompt(w.bot) == first
     assert system_of(w).split(CACHE_SPLIT)[0] == system_of(w, "+919800000123").split(CACHE_SPLIT)[0] == first
@@ -70,14 +70,14 @@ def test_the_history_is_the_last_12_real_messages(world):
     for i in range(30):
         w.repo.add_chat(__import__("app.resort.models", fromlist=["ChatMessage"]).ChatMessage(
             GUEST, "in" if i % 2 == 0 else "out", f"message {i}", w.clock.now() - timedelta(minutes=100 - i), "text"))
-    go(w, "the new one", reply("ok"))
+    go(w, "the new one", answer("ok"))
     lines = [ln for m in w.llm.calls[0].messages for ln in m.content.splitlines()]
     assert HISTORY == 12 and len(lines) <= 13 and "message 17" not in lines and "message 29" in lines
 
 
 def test_an_earlier_rounds_tool_results_shrink_to_one_line(world):
     w = world
-    go(w, ASK + " price?", tool("update_enquiry", call_id="a", **STAY), tool("get_price", call_id="b"), reply("ok"))
+    go(w, ASK + " price?", tool("update_enquiry", call_id="a", **STAY), tool("get_price", call_id="b"), reply(""))
     third = [m for m in w.llm.calls[2].messages if m.role == "tool"]
     assert third[0].tool_call_id == "a" and third[0].content.startswith("[earlier result] update_enquiry: ok")
     assert "\n" not in third[0].content and "next ask_contact" in third[0].content
@@ -139,7 +139,7 @@ class Broken:
 
 def test_a_provider_that_raises_typeerror_hands_the_turn_to_the_next_provider(world, caplog):
     w = world
-    w.llm.script.extend([tool("update_enquiry", **STAY), reply("Sure.")])
+    w.llm.script.extend([tool("update_enquiry", **STAY), answer("Sure.")])
     chain = FallbackLLM([Broken(), w.llm])
     from app.resort.agent.outbox import bot_outbox
     from app.resort.agent.turn import run_turn
@@ -147,7 +147,7 @@ def test_a_provider_that_raises_typeerror_hands_the_turn_to_the_next_provider(wo
     w.repo.add_chat(Row(GUEST, "in", ASK, w.clock.now(), "text"))
     with caplog.at_level(logging.WARNING):
         res = run_turn(w.bot, chain, GUEST, ASK, bot_outbox(w.bot, GUEST, dry_run=True))
-    assert res.outcome != "ai_down" and [c["name"] for c in res.calls] == ["update_enquiry"]
+    assert res.outcome != "ai_down" and [c["name"] for c in res.calls] == ["update_enquiry", "reply"]
     crashed = [r.getMessage() for r in caplog.records if "crashed, trying next" in r.getMessage()]
     assert crashed and all("\n" not in m for m in crashed) and "TypeError" in crashed[0]
 
