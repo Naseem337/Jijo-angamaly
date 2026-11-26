@@ -921,7 +921,7 @@ def test_after_payment_the_guest_gets_only_the_clients_confirmation_with_the_roo
         "Guest - Asha Menon", "98470 12345",
         "Check in - 10th Nov 26", "Check out - 12th Nov 26", "2 Nights", "2 PAX", "1 Room",
         "*#104*", "*Deluxe*",
-        "Room Cost - 8,000", "Total Cost - 8,000", "",
+        "Room Cost - 4,000/Night", "Total Cost - 8,000", "",
         "Advance Paid - 4,000", "Balance Payable - 4,000", "*Booking Confirmed ✅*"])
 
 
@@ -1539,7 +1539,7 @@ def test_the_summary_is_built_in_english_laid_out_line_by_line_and_sent_before_t
         "1 Room",
         "*Deluxe*",
         "*Stay Only*",
-        "Room Cost - 8,000",
+        "Room Cost - 4,000/Night",
         "Early Check-in Charges - 1,000",
         "Total Cost - 9,000", "",
         "As a procedure you may need to pay an advance to block the room.", "",
