@@ -99,6 +99,10 @@ S: dict[str, dict[str, str]] = {
     "rooms_most": _t(*["For your dates {rooms} room(s) are free, enough for up to {cap} persons. Please tell me how many "
                        "persons will come, or send other dates for all {persons}."] * 4),
     "min_rooms": _t(*["Max 3 persons per room, so {persons} persons need at least {rooms} rooms."] * 4),
+    # owner, 2026-11-27: a group bigger than the free rooms on their dates (agent), word for word in every language
+    "group_too_big": _t(*["Sorry, At present we have only availability of {free_rooms} Rooms for your dates, which can "
+                          "accommodate upto {max_people} People Maximum. For your requirement, additional Rooms may be "
+                          "required.\n\nFor additional informations kindly connect directly on call 🤙 {numbers}"] * 4),
     "or": _t("or", "അല്ലെങ്കിൽ", "அல்லது", "या"),
     # the client wants no talk about payment here (2026-11-17): just the link and "please pay"
     "pay": _t('Please pay the advance using this link:\n{url}',

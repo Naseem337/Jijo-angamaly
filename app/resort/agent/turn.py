@@ -147,8 +147,10 @@ def swipe_note(bot: Any, phone: str, context_id: str | None) -> str:
             return (f"{SWIPE_MARK} a general photo of the resort{f' ({prop.name})' if prop else ''}, not of a room. "
                     "Treat the message as a question about the resort, never as a room choice.]")
         rt = bot.repo.get_room_type(sent["room_type_id"])
-        if rt is not None:
+        if rt is not None and rt.active:
             return _room_note(what, rt, sent["room_number"])
+        if rt is not None:  # switched off in the dashboard: invisible to guests, never named
+            return f"{SWIPE_MARK} an earlier message. If they mean a room, ask: \"{WHICH_ROOM}\"]"
     if quoted is None:  # an old message or one we never logged: the room is not known
         return f"{SWIPE_MARK} an earlier message that cannot be found. If they mean a room, ask: \"{WHICH_ROOM}\"]"
     if quoted.direction == "out":
@@ -277,6 +279,9 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
 
     def do_reply(args: dict[str, Any]) -> dict[str, Any]:
         """reply(text): the guest's message, through the guards (a, b: one retry; c: stripped)."""
+        if tools.code_final:  # code already sent the owner's complete answer (big group): the AI adds nothing
+            return {"ok": True, "facts": {"sent_to_guest": True},
+                    "note": "The owner's message already went. Nothing more is sent this turn."}
         if tools.lang is not None:
             tools.lang.take(args.get("language"))  # the reply's language is this turn's language
         src = sources()
@@ -503,7 +508,8 @@ def form_recent(bot: Any, phone: str, form: str) -> bool:
 
 RECENT = 3  # a TOOL text (nearly) the same as one of our last 3 messages is dropped (room labels, glimpse ...)
 LINK_KEYS = ("pay", "hold_pay")
-ALWAYS = ("ai", "ai_down", "say_again_short")  # the AI's reply, an outage notice and the last fallback always go
+# the AI's reply, an outage notice, the last fallback and the big-group answer (the AI adds nothing to it) always go
+ALWAYS = ("ai", "ai_down", "say_again_short", "group_too_big")
 
 
 def drop_recent(bot: Any, phone: str, outbox: Outbox, *, link_asked: bool = False) -> list[Any]:

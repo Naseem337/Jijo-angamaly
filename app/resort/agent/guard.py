@@ -73,6 +73,7 @@ class Sources:
     free_now: bool = False  # a tool returned a free room this turn
     checked_now: bool = False  # a tool checked availability this turn (free or not)
     paid_done: bool = False  # the latest booking is PAID and no new enquiry / link has started
+    pay_ok: bool = True  # the guest has a valid open hold for THIS exact stay: only then may a reply ask to pay
 
     @property
     def everything(self) -> str:
@@ -166,7 +167,7 @@ def clean(reply: str, src: Sources) -> str:
     lines = []
     for line in text.split("\n"):  # an internal-action sentence goes, the rest stays
         kept = [s for s in SENTENCE.split(line) if not INTERNAL.search(s)
-                and not (src.paid_done and PAY_ASK.search(s))]
+                and not ((src.paid_done or not src.pay_ok) and PAY_ASK.search(s))]
         if kept or not line.strip():
             lines.append(" ".join(kept))
     text = "\n".join(lines)
@@ -223,7 +224,15 @@ def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_te
     tools = "\n".join([json.dumps(c.get("result"), ensure_ascii=False, default=str) for c in calls] + tool_texts + ours)
     paid = enq.paid or any(b.status == "paid" for b in bot.repo.list_bookings(phone=phone, limit=20))
     latest = next(iter(bot.repo.list_bookings(phone=phone, limit=1)), None)
+    held = bot._open_hold(phone)
     paid_done = (latest is not None and latest.status in ("paid", "checked_in", "checked_out")
-                 and not bot._open_hold(phone) and (enq.paid or not enq.active))
+                 and not held and (enq.paid or not enq.active))
+    # 2026-11-27: "pay the advance" / the link only when an open hold matches the enquiry's stay (place and dates);
+    # a group too big for the free rooms, or a new stay with no link yet, never gets a pay ask
+    pay_ok = bool(held) and not any(((c.get("result") or {}).get("facts") or {}).get("group_too_big")
+                                         for c in calls) and all(
+        want is None or want == got for want, got in ((enq.place, held[0].property_id),
+                                                      (enq.check_in, held[0].check_in),
+                                                      (enq.check_out, held[0].check_out)))
     return Sources(code=tools + "\n" + facts, guest="\n".join([*said, guest_text]), paid=paid,
-                   free_now=free_in(calls), checked_now=checked_in(calls), paid_done=paid_done)
+                   free_now=free_in(calls), checked_now=checked_in(calls), paid_done=paid_done, pay_ok=pay_ok)

@@ -30,7 +30,7 @@ from app.resort.agent.outbox import Outbox
 from app.resort.agent.state import LANGUAGES, Enquiry
 from app.resort.agent.mobile import check as check_mobile
 from app.resort.agent.script import to_latin
-from app.resort.chat import _Turn, _count_name, _money, close_word, latin_places
+from app.resort.chat import _Turn, _count_name, _money, close_word, display_phone, latin_places
 from app.resort.i18n import status_name, t
 from app.resort.models import Property, RoomType
 from app.resort.refunds import cancellation_terms
@@ -74,6 +74,7 @@ DATE_FIELD = {"type": "object",
 ONCE_TOOLS = ("send_payment_link", "send_photos", "create_booking", "check_payment", "talk_to_owner", "send_map",
               "send_details")
 ONCE_NOTE = "Already done this turn: nothing more was sent. Do not call it again."
+BIG_GROUP_KEY = "agent_big_group"  # guest state: the enquiry (resort|check-in|check-out) the team was alerted about
 
 # Descriptions are short (one example each) and do not repeat the system prompt: they are sent on every call (cached).
 TOOL_SCHEMAS = [
@@ -454,6 +455,7 @@ class AgentTools:
         # the guest's message of this turn (run_turn passes it); None = a call outside a guest turn: places not checked
         self.guest_text = guest_text
         self.ran: list[str] = []  # the tools that ran this turn (ONCE_TOOLS run at most once)
+        self.code_final = False  # code sent the owner's complete answer this turn: reply() sends nothing more
 
     @property
     def sending_ran(self) -> bool:
@@ -529,6 +531,36 @@ class AgentTools:
             out.append({"room_type": rt.name, "asked": asked, "free_rooms": free, "free": free >= asked,
                         "max_adults_per_room": av.room_cap(rt)})
         return out
+
+    def _group_too_big(self, prop: Property, ci: date, co: date, adults: int) -> tuple[int, int] | None:
+        """(free rooms, most adults they hold) when the free ACTIVE rooms on these dates are too few for the group;
+        None when they can hold it or nothing at all is free (that is the plain 'not available' answer)."""
+        repo, now = self.bot.repo, self.bot.clock.now()
+        free = [(rt, repo.free_rooms(rt, ci, co, now, self.phone)) for rt in repo.list_room_types(prop.id)]
+        rooms = sum(n for _, n in free if n > 0)
+        most = sum(n * av.room_cap(rt) for rt, n in free if n > 0)
+        return (rooms, most) if rooms and most < adults else None
+
+    def _big_group_alert(self, prop: Property, ci: date, co: date, adults: int, free_n: int, most: int) -> None:
+        """'Big group enquiry' for the team, once per enquiry (resort + dates), never again on the next messages."""
+        repo = self.bot.repo
+        key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}"
+        state = repo.get_state(self.phone)
+        if state.get(BIG_GROUP_KEY) == key:
+            return
+        state[BIG_GROUP_KEY] = key
+        repo.set_state(self.phone, state)
+        guest = repo.get_guest(self.phone)
+        per_room = max((av.room_cap(rt) for rt in repo.list_room_types(prop.id)), default=3)
+        nights = (co - ci).days
+        text = (f"Big group enquiry 👥\n"
+                f"Guest: {(guest.name if guest and guest.name else 'not given')} ({display_phone(self.phone)})\n"
+                f"Resort: {self.bot._place_label(prop)}\n"
+                f"Dates: {ci.strftime('%d %b %Y')} – {co.strftime('%d %b %Y')} ({nights} night{'s' if nights != 1 else ''})\n"
+                f"Adults: {adults}\n"
+                f"Free now: {free_n} rooms (up to {most})\n"
+                f"Needs: about {-(-adults // per_room)} rooms")
+        self.out.staff("staff:big_group", text, self.bot.staff_numbers(prop.id))
 
     def _said_recently(self, text: str) -> bool:
         """This text (nearly) is among the bot's last 3 messages."""
@@ -865,6 +897,20 @@ class AgentTools:
             enq.early_checkin = False
             return done(False, {"problem": "early check-in for a stay over two room types is arranged by the owner"},
                         "Use talk_to_owner for this.")
+        if not parts and (big := self._group_too_big(prop, ci, co, adults)):
+            # owner, 2026-11-27: the free ACTIVE rooms cannot hold the group. CODE sends the owner's text word for word;
+            # the AI adds nothing (no link, no pay ask, no room details); the team gets one alert per enquiry
+            free_n, most = big
+            if held:  # the open booking stays as it was
+                for f in ("check_in", "check_out", "adults", "rooms", "room_picks", "extra_beds", "early_checkin",
+                          "checked"):
+                    setattr(enq, f, getattr(cur, f))
+            self.out.text("group_too_big", t("group_too_big", lang, free_rooms=free_n, max_people=most,
+                                             numbers=self._numbers(prop)))
+            self._big_group_alert(prop, ci, co, adults, free_n, most)
+            self.code_final = True
+            return done(True, {"available": False, "group_too_big": True, "owner_message_sent": True},
+                        "The owner's message went. Send nothing more this turn.")
         if not parts:  # not available: never a dead end (extra-bed offer, or the nearest free dates)
             scratch: dict[str, Any] = {"lang": lang}
             text = bot._no_room_answer(scratch, prop, bk, ci, co, adults, children, wanted)
