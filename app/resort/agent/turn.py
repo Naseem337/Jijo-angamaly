@@ -249,6 +249,11 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
 
     def do_reply(args: dict[str, Any]) -> dict[str, Any]:
         """reply(text): the guest's message, through the guards (a, b: one retry; c: stripped)."""
+        if any(i.key == "ai" for i in outbox.queue + outbox.sent):
+            # owner, 2026-11-26: exactly ONE reply set per guest message (live: 'ok' got 'Okay' AND 'Okay 👍' when the
+            # AI called reply() twice in one round); a second reply() this turn is never sent
+            log.info("Agent: a second reply() for %s this turn was not sent", phone[-4:])
+            return {"ok": True, "facts": {"already_replied": True}, "note": "Your reply already went. Send nothing more."}
         if tools.lang is not None:
             tools.lang.take(args.get("language"))  # the reply's language is this turn's language
         src = sources()
