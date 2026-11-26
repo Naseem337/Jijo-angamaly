@@ -143,8 +143,8 @@ def _transcribe(bot: Any, msg: Any) -> tuple[str, str]:
             return result.text.strip(), ""
         problem = getattr(result, "problem", None)
         why = f"{problem or 'empty'}: {(getattr(result, 'detail', '') or '')[:120]}".strip(": ")
-        if problem in ("too_long", "unclear"):
-            break  # the same audio gives the same answer: no retry
+        if problem == "too_long":
+            break  # the same audio gives the same answer: no retry (an empty transcript is tried twice, 2026-11-26)
     return "", why
 
 

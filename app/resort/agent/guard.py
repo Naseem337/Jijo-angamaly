@@ -37,6 +37,7 @@ SENTENCE = re.compile(r"(?<=[.!?])\s+")
 # "X is (also) free / available": a room claim (free parking or a free cancellation is not one)
 FREE_CLAIM = re.compile(r"\b(?:is|are)\s+(?:also\s+|still\s+)?(?:free|available)\b", re.IGNORECASE)
 ROOM_WORDS = re.compile(r"\b(?:rooms?|cottages?|suites?|for your dates|on your dates)\b", re.IGNORECASE)
+INDIC = re.compile(r"[ऀ-ॿ஀-௿ഀ-ൿ]")  # Hindi, Tamil, Malayalam script
 AMOUNTS_KEY = "agent_amounts"  # guest state: the numbers tool results gave in this conversation
 
 
@@ -70,6 +71,9 @@ def numbers_in(text: str) -> set[float]:
 def sentence_problem(sentence: str, src: Sources, known: set[float] | None = None) -> str:
     """What is wrong with one sentence of the reply ('' = fine), said so the AI can fix it."""
     known = numbers_in(src.everything) if known is None else known
+    if INDIC.search(sentence):  # the bot writes English letters only (the guest may write any script)
+        return ("Write in English letters only: Malayalam script → Manglish, Tamil → Tanglish, Hindi → Hinglish "
+                "(the same words in English letters).")
     for a, b in AMOUNT.findall(sentence):
         raw = a or b
         if (value := _num(raw)) is not None and value not in known:

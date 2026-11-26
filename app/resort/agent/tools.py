@@ -28,7 +28,8 @@ from app.resort.agent import photos_plan as pp
 from app.resort.agent.language import TurnLanguage
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.state import LANGUAGES, Enquiry
-from app.resort.chat import _Turn, _count_name, _money, close_word
+from app.resort.agent.script import to_latin
+from app.resort.chat import _Turn, _count_name, _money, close_word, latin_places
 from app.resort.i18n import status_name, t
 from app.resort.models import Property, RoomType
 from app.resort.refunds import cancellation_terms
@@ -58,9 +59,10 @@ LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
                                  "letters (chahiye, hai, kya)"}
 
 DATE_FIELD = {"type": "object",
-              "description": "Copy only what the guest said. Never fill month or year yourself. '20 Nov' → {day: 20, "
-                             "month: 11}. A month word the guest wrote is ALWAYS copied. Only leave month null if the "
-                             "guest wrote no month.",
+              "description": "For relative dates ('today', 'tomorrow', 'day after tomorrow' / 'മറ്റന്നാൾ' / 'naalai', "
+                             "'next Friday', 'this weekend', 'the next day' for check-out), compute the exact date from "
+                             "TODAY and give day, month and year. For dates the guest wrote as numbers / months, copy "
+                             "only what they said: '20 Nov' → {day: 20, month: 11}; never fill month or year yourself.",
               "properties": {"day": {"type": "integer", "description": "1-31"},
                              "month": {"type": "integer", "description": "1-12, or null"},
                              "year": {"type": "integer", "description": "null if not said"}},
@@ -496,7 +498,9 @@ class AgentTools:
         """Every word the guest wrote in this conversation (since a restart or a long gap), this turn's message too."""
         rows = self.bot.repo.list_chat(self.phone, limit=200)
         said = [m.text for m in rows[conversation.start_index(rows):] if m.direction == "in"]
-        return [w for text in [*said, self.guest_text or ""] for w in _words(text)]
+        # a place in Malayalam / Tamil / Hindi script (ആലപ്പുഴ) is compared in English letters too (live voice, 2026-11-26)
+        return [w for text in [*said, self.guest_text or ""]
+                for w in _words(text) + _words(to_latin(text)) + _words(latin_places(text))]
 
     def _place_said(self, place: str) -> bool:
         """The place the AI passed is one the guest wrote in this chat: its own words, or a dashboard name / alias of the
@@ -646,6 +650,10 @@ class AgentTools:
         # 1. the place: only one the guest wrote in this chat counts (else it is ignored); unknown -> the owner's
         # location question; switched off -> closed_place; not one of ours -> not_our_place
         place = str(args.get("place") or "").strip()
+        if place and latin_places(place) != place:  # the AI passed it in native script: compared in English letters
+            place = " ".join(_words(latin_places(place))) or to_latin(place)
+        elif place:
+            place = to_latin(place)
         ignored = ""
         if place and not self._place_said(place):
             ignored, place = place, ""  # the AI's own guess: never taken
@@ -670,6 +678,18 @@ class AgentTools:
             prop = self._only_resort()  # one resort only: the place is set and the location question never goes
         if prop is None or not prop.active:
             enq.place = None
+            # everything the guest already gave is kept, so the room check runs as soon as the place comes (2026-11-26)
+            try:
+                ci_p, co_p = _date_parts(args.get("check_in")), _date_parts(args.get("check_out"))
+                ci0 = build_check_in(ci_p, today)[0] if ci_p else None
+                co0 = build_check_out(co_p, ci0 or cur.check_in or today) if co_p else None
+                if ci0 and co0 is None and (n0 := _int(args, "nights")):
+                    co0 = ci0 + timedelta(days=n0)
+                enq.check_in, enq.check_out = ci0 or cur.check_in, co0 or cur.check_out
+            except (ValueError, TypeError):
+                pass
+            enq.adults = _int(args, "adults", cur.adults)
+            enq.rooms = _int(args, "rooms", cur.rooms) or None
             facts = {"missing": ["place"], "towns": towns_or(bot)}
             if ignored:
                 facts["place_ignored"] = f"the guest has not written '{ignored}' in this chat"

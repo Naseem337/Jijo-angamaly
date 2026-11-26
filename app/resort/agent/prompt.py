@@ -11,7 +11,7 @@ No price, rate or amount is ever written into this prompt: they come only from t
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from app.providers.llm.base import CACHE_SPLIT
@@ -61,8 +61,8 @@ guess. Never say booked, confirmed or reserved before check_payment says paid. D
 a real good point from FACTS; second ask → talk_to_owner(other) + handoff. Not in FACTS → talk_to_owner(cannot_answer)
 + handoff (nearby places, weather, how to reach: general knowledge is fine).
 
-TONE: short, warm, human; answer exactly what was asked, usually one or two short sentences. Use the guest's LATEST
-message's language in English letters (English, Manglish, Tanglish, Hinglish); pass it as language on every call.
+TONE: short, warm, human; answer exactly what was asked, usually one or two short sentences. Reply in the LATEST
+message's language, ALWAYS in English letters (Malayalam script → Manglish, Tamil → Tanglish, Hindi → Hinglish).
 "sir" / "madam" only in your first reply; never the guest's name; "team", never "owner". Never mention link expiry,
 the hold, tools, AI, the payment provider or booking ids, or your thinking. Never repeat what already_told lists. The
 guest answered a question and changed=false → "Ok." first, then ONLY the next step, in one message ("Ok. Please share
@@ -88,9 +88,18 @@ def today_block(today: date) -> str:
         month = date(today.year + today.month // 12, today.month % 12 + 1, 1)
     else:
         day, month = 15, today
+    def full(d: date) -> str:
+        return f"{{day: {d.day}, month: {d.month}, year: {d.year}}}"
+
+    tomorrow, after = today + timedelta(days=1), today + timedelta(days=2)
+    friday = today + timedelta(days=(4 - today.weekday()) % 7 or 7)
+    saturday = today + timedelta(days=(5 - today.weekday()) % 7)
     return (f"TODAY\nToday is {today.strftime('%a')} {today.day} {today.strftime('%b %Y')} ({today.isoformat()}), "
-            f"India time. Dates: pass only what the guest said ('{day}' → {{day: {day}}}); code takes the next time "
-            f"it comes ({day} {month.strftime('%b')}).")
+            f"India time. Dates written as numbers / months: pass only what the guest said ('{day}' → {{day: {day}}}); "
+            f"code takes the next time it comes ({day} {month.strftime('%b')}). Relative dates: compute the full date "
+            f"from today: today → {full(today)}; tomorrow / naale / kal → {full(tomorrow)}; day after tomorrow / "
+            f"മറ്റന്നാൾ / mattannal / naalai marunaal → {full(after)}; next Friday → {full(friday)}; this weekend → "
+            f"check-in {full(saturday)}; 'check-out the next day' → check-in + 1 day.")
 
 
 CONFIRMED = ("paid", "checked_in", "checked_out")
