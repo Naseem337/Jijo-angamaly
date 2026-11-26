@@ -280,7 +280,7 @@ def _restart(bot: Any, phone: str, box: Outbox) -> str:
 
 
 def _reset_all(bot: Any, phone: str, box: Outbox) -> str:
-    """Tester-only 'reset all': what restart does (unpaid links closed) PLUS every booking of this phone deleted (the
+    """Tester-only 'reset all': what restart does (unpaid links closed) PLUS every UNPAID booking of this phone deleted (paid ones are kept; the
     rooms are free again) and everything stored about it gone: chat, chat state (enquiry, language, pause, opt-out)
     and the guest record. Then "Reset done." Other phones are never touched."""
     close_unpaid(bot, phone)

@@ -303,17 +303,21 @@ class ResortRepo:
         return counts
 
     def delete_phone_data(self, phone: str) -> dict[str, int]:
-        """Tester 'reset all': this one phone's bookings (with their charges, refunds and ID proofs, so the rooms are
-        free again), its chat, its chat state and its guest record. Nothing of any other phone is touched."""
+        """Tester 'reset all': this one phone's UNPAID bookings (with their charges, refunds and ID proofs, so the rooms
+        are free again), its chat, its chat state and, when no paid booking is left, its guest record. Paid / checked-in
+        / checked-out bookings are always kept (2026-11-27). Nothing of any other phone is touched."""
         counts = {}
+        keep = ("paid", "checked_in", "checked_out")
         with self._tx() as db:
-            ids = [r[0] for r in db.execute("SELECT id FROM bookings WHERE guest_phone = ?", (phone,)).fetchall()]
+            ids = [r[0] for r in db.execute(
+                f"SELECT id FROM bookings WHERE guest_phone = ? AND status NOT IN ({','.join('?' * len(keep))})",
+                (phone, *keep)).fetchall()]
             marks = ",".join("?" * len(ids))
             for table in ("charges", "refunds", "id_proofs"):
-                counts[table] = db.execute(f"DELETE FROM {table} WHERE booking_id IN ({marks})", ids).rowcount \
-                    if ids else 0
-            counts["bookings"] = db.execute("DELETE FROM bookings WHERE guest_phone = ?", (phone,)).rowcount
-            for table in ("chat", "chat_state", "guests", "photo_sends"):
+                counts[table] = db.execute(f"DELETE FROM {table} WHERE booking_id IN ({marks})", ids).rowcount                     if ids else 0
+            counts["bookings"] = db.execute(f"DELETE FROM bookings WHERE id IN ({marks})", ids).rowcount if ids else 0
+            paid_left = db.execute("SELECT COUNT(*) FROM bookings WHERE guest_phone = ?", (phone,)).fetchone()[0]
+            for table in ("chat", "chat_state", "photo_sends") + (() if paid_left else ("guests",)):
                 counts[table] = db.execute(f"DELETE FROM {table} WHERE phone = ?", (phone,)).rowcount
         return counts
 

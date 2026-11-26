@@ -288,6 +288,10 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             return {"ok": False, "facts": {"problem": reasons},
                     "note": f"Your reply was removed because: {'; '.join(reasons)}. Answer the guest's last message "
                             "again without that."}
+        if unreadable(text) and SWIPE_MARK not in swipe:  # nothing to read: the only place for 'say that again'
+            result.outcome = "say_again"
+            outbox.text("say_again_short", t("say_again_short", I18N_LANG[words.now]))
+            return {"ok": True, "facts": {"sent_to_guest": True}, "note": "A short answer went. Do not call reply() again."}
         line = fallback_line(bot, phone, tools, I18N_LANG[words.now])
         log.warning("Agent fallback for %s: '%s' (removed twice: %s | %s)", phone[-4:], line[:80], repeats[0],
                     "; ".join(reasons))

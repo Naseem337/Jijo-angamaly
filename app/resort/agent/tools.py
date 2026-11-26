@@ -1721,8 +1721,12 @@ class AgentTools:
             return self._result(False, {"open_link": False}, start, enq,
                                 "No payment link is open for this guest: follow next_step.")
         b = live[0]
-        if reason == "hold":
-            self.out.text("hold_pay", t("hold_pay", lang, url=b.payment_link_url))
+        hold_text = t("hold_pay", lang, url=b.payment_link_url)
+        rows = repo.list_chat(phone, limit=200)
+        said_hold = any(m.direction == "out" and b.payment_link_url in m.text and m.text.strip() == hold_text.strip()
+                        for m in rows[conversation.start_index(rows):])
+        if reason == "hold" and not said_hold:  # the hold text goes ONCE per link (2026-11-27); later: the plain link
+            self.out.text("hold_pay", hold_text)
         else:
             self.out.text("pay", pay_text(b, lang, now))
         enq.booking_id, enq.link_open = b.id, True
