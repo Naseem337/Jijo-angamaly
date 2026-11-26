@@ -1303,8 +1303,51 @@ class AgentTools:
         rooms = sum(p["rooms"] for p in parts)
         facts = {"room_type": room, "rooms": rooms, "extra_beds": beds, "dates": av.fmt_range(ci, co),
                  "nights": (co - ci).days, "price": price}
-        return self._result(True, facts, start, enq, "Only a price answer: nothing is booked or changed. Give the "
-                            "amounts with reply() (per room per night when there is one, and the total).")
+        # owner, 2026-11-26: the price goes as CODE's structured block, its own message; the AI never rewrites it
+        self.out.text("price", self._price_block(prop, parts, ci, co, price))
+        facts["price_block_sent"] = True
+        return self._result(True, facts, start, enq, "Only a price answer: nothing is booked or changed. The price block "
+                            "went by itself as its own message: never repeat or rewrite the amounts; reply() only "
+                            "for anything else the guest asked (or nothing).")
+
+    def _price_block(self, prop: Property, parts: list[dict[str, Any]], ci: date, co: date,
+                     price: dict[str, Any]) -> str:
+        """The price as short lines (owner's layout): room name, dates, room cost, extra bed, total, advance, balance.
+        Several room types: one line each. Every amount comes from _price_of (the dashboard rates)."""
+        nights = (co - ci).days
+        night_s = f"{nights} night{'s' if nights != 1 else ''}"
+        bed_rate = prop.extra_bed_rate or 0
+        fee = price.get("early_checkin_fee", 0)
+        lines = []
+        if len(parts) == 1:
+            p = parts[0]
+            lines.append(f"*{p['rt'].name}*")
+        else:
+            lines.append("*" + " + ".join(_count_name(p["rooms"], p["rt"].name) for p in parts) + "*")
+        lines += [f"{ci.day} {ci.strftime('%b')} – {co.day} {co.strftime('%b')} ({night_s})", ""]
+        beds_total = 0
+        for p in parts:
+            beds_cost = bed_rate * p["beds"] * nights
+            beds_total += beds_cost
+            part_fee = fee if len(parts) == 1 else 0
+            room_cost = p["total"] - beds_cost - part_fee
+            per = price.get("per_room_per_night") if len(parts) == 1 else None
+            label = "Room" if len(parts) == 1 else p["rt"].name
+            rooms_x = f" × {p['rooms']} rooms" if p["rooms"] > 1 else ""
+            if per and per * p["rooms"] * nights == room_cost:
+                lines.append(f"{label}: {_money(per)}{rooms_x} × {night_s} = {_money(room_cost)}")
+            else:
+                lines.append(f"{label}{(' (' + str(p['rooms']) + ' rooms)') if p['rooms'] > 1 else ''}: "
+                             f"{_money(room_cost)} ({night_s})")
+        beds = sum(p["beds"] for p in parts)
+        if beds:
+            each = f" × {beds} beds" if beds > 1 else ""
+            lines.append(f"Extra bed: {_money(bed_rate)}{each} × {night_s} = {_money(beds_total)}")
+        if fee:
+            lines.append(f"Early check-in: {_money(fee)}")
+        lines += [f"*Total: {_money(price['total'])}*", "", f"Advance: {_money(price['advance_now'])}",
+                  f"Balance at check-in: {_money(price['balance_at_property'])}"]
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------ shared by the tools below
 
