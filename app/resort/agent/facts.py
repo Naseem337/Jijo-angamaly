@@ -72,7 +72,7 @@ def build_facts(bot: Any) -> str:
         if good := [h for h in (_clean(bot, h) for h in p.highlights) if h]:
             out.append(f"  Good points: {'; '.join(good)}")
         if meal := _clean(bot, p.meal_plan):
-            out.append(f"  Meal plan: {meal}")
+            out.append(f"  Food (owner's code word, never say it to the guest; tell them in plain words): {meal}")
         if info := _clean(bot, p.stay_info):
             out.append(f"  Stay info / house rules: {info}")
         if pol := _clean(bot, p.policies):
