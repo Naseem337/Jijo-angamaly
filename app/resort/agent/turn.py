@@ -562,7 +562,12 @@ def fallback_line(bot: Any, phone: str, tools: Any, lang: str) -> str:
     if prop is not None and rec and enq.check_in and (rec.get("prop"), rec.get("ci"), rec.get("co")) == (
             prop.id, enq.check_in.isoformat(), enq.check_out.isoformat() if enq.check_out else None):
         return t("group_too_big", lang, free_rooms=rec["free"], max_people=rec["most"], numbers=tools._numbers(prop))
-    step = enq.next_step
+    return step_line(bot, phone, lang) or "How may I assist you?"
+
+
+def step_line(bot: Any, phone: str, lang: str) -> str:
+    """The open step's owner text ('' when no step is open)."""
+    step = Enquiry.load(bot.repo, phone).next_step
     if step == "ask_location":
         return t("ask_location", lang, towns=towns_or(bot))
     if step == "ask_details":
@@ -573,7 +578,7 @@ def fallback_line(bot: Any, phone: str, tools: Any, lang: str) -> str:
         return t("ask_contact", lang)
     if step == "pay":
         return t("pay_nudge", lang)
-    return "How may I assist you?"
+    return ""
 
 
 RECENT = 3  # a TOOL text (nearly) the same as one of our last 3 messages is dropped (room labels, glimpse ...)

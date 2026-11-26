@@ -11,6 +11,7 @@ BookingBot.handle() sends a message here when AGENT_MODE=agent (the default stay
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from app.core.phone import mask_phone, try_normalize_phone
@@ -41,11 +42,68 @@ def command(text: str) -> str:
     return word if word in COMMANDS else ""
 
 
+CRASH_ALERT_GAP_S = 30 * 60  # one staff alert per guest per 30 minutes for crashes (no flood when it repeats)
+MOMENT = "Please give me a moment."
+
+
 def handle(bot: Any, msg: Any, *, dry_run: bool = False) -> str:
-    """One WhatsApp message in agent mode. Returns what happened (for logs and tests)."""
+    """One WhatsApp message in agent mode. Returns what happened (for logs and tests). A crash anywhere after the
+    dedupe is never silent (owner, 2026-11-27): the traceback is logged, the team gets ONE alert and the guest gets
+    the open step or "Please give me a moment."."""
     now, phone = bot.clock.now(), msg.phone
     if not bot.repo.mark_event_processed(msg.id, now):
         return "duplicate"
+    before = _last_out(bot, phone)
+    try:
+        return _handle(bot, msg, now, phone, dry_run)
+    except Exception as exc:
+        log.exception("Agent crashed on a message from %s", mask_phone(phone))
+        _crash_reply(bot, phone, exc, before, dry_run)
+        return "crashed"
+
+
+def _last_out(bot: Any, phone: str) -> int:
+    """How many messages this guest has been sent (a crash reply goes only when none was added)."""
+    try:
+        return sum(1 for m in bot.repo.list_chat(phone, limit=100000) if m.direction == "out")
+    except Exception:
+        return -1
+
+
+def _crash_reply(bot: Any, phone: str, exc: Exception, before: Any, dry_run: bool) -> None:
+    """ONE staff alert ('Bot error for <masked>: <short reason>', at most one per guest per 30 min) and, when the
+    guest got nothing from this message, the open step or MOMENT. Each part is guarded on its own."""
+    reason = f"{type(exc).__name__}: {str(exc)[:100]}".strip()
+    enq = None
+    try:
+        enq = Enquiry.load(bot.repo, phone)
+    except Exception:
+        log.exception("Crash reply: the enquiry could not be read for %s", mask_phone(phone))
+    try:
+        if not dry_run:
+            st = bot.repo.get_state(phone)
+            last = st.get("crash_alert_at")
+            now = bot.clock.now()
+            if not last or (now - datetime.fromisoformat(last)).total_seconds() >= CRASH_ALERT_GAP_S:
+                st["crash_alert_at"] = now.isoformat()
+                bot.repo.set_state(phone, st)
+                bot.alert_staff(f"Bot error for {mask_phone(phone)}: {reason}", enq.place if enq else None)
+    except Exception:
+        log.exception("Crash alert failed for %s", mask_phone(phone))
+    try:
+        if _last_out(bot, phone) != before:
+            return  # the guest already got an answer before the crash
+        from app.resort.agent.turn import step_line
+        lang = I18N_LANG[enq.language] if enq else "en"
+        line = (step_line(bot, phone, lang) if enq is not None and enq.active else "") or MOMENT
+        box = bot_outbox(bot, phone, dry_run=dry_run)
+        box.text("crash", line)
+        box.flush()
+    except Exception:
+        log.exception("Crash reply to the guest failed for %s", mask_phone(phone))
+
+
+def _handle(bot: Any, msg: Any, now: Any, phone: str, dry_run: bool) -> str:
     if not is_tester(bot, phone):  # AI-6: the owner's test runs only for the listed phones
         log.info("Agent: %s is not a tester: no reply", mask_phone(phone))
         return "not_a_tester"
