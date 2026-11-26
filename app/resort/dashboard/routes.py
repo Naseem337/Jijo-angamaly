@@ -877,6 +877,42 @@ async def delete_all_bookings(request: Request, auth: Auth = Depends(require_own
     return JSONResponse({"deleted": get_repo().clear_bookings()})
 
 
+CLEAR_ALL_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delete all bookings</title><body style="font-family:system-ui;max-width:520px;margin:40px auto;padding:0 16px">
+<h2>Delete ALL bookings and ALL leads</h2>
+<p>Every booking (with its payments, charges, refunds and ID proofs) and every lead is deleted. This cannot be undone.
+Chats, guests, rooms, photos and settings stay.</p>
+<form method="post"><label>Type DELETE to confirm<br><input name="confirm" autocomplete="off"
+style="font-size:18px;padding:6px;margin:8px 0"></label><br>
+<button style="font-size:16px;padding:8px 16px;background:#b00020;color:#fff;border:0;border-radius:6px">Delete everything
+</button></form>{result}</body>"""
+
+
+@router.get("/clear-all")
+def clear_all_page(request: Request, auth: Auth = Depends(require_owner)):
+    """Owner only: the page with the 'delete all bookings and leads' form."""
+    return Response(CLEAR_ALL_PAGE.format(result=""), media_type="text/html")
+
+
+@router.post("/clear-all")
+async def clear_all(request: Request, auth: Auth = Depends(require_owner)):
+    """Owner only: delete every booking (with payments, charges, refunds, ID proofs) and every lead. Needs DELETE."""
+    from app.resort import leads
+    f = await request.form()
+    if str(f.get("confirm", "")).strip() != "DELETE":
+        return Response(CLEAR_ALL_PAGE.format(result="<p style='color:#b00020'>Nothing deleted: type DELETE.</p>"),
+                        media_type="text/html", status_code=400)
+    repo = get_repo()
+    counts = repo.clear_bookings()
+    leads._ensure(repo)
+    with repo._tx() as db:
+        counts["leads"] = db.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+        db.execute("DELETE FROM leads")
+    done = ", ".join(f"{k}: {v}" for k, v in counts.items())
+    return Response(CLEAR_ALL_PAGE.format(result=f"<p style='color:#1b5e20'><b>Deleted.</b> {done}</p>"),
+                    media_type="text/html")
+
+
 @router.post("/reset-test-data")
 async def reset_test_data(request: Request, auth: Auth = Depends(require_owner)):
     """Owner only: delete all bookings and chats (test data) before a client starts. Needs confirm=DELETE."""
