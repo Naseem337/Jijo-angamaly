@@ -113,9 +113,10 @@ TOOL_SCHEMAS = [
             "extra_beds": {"type": "integer", "description": "only the guest's answer to the extra-bed question (0 = "
                                                              "no) or an extra bed they ask for themselves"},
             "early_checkin": {"type": "boolean", "description": "true only if the guest asked for early check-in"},
-            "accept_free_rooms": {"type": "boolean", "description": "true when the group is too big for the free rooms "
-                                  "and the guest accepts the rooms that are free ('book the current rooms', 'book what's "
-                                  "available', 'ok book 4 rooms'): code books those rooms for as many adults as they hold"},
+            "accept_free_rooms": {"type": "boolean", "description": "true ONLY when, after the big-group message, the "
+                                  "guest says an explicit yes to 'Do you want to book the available rooms?' or explicitly "
+                                  "asks for them ('book the available rooms', 'book those 4 rooms'); never for a bare "
+                                  "'ok' / 'fine' / 'hmm' / 'thanks'. Code books those rooms for as many adults as they hold"},
             "change_existing": {"type": "boolean", "description": "true when the guest wants to CHANGE a booking they "
                                 "already have (dates, persons, rooms, room type), not make another one. Before payment "
                                 "the booking is updated; a PAID booking is never changed here (code blocks it)."},
@@ -972,20 +973,24 @@ class AgentTools:
             if self._big_group().get("key") == key:
                 # owner, 2026-11-27: the message goes ONCE per enquiry; after that the AI answers in its own words
                 return done(True, {**facts_big, "group_message_already_sent": True, "numbers": self._numbers(prop)},
-                            "The owner's message about the free rooms already went: never send it again. Answer what "
-                            "the guest said now, short, in your own words; no link, no pay ask. Give the team numbers in "
-                            "one short line only if they ask. If they accept the free rooms ('book the current rooms', "
-                            "'book what's available', 'ok book 4 rooms', 'fine, those rooms') → call update_enquiry "
-                            "with accept_free_rooms=true (and rooms if they said a number).")
+                            "The owner's message about the free rooms already went, with the question 'Do you want to "
+                            "book the available {free_rooms} rooms for {max_people} people?': never send either again. "
+                            "Only an explicit yes to that question or an explicit request ('book the available rooms', "
+                            "'book those 4 rooms') → update_enquiry with accept_free_rooms=true (and rooms if they said a "
+                            "number). 'ok' / 'fine' / 'hmm' / 'thanks' are NOT a yes: a short reply only, no booking. "
+                            "'No' → ask briefly what they'd like (other dates, fewer people, or call the team). Answer "
+                            "anything else short, in your own words; no link, no pay ask; the team numbers in one short "
+                            "line only if they ask.")
             self._save_big_group({"key": key, "prop": prop.id, "ci": ci.isoformat(), "co": co.isoformat(),
-                                  "adults": adults, "free": free_n, "most": most})
+                                  "adults": adults, "free": free_n, "most": most, "asked": True})
             self.out.text("group_too_big", t("group_too_big", lang, free_rooms=free_n, max_people=most,
                                              numbers=self._numbers(prop)))
             self.out.staff("staff:big_group", self._big_group_text(prop, self._big_group()),
                            self.bot.staff_numbers(prop.id))
-            self.code_final = True
             return done(True, {**facts_big, "owner_message_sent": True},
-                        "The owner's message went. Send nothing more this turn.")
+                        f"The owner's message went. Your reply() is ONLY this one question, in the guest's language: "
+                        f"\"Do you want to book the available {free_n} rooms for {most} people?\" Nothing else: no "
+                        "link, no pay ask, no room details, no other rooms.")
         if not parts:  # not available: never a dead end (extra-bed offer, or the nearest free dates)
             scratch: dict[str, Any] = {"lang": lang}
             text = bot._no_room_answer(scratch, prop, bk, ci, co, adults, children, wanted)

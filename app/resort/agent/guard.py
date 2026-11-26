@@ -197,7 +197,7 @@ def free_in(calls: list[dict[str, Any]]) -> bool:
     """A tool of this turn returned a free room."""
     for c in calls:
         facts = (c.get("result") or {}).get("facts") or {}
-        if facts.get("available") is True or facts.get("also_free_for_your_dates"):
+        if facts.get("available") is True or facts.get("also_free_for_your_dates") or facts.get("group_too_big"):
             return True
     return False
 
