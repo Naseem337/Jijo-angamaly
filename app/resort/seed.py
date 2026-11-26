@@ -112,6 +112,17 @@ def _tidy_old(repo: ResortRepo, p: Property) -> bool:
     return changed
 
 
+POZHIYORAM_ANSWERS = [{
+    "id": "A-food", "topic": "food / dining",
+    "examples": "breakfast, lunch, dinner, restaurant, meals, food",
+    "text": ("*A Note on Dining:\U0001F374*\n"
+             "While we don't have an in-house restaurant, we love the \"picnic\" vibe! You can order all your favorites "
+             "via Swiggy or Zomato, and they'll deliver right to our gates.\n\n"
+             "In and around 5 km you may find good restaurants as well. If you need any assistance, you can be in touch "
+             "with our property caretaker during your stay."),
+}]
+
+
 def seed(repo: ResortRepo) -> list[str]:
     """Returns human-readable lines about what was done (the generated password is included once).
 
@@ -150,6 +161,11 @@ def seed(repo: ResortRepo) -> list[str]:
                 out.append(f"{p.name}: stay details message, check-in/out times and map link added.")
         if not out:
             out.append("Properties already exist: nothing seeded.")
+    for p in repo.list_properties(active_only=False):  # owner answers (FAQ, 2026-11-27): seeded once, then the owner's
+        if p.name == ALLEPPEY["name"] and p.owner_answers is None:
+            p.owner_answers = [dict(a) for a in POZHIYORAM_ANSWERS]
+            repo.save_property(p)
+            out.append(f"{p.name}: owner answer 'food / dining' added.")
     email = (os.environ.get("RESORT_OWNER_EMAIL") or DEFAULT_OWNER_EMAIL).strip().lower()
     given = os.environ.get("RESORT_OWNER_PASSWORD")
     owner = repo.get_user(email)

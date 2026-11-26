@@ -158,6 +158,14 @@ TOOL_SCHEMAS = [
         "resort's general photos not sent yet. No availability check, no price, no form.",
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
+        "owner_answer",
+        "The guest's question is about one of the OWNER ANSWER topics in FACTS (any words or language). Code sends the "
+        "owner's exact text for that topic as its own message (once per chat). Add nothing about that topic yourself.",
+        {"type": "object", "properties": {
+            "topic": {"type": "string", "description": "the topic name exactly as in FACTS"},
+            "language": LANGUAGE_FIELD},
+         "required": ["topic"]}),
+    ToolSpec(
         "send_map",
         "ONLY when the guest asks for the map, the location pin or directions. 'Where is it' / 'evde aanu' / 'how far "
         "from town' is answered from FACTS in one short line (area, landmark, distance), with no map.",
@@ -1631,7 +1639,7 @@ class AgentTools:
         outs = [m.text for m in rows[conversation.start_index(rows):] if m.direction == "out"]
         facts: dict[str, Any] = {}
         head = _words(next((ln for ln in prop.intro.split("\n") if ln.strip()), ""))
-        if prop.intro and not any(head and _words(o).startswith(head) for o in outs):
+        if prop.intro and not any(head and _words(o)[:len(head)] == head for o in outs):
             rts = sorted((r for r in bot.repo.list_room_types(prop.id) if r.active),
                          key=lambda r: (r.priority, r.base_rate))
             text = prop.intro
@@ -1658,6 +1666,36 @@ class AgentTools:
                 + (f"You MAY add ONE short reminder in your own words for the open step ({step}), max 10 words, via "
                    "reply(); otherwise send nothing." if step else "Send nothing more (no reply() needed)."))
         return self._result(True, {**facts, "open_step_reminder": step}, start, enq, note)
+
+    def owner_answer(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Owner answers (FAQ, 2026-11-27): the topic's exact dashboard text as its own message, once per conversation.
+        The AI picks the topic; code only matches that topic NAME to the dashboard list (the open resort's first)."""
+        bot = self.bot
+        start, enq, style, lang = self._ctx(args)
+        prop = self._the_resort(enq, bot._open_hold(self.phone))
+        props = ([prop] if prop else []) + [p for p in bot._places() if not prop or p.id != prop.id]
+        rows = [(p, a) for p in props for a in (p.owner_answers or []) if a.get("topic") and a.get("text")]
+        want = str(args.get("topic") or "").strip().casefold()
+        hit = next((r for r in rows if r[1]["topic"].strip().casefold() == want), None)
+        if hit is None and rows:
+            close = difflib.get_close_matches(want, [a["topic"].strip().casefold() for _, a in rows], n=1, cutoff=0.6)
+            hit = next((r for r in rows if close and r[1]["topic"].strip().casefold() == close[0]), None)
+        if hit is None:
+            return self._result(False, {"problem": "no such owner answer topic",
+                                        "topics": sorted({a["topic"] for _, a in rows})}, start, enq,
+                                "Answer from FACTS with reply(); handoff only if FACTS has nothing.")
+        _, ans = hit
+        rows_chat = bot.repo.list_chat(self.phone, limit=200)
+        outs = [m.text for m in rows_chat[conversation.start_index(rows_chat):] if m.direction == "out"]
+        head = _words(next((ln for ln in ans["text"].split("\n") if ln.strip()), ""))
+        if any(head and _words(o)[:len(head)] == head for o in (*outs, *self.out.texts)):
+            return self._result(True, {"already_sent": True, "topic": ans["topic"], "answer_text": ans["text"]},
+                                start, enq, "This owner answer was already sent in this chat: do NOT send it again. "
+                                "Say it in ONE short line in your own words via reply().")
+        self.out.text(f"owner_answer:{ans.get('id', '')}", ans["text"])
+        return self._result(True, {"owner_answer_sent": ans["topic"]}, start, enq,
+                            "Sent word for word. Add NOTHING about this topic; use reply() only to answer any OTHER "
+                            "question in the same message, otherwise send nothing more.")
 
     def send_map(self, args: dict[str, Any]) -> dict[str, Any]:
         """The resort's Google Maps link, then the booking step still open."""
@@ -1782,6 +1820,7 @@ class AgentTools:
         handlers = {"update_enquiry": self.update_enquiry, "get_price": self.get_price,
                     "compare_rooms": self.compare_rooms, "send_photos": self.send_photos,
                     "send_map": self.send_map, "send_details": self.send_details,
+                    "owner_answer": self.owner_answer,
                     "create_booking": self.create_booking,
                     "check_payment": self.check_payment, "send_payment_link": self.send_payment_link,
                     "my_bookings": self.my_bookings, "change_name": self.change_name,

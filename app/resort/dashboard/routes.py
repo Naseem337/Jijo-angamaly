@@ -1083,6 +1083,41 @@ async def property_delete(property_id: str, request: Request, auth: Auth = Depen
     raise redirect(toast_url(f"{BASE}/properties", "Property deleted"))
 
 
+@router.post("/properties/{property_id}/answers")
+async def owner_answer_save(property_id: str, request: Request, auth: Auth = Depends(require_user)):
+    """Owner answers (FAQ, 2026-11-27): add or edit one topic. The bot uses it from the next message on."""
+    from app.resort.models import new_id
+
+    f = await form_of(request, auth)
+    repo = get_repo()
+    p = _prop(repo, auth, property_id)
+    topic, text = f.get("topic", "").strip()[:60], f.get("text", "").replace("\r\n", "\n").strip()[:3000]
+    examples = f.get("examples", "").strip()[:300]
+    back = f"{BASE}/properties/{p.id}#answers"
+    if not topic or not text:
+        raise redirect(toast_url(back, "!Topic and answer text are required"))
+    answers = list(p.owner_answers or [])
+    aid = f.get("aid", "").strip()
+    row = next((a for a in answers if a.get("id") == aid), None) if aid else None
+    if row is None:
+        answers.append({"id": new_id("A"), "topic": topic, "examples": examples, "text": text})
+    else:
+        row.update(topic=topic, examples=examples, text=text)
+    p.owner_answers = answers
+    repo.save_property(p)
+    raise redirect(toast_url(back, "Owner answer saved"))
+
+
+@router.post("/properties/{property_id}/answers/{answer_id}/delete")
+async def owner_answer_delete(property_id: str, answer_id: str, request: Request, auth: Auth = Depends(require_user)):
+    await form_of(request, auth)
+    repo = get_repo()
+    p = _prop(repo, auth, property_id)
+    p.owner_answers = [a for a in (p.owner_answers or []) if a.get("id") != answer_id]
+    repo.save_property(p)
+    raise redirect(toast_url(f"{BASE}/properties/{p.id}#answers", "Owner answer deleted"))
+
+
 def _room(repo, auth: Auth, property_id: str, room_id: str) -> tuple[Property, RoomType | None]:
     prop = _prop(repo, auth, property_id)
     if room_id == "new":

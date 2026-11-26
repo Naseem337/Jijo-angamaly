@@ -30,6 +30,31 @@
   {% else %}{{ empty("No room types yet.") }}{% endif %}
 </section>
 {{ photo_gallery(p.photo_urls, BASE ~ "/properties/" ~ p.id ~ "/photos", csrf, "", "Photos", "") }}
+{# Owner answers (FAQ, 2026-11-27): the bot sends the answer text word for word (WhatsApp *bold* / _italic_ kept) #}
+<section class="card" id="answers">
+  <div class="card-head"><h3>Owner answers</h3></div>
+  <p class="muted">When a guest asks about a topic (in any language), the bot sends your exact answer text, once per chat. Active immediately.</p>
+  {% for a in p.owner_answers or [] %}
+  <details class="field"><summary><b>{{ a.topic }}</b> <span class="muted">{{ a.examples }}</span></summary>
+    <form method="post" action="{{ BASE }}/properties/{{ p.id }}/answers" class="form">{{ csrf_field(csrf) }}
+      <input type="hidden" name="aid" value="{{ a.id }}">
+      {{ field("Topic", "topic", a.topic, required=True) }}
+      {{ field("Keywords / examples", "examples", a.examples, hint="e.g. breakfast, lunch, dinner, restaurant, meals, food available?") }}
+      {{ area("Exact answer text", "text", a.text, 8) }}
+      <div class="actions"><button class="btn primary">Save</button>
+        <button class="btn danger" formaction="{{ BASE }}/properties/{{ p.id }}/answers/{{ a.id }}/delete" data-confirm="Delete this owner answer?">Delete</button></div>
+    </form>
+  </details>
+  {% else %}{{ empty("No owner answers yet.") }}{% endfor %}
+  <details class="field"><summary><b>+ Add an owner answer</b></summary>
+    <form method="post" action="{{ BASE }}/properties/{{ p.id }}/answers" class="form">{{ csrf_field(csrf) }}
+      {{ field("Topic", "topic", "", required=True, hint="e.g. food / dining") }}
+      {{ field("Keywords / examples", "examples", "", hint="e.g. breakfast, lunch, dinner, restaurant, meals, food available?") }}
+      {{ area("Exact answer text", "text", "", 8) }}
+      <div class="actions"><button class="btn primary">Add</button></div>
+    </form>
+  </details>
+</section>
 {% else %}
 <section class="card hint-card" id="rooms"><h3>Rooms &amp; rates</h3><p class="muted">Save the property first. Then you can add room types, rates and seasonal prices here.</p></section>
 {% endif %}

@@ -87,5 +87,8 @@ def build_facts(bot: Any) -> str:
             out.append(f"  Early check-in (only if asked): from {bot._short_time(p.early_checkin_time)}; the "
                        "charge comes only from prepare_booking / create_booking.")
         out.append(f"  Team's phone/WhatsApp numbers: {numbers}")
+        if topics := [a for a in (p.owner_answers or []) if a.get("topic") and a.get("text")]:
+            out.append("  OWNER ANSWER topics (question on one of these, any language → owner_answer(topic)): "
+                       + "; ".join(f"'{a['topic']}' (e.g. {a.get('examples') or a['topic']})" for a in topics))
         out += _rooms(bot, p)
     return "\n".join(out)

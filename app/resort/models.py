@@ -48,6 +48,9 @@ class Property:
     cancel_policy: list[dict] = field(default_factory=lambda: [
         {"days_before": 7, "retention_pct": 10}, {"days_before": 3, "retention_pct": 25},
         {"days_before": 2, "retention_pct": 50}, {"days_before": 0, "retention_pct": 100}])
+    # Owner answers (FAQ, 2026-11-27): [{"id", "topic", "examples", "text"}]; the agent's owner_answer tool sends "text"
+    # word for word. None = never set (the seed may fill it once); [] = the owner deleted them all.
+    owner_answers: list[dict] | None = None
     active: bool = True
     id: str = field(default_factory=lambda: new_id("P"))
 
