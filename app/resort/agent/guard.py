@@ -36,6 +36,10 @@ LINK = re.compile(r"https?://\S+")
 SENTENCE = re.compile(r"(?<=[.!?])\s+")
 # "X is (also) free / available": a room claim (free parking or a free cancellation is not one)
 FREE_CLAIM = re.compile(r"\b(?:is|are)\s+(?:also\s+|still\s+)?(?:free|available)\b", re.IGNORECASE)
+# "X is not available", "only the cottages are free", "fully booked": a claim about availability as well
+NEG_CLAIM = re.compile(r"\b(?:(?:is|are)\s*(?:not|n't)\s+(?:free|available)|(?:isn't|aren't)\s+(?:free|available)|"
+                       r"not (?:free|available)|fully booked|sold out|no rooms?\b|only\b[^.!?]{0,60}\b(?:free|available))",
+                       re.IGNORECASE)
 ROOM_WORDS = re.compile(r"\b(?:rooms?|cottages?|suites?|for your dates|on your dates)\b", re.IGNORECASE)
 INDIC = re.compile(r"[ऀ-ॿ஀-௿ഀ-ൿ]")  # Hindi, Tamil, Malayalam script
 # why a price is what it is is never said (owner, 2026-11-26): only the price from the tool
@@ -52,6 +56,7 @@ class Sources:
     guest: str = ""  # the guest's messages in this conversation
     paid: bool = False  # a booking of this guest is paid
     free_now: bool = False  # a tool returned a free room this turn
+    checked_now: bool = False  # a tool checked availability this turn (free or not)
 
     @property
     def everything(self) -> str:
@@ -90,6 +95,9 @@ def sentence_problem(sentence: str, src: Sources, known: set[float] | None = Non
     if hit := PRICE_REASON.search(sentence):
         return (f'"{hit.group(0)}": never say why a price is what it is (season, peak, weekend or holiday rate, rates '
                 "changed, special rate). Give only the price from the tool.")
+    if not src.checked_now and NEG_CLAIM.search(sentence) and ROOM_WORDS.search(sentence):
+        return ("Check with the tool first: no tool checked availability this turn, so never say a room is not free, "
+                "fully booked or that only some rooms are free (update_enquiry with room_picks for every type named).")
     if not src.free_now and FREE_CLAIM.search(sentence) and ROOM_WORDS.search(sentence) \
             and not NOT_YET.search(sentence):
         return ("No tool returned a free room this turn: never say a room is free or available without one "
@@ -170,6 +178,15 @@ def free_in(calls: list[dict[str, Any]]) -> bool:
     return False
 
 
+CHECK_KEYS = ("available", "picked_rooms_check", "free_rooms", "room_not_free", "room_not_free_for_your_dates",
+              "no_other_room_free_for_your_dates", "also_free_for_your_dates", "picked_room_not_free", "free_dates")
+
+
+def checked_in(calls: list[dict[str, Any]]) -> bool:
+    """A tool of this turn checked availability (free or not)."""
+    return any(k in ((c.get("result") or {}).get("facts") or {}) for c in calls for k in CHECK_KEYS)
+
+
 def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_texts: list[str], guest_text: str,
             conv: str = "") -> Sources:
     rows = bot.repo.list_chat(phone, limit=200)
@@ -183,4 +200,4 @@ def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_te
     tools = "\n".join([json.dumps(c.get("result"), ensure_ascii=False, default=str) for c in calls] + tool_texts + ours)
     paid = enq.paid or any(b.status == "paid" for b in bot.repo.list_bookings(phone=phone, limit=20))
     return Sources(code=tools + "\n" + facts, guest="\n".join([*said, guest_text]), paid=paid,
-                   free_now=free_in(calls))
+                   free_now=free_in(calls), checked_now=checked_in(calls))

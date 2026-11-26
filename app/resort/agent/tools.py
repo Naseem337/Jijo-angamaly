@@ -506,6 +506,21 @@ class AgentTools:
                               "already_told. " + str(result.get("note") or ""))
         return result
 
+    def _pick_check(self, prop: Property, ids: list[str], ci: date, co: date) -> list[dict[str, Any]]:
+        """Each room type the guest named: how many they asked for, how many are free on their dates (their own hold
+        not counted) and how many adults one room holds."""
+        repo, now = self.bot.repo, self.bot.clock.now()
+        out = []
+        for rid in dict.fromkeys(ids):
+            rt = repo.get_room_type(rid)
+            if rt is None:
+                continue
+            free = repo.free_rooms(rt, ci, co, now, self.phone)
+            asked = ids.count(rid)
+            out.append({"room_type": rt.name, "asked": asked, "free_rooms": free, "free": free >= asked,
+                        "max_adults_per_room": av.room_cap(rt)})
+        return out
+
     def _form_recent(self, lines: list[str]) -> bool:
         """The same form lines are in one of the bot's last 3 messages (owner, 2026-11-26: never the same form twice)."""
         want = {str(ln).strip().lower() for ln in lines if str(ln).strip()}
@@ -812,7 +827,18 @@ class AgentTools:
             kept, enq.room_picks = [], []
         else:
             enq.room_picks = kept
+        if ids:  # owner, 2026-11-26: every room type the guest named is checked for THEIR dates, one by one
+            notes["picked_rooms_check"] = self._pick_check(prop, ids, ci, co)
         parts, mix = self._plan(prop, bk, wanted)
+        if ids and parts and {p["rt"].id for p in parts} != set(ids):
+            # the picks were not used as asked: say why (never a silent switch to other rooms)
+            check = notes["picked_rooms_check"]
+            if not all(c["free"] for c in check):
+                notes["picks_not_used"] = "not every picked room type is free on these dates (see picked_rooms_check)"
+            else:
+                cap = sum(c["max_adults_per_room"] * c["asked"] for c in check)
+                notes["picks_not_used"] = (f"the picked rooms are free but hold at most {cap} adults; {adults} adults "
+                                           "asked (an extra bed or one more room would be needed)")
         if early and mix:
             enq.early_checkin = False
             return done(False, {"problem": "early check-in for a stay over two room types is arranged by the owner"},
