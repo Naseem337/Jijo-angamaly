@@ -888,7 +888,7 @@ def duplicate_photos(request: Request, auth: Auth = Depends(require_owner), msg:
     from app.resort import photo_dups as pd
     repo = get_repo()
     info = pd.infos(repo)
-    found = pd.groups(repo)
+    found = pd.listed_groups(repo)
     parts = [f"<p><b>{len(found)}</b> duplicate group{'s' if len(found) != 1 else ''}.</p>"]
     for n, g in enumerate(found, 1):
         parts.append(f"<section style='border:1px solid #ddd;border-radius:8px;padding:12px;margin:12px 0'>"
@@ -919,7 +919,7 @@ async def duplicate_photos_keep(request: Request, auth: Auth = Depends(require_o
     form = await _photo_form(request, auth)
     repo = get_repo()
     keep = str(form.get("keep", ""))
-    group = next((g for g in pd.groups(repo) if keep in {_place_key(pl) for pl in g.places}), None)
+    group = next((g for g in pd.listed_groups(repo) if keep in {_place_key(pl) for pl in g.places}), None)
     if group is None:
         raise redirect(f"{BASE}/duplicate-photos?msg=That+group+has+changed;+nothing+was+removed")
     kept = next(pl for pl in group.places if _place_key(pl) == keep)

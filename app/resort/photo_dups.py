@@ -145,6 +145,20 @@ def groups(repo: Any) -> list[Group]:
     return [g for g in found.values() if len(g.places) > 1]
 
 
+def worth_listing(g: Group) -> bool:
+    """A group the owner should see (owner, 2026-11-27): copies across different room types (or the resort photos), or
+    twice in the same room number's list. One room type sharing a set over its room numbers (101/102) is intended."""
+    if len({(pl.property_id, pl.room_type_id) for pl in g.places}) > 1:
+        return True
+    spots = [(pl.property_id, pl.room_type_id, pl.number) for pl in g.places]
+    return len(spots) != len(set(spots))
+
+
+def listed_groups(repo: Any) -> list[Group]:
+    """The duplicate groups shown on the Duplicate photos page."""
+    return [g for g in groups(repo) if worth_listing(g)]
+
+
 def where_else(repo: Any, ref: str) -> list[str]:
     """Other places with a duplicate of this photo (for the upload warning)."""
     info = infos(repo)
