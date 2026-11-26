@@ -868,6 +868,85 @@ def photo_check(request: Request, auth: Auth = Depends(require_owner)):
     return JSONResponse({"to_fix": photo_map.check(repo), "counts": counts})
 
 
+DUP_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duplicate photos</title><body style="font-family:system-ui;max-width:900px;margin:24px auto;padding:0 16px;
+background:#fff;color:#111"><p><a href="{base}/properties">&larr; Properties</a></p><h2>Duplicate photos</h2>
+<p>Photos with the same photo id, the same file name or the same file. Nothing is removed unless you click.
+"Keep as Common" marks the kept photo as a resort photo (courtyard, beach, entrance): it is sent once per chat with
+the resort photos, never as a room's photo.</p>{msg}{body}</body>"""
+
+
+def _place_key(pl) -> str:
+    return "|".join((pl.ref, pl.property_id, pl.room_type_id, pl.number))
+
+
+@router.get("/duplicate-photos")
+def duplicate_photos(request: Request, auth: Auth = Depends(require_owner), msg: str = ""):
+    """Owner only: duplicate groups (same id, file name or file bytes), with thumbnail, file name and where."""
+    from html import escape
+
+    from app.resort import photo_dups as pd
+    repo = get_repo()
+    info = pd.infos(repo)
+    found = pd.groups(repo)
+    parts = [f"<p><b>{len(found)}</b> duplicate group{'s' if len(found) != 1 else ''}.</p>"]
+    for n, g in enumerate(found, 1):
+        parts.append(f"<section style='border:1px solid #ddd;border-radius:8px;padding:12px;margin:12px 0'>"
+                     f"<h3 style='margin:0 0 8px'>Group {n} <small style='color:#666'>({', '.join(sorted(g.why))})"
+                     "</small></h3><div style='display:flex;flex-wrap:wrap;gap:12px'>")
+        for pl in g.places:
+            i = info.get(pl.ref) or {}
+            tag = " · <b>Common</b>" if pd.is_common(pl.ref, info) else ""
+            buttons = "".join(
+                f"<form method='post' style='margin:4px 0'><input type='hidden' name='csrf' value='{auth.csrf}'>"
+                f"<input type='hidden' name='keep' value='{escape(_place_key(pl))}'>"
+                f"<input type='hidden' name='common' value='{c}'><button>{label}</button></form>"
+                for c, label in (("1", "Keep as Common, remove others"), ("0", "Keep here, remove others")))
+            parts.append(f"<figure style='margin:0;width:200px'><a href='{escape(pl.ref)}' target='_blank'>"
+                         f"<img src='{escape(pl.ref)}' style='width:200px;height:140px;object-fit:cover;"
+                         f"border-radius:6px'></a><figcaption style='font-size:13px'>"
+                         f"{escape(i.get('name') or '(file name not known)')}<br>{escape(pl.where)}{tag}{buttons}"
+                         "</figcaption></figure>")
+        parts.append("</div></section>")
+    note = f"<p style='color:#1b5e20'><b>{escape(msg)}</b></p>" if msg else ""
+    return Response(DUP_PAGE.format(base=BASE, msg=note, body="".join(parts)), media_type="text/html")
+
+
+@router.post("/duplicate-photos")
+async def duplicate_photos_keep(request: Request, auth: Auth = Depends(require_owner)):
+    """One click: keep this copy (optionally as Common) and remove every other copy of its group from its list."""
+    from app.resort import photo_dups as pd
+    form = await _photo_form(request, auth)
+    repo = get_repo()
+    keep = str(form.get("keep", ""))
+    group = next((g for g in pd.groups(repo) if keep in {_place_key(pl) for pl in g.places}), None)
+    if group is None:
+        raise redirect(f"{BASE}/duplicate-photos?msg=That+group+has+changed;+nothing+was+removed")
+    kept = next(pl for pl in group.places if _place_key(pl) == keep)
+    if form.get("common") == "1":
+        repo.save_photo_info(kept.ref, common=True)
+    removed = 0
+    for pl in group.places:
+        if _place_key(pl) == keep:
+            continue
+        if not pl.room_type_id:
+            p = repo.get_property(pl.property_id)
+            p.photo_urls = [r for r in p.photo_urls if r != pl.ref]
+            repo.save_property(p)
+        else:
+            rt = repo.get_room_type(pl.room_type_id)
+            if pl.number:
+                rt.number_photos = {**rt.number_photos,
+                                    pl.number: [r for r in rt.number_photos.get(pl.number, []) if r != pl.ref]}
+            else:
+                rt.photo_urls = [r for r in rt.photo_urls if r != pl.ref]
+            repo.save_room_type(rt)
+        if pl.ref != kept.ref:
+            _drop_file(repo, pl.ref)
+        removed += 1
+    raise redirect(f"{BASE}/duplicate-photos?msg=Kept+1,+removed+{removed}")
+
+
 @router.post("/delete-all-bookings")
 async def delete_all_bookings(request: Request, auth: Auth = Depends(require_owner)):
     """Owner only: delete every booking (chats, guests, rooms and settings stay). Needs confirm=DELETE."""
@@ -964,20 +1043,35 @@ async def _photo_form(request: Request, auth: Auth):
 
 
 async def _apply_photos(request: Request, auth: Auth, photos: list[str]) -> tuple[list[str], str]:
-    """Upload / remove / make-cover on a photo list. Returns the new list and a toast message."""
+    """Upload / remove / make-cover / Common on a photo list. Returns the new list and a toast message."""
+    from app.resort import photo_dups as pd
     from app.resort import photos as ph
     form = await _photo_form(request, auth)
+    repo = get_repo()
     action, ref = str(form.get("action", "upload")), str(form.get("ref", ""))
     if action == "remove" and ref in photos:
-        ph.delete_photo(ref)
+        _drop_file(repo, ref)
         return [x for x in photos if x != ref], "Photo removed"
     if action == "cover" and ref in photos:
         return [ref] + [x for x in photos if x != ref], "Cover photo set"
+    if action == "common" and ref in photos:  # owner, 2026-11-27: a resort photo (courtyard, beach), not a room's
+        on = form.get("common") == "on"
+        repo.save_photo_info(ref, common=on)
+        return photos, "Marked as a common photo" if on else "No longer a common photo"
     files = [f for f in form.getlist("photos") if hasattr(f, "read")]
-    added, problem = 0, ""
+    added, problem, warn = 0, "", []
     for upload in files:  # no limit (client, 2026-11-19): every photo the owner uploads is kept and sent
         try:
-            photos = photos + [ph.save_photo(await upload.read())]
+            data = await upload.read()
+            new = ph.save_photo(data)
+            name = pd.clean_name(getattr(upload, "filename", "") or "")
+            repo.save_photo_info(new, name=name, sha=pd.sha_of_file(new))
+            info = pd.infos(repo)
+            mine = pd.keys(new, info) - {"id:" + new}
+            for pl in pd.places(repo):  # the upload is not in any list yet: every hit is another copy
+                if mine & pd.keys(pl.ref, info):
+                    warn.append(pl.room_type_name or "the resort photos")
+            photos = photos + [new]
             added += 1
         except ph.PhotoError as exc:
             problem = str(exc)
@@ -985,7 +1079,19 @@ async def _apply_photos(request: Request, auth: Auth, photos: list[str]) -> tupl
         return photos, "!" + problem
     if not added:
         return photos, "!Choose one or more photos first"
-    return photos, f"{added} photo{'s' if added != 1 else ''} added" + (f" ({problem})" if problem else "")
+    message = f"{added} photo{'s' if added != 1 else ''} added" + (f" ({problem})" if problem else "")
+    if warn:
+        message = "!" + message + ". A photo with this name/file already exists in " + \
+            ", ".join(dict.fromkeys(warn)) + " (see Duplicate photos)."
+    return photos, message
+
+
+def _drop_file(repo, ref: str) -> None:
+    """Remove a photo's file only when no other list still uses the same photo id."""
+    from app.resort import photo_dups as pd
+    from app.resort import photos as ph
+    if sum(1 for pl in pd.places(repo) if pl.ref == ref) <= 1:
+        ph.delete_photo(ref)
 
 
 @router.post("/properties/{property_id}/photos")
@@ -1132,9 +1238,12 @@ def _room(repo, auth: Auth, property_id: str, room_id: str) -> tuple[Property, R
 def room_edit(property_id: str, room_id: str, request: Request, auth: Auth = Depends(require_user)):
     repo = get_repo()
     prop, rt = _room(repo, auth, property_id, room_id)
+    from app.resort import photo_dups as pd
+    info = pd.infos(repo)
     return page(request, "room_form.html", auth, nav="properties", prop=prop,
                 rt=rt or RoomType(prop.id, ""), is_new=rt is None,
-                rules=repo.list_rate_rules(rt.id) if rt else [])
+                rules=repo.list_rate_rules(rt.id) if rt else [],
+                common={r for r, i in info.items() if i.get("common")})
 
 
 @router.post("/properties/{property_id}/rooms/{room_id}")

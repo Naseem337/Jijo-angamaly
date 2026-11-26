@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS id_proofs (id TEXT PRIMARY KEY, booking_id TEXT NOT N
     id_type TEXT NOT NULL, received_at TEXT NOT NULL, last4 TEXT NOT NULL DEFAULT '', mime TEXT NOT NULL DEFAULT '',
     data BLOB, status TEXT NOT NULL DEFAULT 'received', verified_by TEXT NOT NULL DEFAULT '', delete_after TEXT);
 CREATE INDEX IF NOT EXISTS id_proofs_booking ON id_proofs(booking_id);
+CREATE TABLE IF NOT EXISTS photo_info (ref TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', sha TEXT NOT NULL DEFAULT '',
+    common INTEGER NOT NULL DEFAULT 0);
 """
 
 
@@ -452,6 +454,21 @@ class ResortRepo:
             return
         self._run("INSERT OR REPLACE INTO photo_sends(wamid, phone, kind, ref, property_id, room_type_id, room_number, at) "
                   "VALUES(?,?,?,?,?,?,?,?)", (wamid, phone, kind, ref, property_id, room_type_id, room_number, _iso(at)))
+
+    def photo_infos(self) -> dict[str, dict[str, Any]]:
+        """Every photo's info: ref (the stable photo id) -> {name: the uploaded file's name, sha: checksum of the file
+        bytes, common: a resort photo (courtyard, beach ...) rather than a room's}."""
+        return {r["ref"]: {"name": r["name"], "sha": r["sha"], "common": bool(r["common"])}
+                for r in self._all("SELECT * FROM photo_info")}
+
+    def save_photo_info(self, ref: str, *, name: str | None = None, sha: str | None = None,
+                        common: bool | None = None) -> None:
+        """Only the fields given change."""
+        with self._lock:
+            self._db.execute("INSERT OR IGNORE INTO photo_info(ref) VALUES(?)", (ref,))
+            for col, value in (("name", name), ("sha", sha), ("common", None if common is None else int(common))):
+                if value is not None:
+                    self._db.execute(f"UPDATE photo_info SET {col}=? WHERE ref=?", (value, ref))
 
     def photo_send(self, phone: str, wamid: str) -> dict[str, str] | None:
         """The photo / label this guest's swipe-reply points at, or None."""

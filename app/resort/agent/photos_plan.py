@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.resort import availability as av
+from app.resort import photo_dups as pd
 from app.resort.agent import conversation
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.state import Enquiry
@@ -53,8 +54,19 @@ def queued_photos(out: Outbox) -> set[str]:
 
 
 def sent_refs(bot: Any, phone: str, out: Outbox) -> set[str]:
-    """Every photo already sent in this conversation (the '[photo] <ref>' rows of the chat log) or queued now."""
-    return set(bot._sent_photos(phone)) | queued_photos(out)
+    """Every photo already sent in this conversation (the '[photo] <ref>' rows of the chat log) or queued now. A photo
+    counts as sent when a duplicate of it (same id, file name or file bytes) went (photo_dups.SentPhotos)."""
+    return pd.SentPhotos(set(bot._sent_photos(phone)) | queued_photos(out), pd.infos(bot.repo))
+
+
+def _info(bot: Any, sent: Any = None) -> dict[str, Any]:
+    return sent.info if isinstance(sent, pd.SentPhotos) else pd.infos(bot.repo)
+
+
+def room_only(bot: Any, refs: list[str], sent: Any = None) -> list[str]:
+    """A room's photos without the ones ticked Common (those belong to the resort, owner 2026-11-27)."""
+    info = _info(bot, sent)
+    return [r for r in refs if not (info.get(r) or {}).get("common")]
 
 
 def last_text(bot: Any, phone: str, out: Outbox) -> str:
@@ -117,24 +129,27 @@ def offered_sets(bot: Any, rt: RoomType, enq: Enquiry, rooms: int, sent: set[str
                  ) -> list[tuple[str, list[str]]]:
     """Each offered room of this type as (label, its photos not sent yet), one per room the guest would get. A room
     with no photos of its own shows the room type's photos (once). A label goes even when there is no photo."""
-    used = set(sent)
+    used = sent.copy() if isinstance(sent, pd.SentPhotos) else set(sent)
     out: list[tuple[str, list[str]]] = []
     for number in next_numbers(bot, rt, enq, rooms, phone) or [""]:
-        own = rt.number_photos.get(number, []) if number else []
-        refs = [r for r in dict.fromkeys(own or rt.photo_urls) if r not in used]
-        used |= set(refs)
+        own = room_only(bot, rt.number_photos.get(number, []), sent) if number else []
+        refs = []
+        for r in dict.fromkeys(own or room_only(bot, rt.photo_urls, sent)):
+            if r not in used:
+                refs.append(r)
+                used.add(r)
         out.append((room_label(rt, number), refs))
     return out
 
 
 def room_refs(bot: Any, rt: RoomType, enq: Enquiry, rooms: int = 1, phone: str = "") -> list[str]:
     """Photos of the exact room the guest would get, else the room type's photos, else any room number's photos."""
-    own = [r for n in next_numbers(bot, rt, enq, rooms, phone) for r in rt.number_photos.get(n, [])]
+    own = room_only(bot, [r for n in next_numbers(bot, rt, enq, rooms, phone) for r in rt.number_photos.get(n, [])])
     if own:
         return list(dict.fromkeys(own))
-    if rt.photo_urls:
-        return list(rt.photo_urls)
-    return list(dict.fromkeys(r for n in rt.room_list for r in rt.number_photos.get(n, [])))
+    if typ := room_only(bot, list(rt.photo_urls)):
+        return typ
+    return room_only(bot, list(dict.fromkeys(r for n in rt.room_list for r in rt.number_photos.get(n, []))))
 
 
 def label_sets(rt: RoomType, refs: list[str]) -> list[tuple[str, list[str]]]:
@@ -152,9 +167,17 @@ def label_sets(rt: RoomType, refs: list[str]) -> list[tuple[str, list[str]]]:
     return out
 
 
-def general_photos(prop: Property, sent: set[str]) -> list[str]:
-    """The resort's general photos (outside, beach, common areas) not yet sent, in the owner's order, all of them."""
-    return [r for r in prop.photo_urls if r not in sent][:MAX_GENERAL_PHOTOS]
+def general_photos(prop: Property, sent: set[str], bot: Any = None) -> list[str]:
+    """The resort's COMMON photos (its own photos + room photos ticked Common: outside, beach, courtyard) not yet sent
+    in this chat (a duplicate counts as sent), in the owner's order, all of them."""
+    refs = pd.common_photos(bot.repo, prop, _info(bot, sent)) if bot is not None else list(prop.photo_urls)
+    seen = sent.copy() if isinstance(sent, pd.SentPhotos) else set(sent)
+    out = []
+    for r in refs:
+        if r not in seen:
+            out.append(r)
+            seen.add(r)
+    return out[:MAX_GENERAL_PHOTOS]
 
 
 # ------------------------------------------------------------------ the plan
@@ -178,7 +201,14 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
     free = [rt for rt, _ in bot._fits(prop, {**bk, "pref": None})] if dated else rooms
 
     def unsent(refs: list[str]) -> list[str]:
-        return [r for r in dict.fromkeys(refs) if r not in sent][:MAX_ROOM_PHOTOS]
+        """Not sent in this chat, and no two duplicates of each other in one send."""
+        seen = sent.copy() if isinstance(sent, pd.SentPhotos) else set(sent)
+        out = []
+        for r in dict.fromkeys(refs):
+            if r not in seen:
+                out.append(r)
+                seen.add(r)
+        return out[:MAX_ROOM_PHOTOS]
 
     picked = {rt.id for p in enq.room_picks if (rt := find_room(bot, rooms, str(p.get("room_type") or "")))}
     offered_id = (enq.checked or {}).get("pref") or (next(iter(picked)) if len(picked) == 1 else None)
@@ -194,8 +224,9 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
             # another room than the offered one: shown, never switched; its photos already went -> only 'also free'
             return Plan([(named, refs)], also_free=True) if refs else Plan(problem="other_free", room=named.name)
         return Plan([(named, refs)]) if refs else Plan(problem="photos_sent")
-    if kind == "resort":
-        refs = unsent(prop.photo_urls)
+    common = pd.common_photos(bot.repo, prop, _info(bot, sent))
+    if kind == "resort":  # the guest asked for the resort's photos: the ones not sent, else (asked again) all again
+        refs = unsent(common) or list(common)
         return Plan([(None, refs)]) if refs else Plan(problem="photos_sent")
     if not free:
         return Plan(problem="no_other_room")
@@ -205,7 +236,7 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
     # before any dates every room is shown (owner, 2026-11-21: photos are not restricted); 'not free on your dates' is
     # only said once there ARE dates
     none_left = "no_other_room" if dated else "photos_sent"
-    if not dated and not others and not unsent(refs_of[current.id]) and (general := unsent(prop.photo_urls)):
+    if not dated and not others and not unsent(refs_of[current.id]) and (general := unsent(common)):
         return Plan([(None, general)])  # every room shown: 'send all photos' / 'more' gets the resort's photos
     other_free = [rt for rt in free if rt is not current]
     if kind == "all_rooms":
@@ -216,7 +247,7 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
         for rt in [current, *other_free]:
             if refs := more_numbers(bot, rt, enq, sent, phone):
                 return Plan([(rt, refs)])
-        if general := unsent(prop.photo_urls):
+        if general := unsent(common):
             return Plan([(None, general)])
         return Plan(problem="photos_sent")
     if kind == "other_room":
@@ -236,7 +267,7 @@ def plan(bot: Any, enq: Enquiry, prop: Property, kind: str, room_type: str, sent
     for rt in [current, *other_free]:
         if refs := more_numbers(bot, rt, enq, sent, phone):
             return Plan([(rt, refs)])
-    if general := unsent(prop.photo_urls):
+    if general := unsent(common):
         return Plan([(None, general)])
     return Plan(problem="photos_sent")
 
@@ -245,7 +276,7 @@ def more_numbers(bot: Any, rt: RoomType, enq: Enquiry, sent: set[str], phone: st
     """The own photos (not sent yet) of the next room of this type that is free on the guest's dates (any room before
     dates), in the owner's order: 'more photos' after the offered room was shown."""
     for number in next_numbers(bot, rt, enq, len(rt.room_list), phone):
-        if refs := [r for r in dict.fromkeys(rt.number_photos.get(number, [])) if r not in sent]:
+        if refs := [r for r in dict.fromkeys(room_only(bot, rt.number_photos.get(number, []), sent)) if r not in sent]:
             return refs
     return []
 

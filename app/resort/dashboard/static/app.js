@@ -133,6 +133,11 @@ document.querySelectorAll('input[data-autosubmit]').forEach(function (input) {
   });
 });
 
+// The "Common photo" tick saves at once.
+document.querySelectorAll('input[data-autocheck]').forEach(function (input) {
+  input.addEventListener('change', function () { input.form.submit(); });
+});
+
 // Copy buttons, dialogs and quick amounts.
 (function () {
   function say(msg) {

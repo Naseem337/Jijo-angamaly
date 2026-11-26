@@ -1145,7 +1145,7 @@ class AgentTools:
                 per = price.get("per_room_per_night") or round(price["total"] / max(1, nights * sum(p["rooms"] for p in parts)))
                 self.out.text("glimpse", prop.intro.replace("{price}", _money(per)).replace("{room}", parts[0]["rt"].name))
                 enq.intro_sent = prop.id
-            if general := pp.general_photos(prop, sent):
+            if general := pp.general_photos(prop, sent, self.bot):
                 self.out.photos(f"photos:{len(general)}", general)
                 sent |= set(general)
         for part in parts:  # FOR EACH offered room: its label (even with no photo), then its photos (fix round 3)
@@ -1725,7 +1725,7 @@ class AgentTools:
                 text = text.replace("{price}", _money(rts[0].base_rate)).replace("{room}", rts[0].name)
             self.out.text("glimpse", text)
             facts["glimpse_sent"] = True
-        general = pp.general_photos(prop, pp.sent_refs(bot, self.phone, self.out))
+        general = pp.general_photos(prop, pp.sent_refs(bot, self.phone, self.out), bot)
         if general:
             self.out.photos(f"photos:{len(general)}", general)
             facts["general_photos_sent"] = len(general)

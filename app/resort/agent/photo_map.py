@@ -16,8 +16,14 @@ LABEL = re.compile(r"\*(?:Room (\w+) - )?(.+?)\*")
 
 
 def photo_room(repo: Any, ref: str) -> tuple[str, str, str] | None:
-    """(property_id, room_type_id or 'resort', room number or '') for a photo id, or None when no one has it."""
+    """(property_id, room_type_id or 'resort', room number or '') for a photo id, or None when no one has it. A photo
+    ticked Common in the dashboard is the resort's, wherever it is listed."""
+    common = bool((repo.photo_infos().get(ref) or {}).get("common"))
     for p in repo.list_properties(active_only=False):
+        if common and (ref in (p.photo_urls or []) or any(
+                ref in (rt.photo_urls or []) or any(ref in v for v in (rt.number_photos or {}).values())
+                for rt in repo.list_room_types(p.id, False))):
+            return p.id, RESORT, ""
         for rt in repo.list_room_types(p.id, False):
             for num, refs in (rt.number_photos or {}).items():
                 if ref in refs:
