@@ -102,6 +102,9 @@ TOOL_SCHEMAS = [
             "extra_beds": {"type": "integer", "description": "only the guest's answer to the extra-bed question (0 = "
                                                              "no) or an extra bed they ask for themselves"},
             "early_checkin": {"type": "boolean", "description": "true only if the guest asked for early check-in"},
+            "change_existing": {"type": "boolean", "description": "true when the guest wants to CHANGE a booking they "
+                                "already have (dates, persons, rooms, room type), not make another one. Before payment "
+                                "the booking is updated; a PAID booking is never changed here (code blocks it)."},
             "reason": {"type": "string", "enum": list(pp.FORM_REASONS),
                        "description": "what the guest asked: price (a rate or cost), availability (are rooms free), "
                                       "booking (anything else; the default). Comes back as form_reason."},
@@ -563,6 +566,16 @@ class AgentTools:
         enq.language = style
         held = bot._open_hold(phone)
         enq.booking_id, enq.link_open = (held[0].id, True) if held else (None, False)
+        paid_up = [b for b in repo.list_bookings(phone=phone, limit=10)
+                   if b.status in ("paid", "checked_in") and b.check_out >= today]
+        if args.get("change_existing") and paid_up and not held:
+            # owner, 2026-11-26: a PAID booking is never changed or cancelled by the agent: nothing is touched or sent
+            prop0 = repo.get_property(paid_up[0].property_id)
+            return self._result(False, {"paid_booking_cannot_be_changed": av.fmt_range(paid_up[0].check_in,
+                                                                                         paid_up[0].check_out),
+                                        "numbers": self._numbers(prop0)}, start, cur,
+                                "Nothing was changed. Call talk_to_owner(change_or_cancel_paid, staff_note=what the "
+                                "guest wants to change), then reply \"Please contact the team directly: {numbers}\".")
 
         def done(ok: bool, facts: dict[str, Any], note: str) -> dict[str, Any]:
             facts = {**not_ours, **facts}
@@ -709,6 +722,13 @@ class AgentTools:
                 facts["free_with_extra_beds_in_rooms"] = scratch["suggest_rooms"]
             elif text != t("rooms_none", lang):
                 facts["group_bigger_than_all_free_rooms"] = True
+            if held:  # owner, 2026-11-26: a change that is not free changes nothing; the old link stays valid
+                for f in ("check_in", "check_out", "adults", "rooms", "room_picks", "extra_beds", "early_checkin",
+                          "checked"):
+                    setattr(enq, f, getattr(cur, f))
+                facts["your_booking_unchanged"] = True
+                return done(True, facts, "Nothing changed: the guest's booking and payment link stay as they were. "
+                            "Say 'Sorry, X is not free on your dates.' (or offer free_dates) in one short line.")
             enq.checked = {"available": False, "key": f"none|{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults}"}
             return done(True, facts, SENT_NOTE)
 
@@ -789,7 +809,7 @@ class AgentTools:
             stay = bot._held_stay(phone) or {}
             guest = repo.get_guest(phone)
             enq.contact = {"name": stay.get("guest_name") or (guest.name if guest else ""),
-                           "mobile": stay.get("mobile") or "same"}
+                           "mobile": stay.get("mobile") or "same", "old_ids": [b.id for b in held]}
             bot.close_old_holds(phone, set())
             held, closed_link = [], True
             enq.booking_id, enq.link_open = None, False
@@ -943,12 +963,33 @@ class AgentTools:
                                                 early=enq.early_checkin)
         if failure is not None:
             return failure
+        self._retire({b.id for b in held} | set((contact or {}).get("old_ids") or []), made["booking_id"])
         self.out.text("summary", ctx.summary_message)
         self.out.text("pay", ctx.pay_message)
         enq.booking_id, enq.link_open, enq.contact = made["booking_id"], True, None
         enq.save(bot.repo, self.phone)
-        return self._result(True, {**facts, "old_link_closed": True, "new_summary_and_link_sent": True}, start, enq,
-                            SENT_NOTE)
+        return self._result(True, {**facts, "booking_updated": True, "old_link_closed": True,
+                                   "new_summary_and_link_sent": True}, start, enq,
+                            "The new summary and payment link went by themselves. Say one short line, e.g. \"Done, "
+                            "I've updated your booking.\" Never repeat amounts.")
+
+    def _retire(self, old_ids: set[str], new_id: str) -> None:
+        """Owner, 2026-11-26: the unpaid booking a change replaced is CANCELLED (never active on the dashboard, its rooms
+        free on the calendar) and names the booking that replaced it. A paid booking is never touched."""
+        bot = self.bot
+        for bid in old_ids:
+            b = bot.repo.get_booking(bid)
+            if b is None or b.id == new_id or b.status not in ("hold", "expired"):
+                continue
+            if b.status == "hold" and b.payment_link_id:
+                try:
+                    bot.payments.cancel_link(b.payment_link_id)
+                except Exception as exc:  # a link that cannot be closed must never stop the change
+                    log.warning("Could not close the old link of %s: %s", b.id, exc)
+            b.status = "cancelled"
+            b.notes = ((b.notes or "").replace("[replaced by a newer booking]", "").strip()
+                       + f" [replaced by {new_id}]").strip()
+            bot.repo.save_booking(b)
 
     def _make_booking(self, enq: Enquiry, prop: Property, bk: dict[str, Any], parts: list[dict[str, Any]], mix: Any,
                       lang: str, name: str, mobile: str, start: int, early: bool = False
@@ -1080,6 +1121,11 @@ class AgentTools:
         bot, phone, repo = self.bot, self.phone, self.bot.repo
         start, enq, style, lang = self._ctx(args)
         prop = repo.get_property(enq.place) if enq.place else None
+        if enq.paid:  # the enquiry's booking is paid: never re-made or changed here (owner, 2026-11-26)
+            return self._result(False, {"problem": "this booking is already paid and cannot be changed here",
+                                        "numbers": self._numbers(prop)}, start, enq,
+                                "A paid booking is changed only by the team: talk_to_owner(change_or_cancel_paid) "
+                                "and the handoff line.")
         if prop is None or not (enq.check_in and enq.check_out and enq.adults) or not (enq.checked or {}).get("available"):
             return self._result(False, {"problem": "no available stay has been checked yet"}, start, enq,
                                 "Call update_enquiry with the stay first; the owner's messages for it are sent for you.")
