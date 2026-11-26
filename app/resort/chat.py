@@ -775,6 +775,14 @@ NATIVE_PLACES = [(re.compile(p), name) for p, name in (
     ("മൂന്നാർ|மூணார்|மூன்னார்|मुन्नार", "munnar"), ("പൊഴിയോരം|பொழியோரம்|पोझियोरम", "pozhiyoram"))]
 
 
+def room_cost_line(room_cost: int, nights: int) -> str:
+    """Owner, 2026-11-27: the summary shows the room cost PER NIGHT ('Room Cost - 3,000/Night'). A stay whose room cost
+    does not divide evenly by the nights (different weekend rates) keeps the stay's room cost."""
+    if nights > 0 and room_cost % nights == 0:
+        return f"Room Cost - {room_cost // nights:,}/Night"
+    return f"Room Cost - {room_cost:,}"
+
+
 def english_letters_only(text: str, lang: str = "en") -> str:
     """The last guard before ANY text goes to a guest (owner, 2026-11-18: "strictly no text in regional-language
     alphabets, only English letters"). Lines with Malayalam / Tamil / Devanagari letters are left out (a summary line
@@ -3882,7 +3890,7 @@ class ChatMixin:
             lines.append(f"*{rt.name}*")
         if prop.meal_plan:
             lines.append(f"*{prop.meal_plan}*")
-        lines.append(f"Room Cost - {total - fee - bed_cost:,}")
+        lines.append(room_cost_line(total - fee - bed_cost, q.nights))
         if bed_cost:
             lines.append(f"Extra Bed - {bed_cost:,}")
         if fee:
@@ -3931,7 +3939,7 @@ class ChatMixin:
             lines.append(f"*{rt.name}*")
         if prop and prop.meal_plan:
             lines.append(f"*{prop.meal_plan}*")
-        lines.append(f"Room Cost - {total - fee - bed_cost:,}")
+        lines.append(room_cost_line(total - fee - bed_cost, b.nights))
         if bed_cost:
             lines.append(f"Extra Bed - {bed_cost:,}")
         if fee:
