@@ -15,6 +15,7 @@ Every result has the same shape: {ok, facts, sent, next_step, note}.
 from __future__ import annotations
 
 import difflib
+import json
 import logging
 import time
 from datetime import date, timedelta
@@ -442,6 +443,49 @@ class AgentTools:
         if any(not k.startswith("staff:") and k != "confirmed" for k in sent) and not note.startswith(ALREADY_SENT):
             note = f"{ALREADY_SENT} {note}"  # every tool that sent the guest something says so first
         return {"ok": ok, "facts": facts, "sent": sent, "next_step": enq.next_step, "note": note}
+
+    @staticmethod
+    def _sig(enq: Enquiry) -> str:
+        """The stay the guest was told about (an extra-bed answer alone is not a new stay)."""
+        return json.dumps([enq.place, str(enq.check_in), str(enq.check_out), enq.adults, enq.rooms, enq.room_picks,
+                           enq.early_checkin, enq.booking_id, enq.paid], default=str, sort_keys=True)
+
+    def _mark_told(self, result: dict[str, Any], before: Enquiry, start: int) -> dict[str, Any]:
+        """Owner, 2026-11-26: no repeated lines. Every result says `changed` (the stay or booking changed, or something
+        went to the guest) and `already_told` (what the guest was told earlier for this same stay)."""
+        if not isinstance(result, dict):
+            return result
+        repo = self.bot.repo
+        enq = Enquiry.load(repo, self.phone)
+        sig = self._sig(enq)
+        sent = [k for k in self.out.keys[start:] if not k.startswith("staff:") and k != "confirmed"]
+        changed = sig != self._sig(before) or bool(sent)
+        told = enq.told if (enq.told or {}).get("sig") == sig else {"sig": sig, "items": []}
+        already = list(told["items"])
+        facts = result.get("facts") or {}
+        new = []
+        if facts.get("available") is True:
+            new += ["rooms_available", "rooms_sentence"]
+        if facts.get("form_lines"):
+            new.append("form")
+        if facts.get("missing") == ["place"]:
+            new.append("location_question")
+        if facts.get("price") and "get_price" in self.ran[-1:]:
+            new.append("price")
+        if facts.get("extra_bed_question") and not facts.get("extra_bed_question_already_asked"):
+            new.append("extra_bed_question")
+        if facts.get("summary_and_link_sent") or facts.get("new_summary_and_link_sent"):
+            new.append("summary_and_link")
+        told["items"] = already + [x for x in new if x not in already]
+        if told != enq.told:
+            enq.told = told
+            enq.save(repo, self.phone)
+        result["changed"], result["already_told"] = changed, already
+        if not changed and already:
+            result["note"] = ("Nothing changed: the guest only answered. Reply in ONE message: a short acknowledgement "
+                              "first ('Ok.' in their language), then ONLY the next step. Never repeat anything in "
+                              "already_told. " + str(result.get("note") or ""))
+        return result
 
     def _only_resort(self) -> Property | None:
         """The one open resort, when there is exactly one: then the place is never asked."""
@@ -1414,7 +1458,7 @@ class AgentTools:
             return self._result(True, {"already_done": True}, start, enq, ONCE_NOTE)
         self.ran.append(name)
         try:
-            return handler(args or {})
+            return self._mark_told(handler(args or {}), enq, start)
         except Exception as exc:  # a bad tool call must never leave the guest unanswered
             log.exception("Tool %s failed", name)
             return self._result(False, {"problem": f"internal error: {type(exc).__name__}"}, start, enq,

@@ -55,6 +55,7 @@ class Enquiry:
     contact: dict[str, Any] | None = None  # {"name", "mobile"} of a payment link closed by a layout change, kept for the new link
     bed_asked_for: str | None = None  # "adults|rooms": the layout the extra-bed question was asked for (asked once)
     bed_answered_for: str | None = None  # the layout the guest answered it for (or asked for a bed on their own)
+    told: dict[str, Any] | None = None  # {"sig": the stay, "items": what the guest was already told for it}
     started: bool = False  # a tool began a booking (update_enquiry / send_photos): from now on code keeps the open step
 
     @property
@@ -154,7 +155,7 @@ class Enquiry:
                 "link_open": self.link_open, "paid": self.paid, "language": self.language,
                 "photo_wish": self.photo_wish, "intro_sent": self.intro_sent,
                 "bed_asked_for": self.bed_asked_for, "bed_answered_for": self.bed_answered_for,
-                "contact": self.contact, "started": self.started}
+                "contact": self.contact, "started": self.started, "told": self.told}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> Enquiry:
@@ -174,7 +175,7 @@ class Enquiry:
                    link_open=bool(d.get("link_open")), paid=bool(d.get("paid")), language=lang,
                    photo_wish=d.get("photo_wish") or None, intro_sent=d.get("intro_sent") or None,
                    bed_asked_for=d.get("bed_asked_for") or None, bed_answered_for=d.get("bed_answered_for") or None,
-                   contact=d.get("contact") or None, started=bool(d.get("started")))
+                   contact=d.get("contact") or None, started=bool(d.get("started")), told=d.get("told") or None)
 
     @classmethod
     def load(cls, repo: Any, phone: str) -> Enquiry:
