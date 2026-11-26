@@ -57,6 +57,9 @@ class Enquiry:
     bed_answered_for: str | None = None  # the layout the guest answered it for (or asked for a bed on their own)
     told: dict[str, Any] | None = None  # {"sig": the stay, "items": what the guest was already told for it}
     started: bool = False  # a tool began a booking (update_enquiry / send_photos): from now on code keeps the open step
+    checked_at: str | None = None  # when the last room check ran (ISO time; owner 2026-11-27: kept up to 7 days)
+    saved_on: str | None = None  # set when the enquiry comes from an earlier conversation: the old check no longer counts
+    dates_passed: bool = False  # the saved dates were in the past when the guest came back
 
     @property
     def active(self) -> bool:
@@ -126,6 +129,15 @@ class Enquiry:
         if self.early_checkin:
             parts.append("early check-in asked")
         lines = ["CURRENT ENQUIRY", " · ".join(parts)]
+        if self.saved_on:
+            lines.append(f"SAVED from an earlier chat (last checked {self.saved_on}); availability must be checked "
+                         "again. If the guest wants to continue booking: FIRST confirm these saved details in one short "
+                         "message (e.g. 'Shall I check 12–14 Dec, 3 adults, 1 room at <resort> again?'); a yes → "
+                         "update_enquiry (it re-checks now); a change → update_enquiry with it. A plain greeting → the "
+                         "normal greeting; mention this only if they talk about booking.")
+        if self.dates_passed:
+            lines.append("the saved dates have passed: if they want to book, say 'Those dates have passed. Please share "
+                         "new dates.' (update_enquiry gives the form lines)")
         if self.checked is not None:
             if self.checked.get("available") is False:
                 lines.append("checked: not available for these dates")
@@ -155,7 +167,8 @@ class Enquiry:
                 "link_open": self.link_open, "paid": self.paid, "language": self.language,
                 "photo_wish": self.photo_wish, "intro_sent": self.intro_sent,
                 "bed_asked_for": self.bed_asked_for, "bed_answered_for": self.bed_answered_for,
-                "contact": self.contact, "started": self.started, "told": self.told}
+                "contact": self.contact, "started": self.started, "told": self.told,
+                "checked_at": self.checked_at, "saved_on": self.saved_on, "dates_passed": self.dates_passed}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> Enquiry:
@@ -175,7 +188,9 @@ class Enquiry:
                    link_open=bool(d.get("link_open")), paid=bool(d.get("paid")), language=lang,
                    photo_wish=d.get("photo_wish") or None, intro_sent=d.get("intro_sent") or None,
                    bed_asked_for=d.get("bed_asked_for") or None, bed_answered_for=d.get("bed_answered_for") or None,
-                   contact=d.get("contact") or None, started=bool(d.get("started")), told=d.get("told") or None)
+                   contact=d.get("contact") or None, started=bool(d.get("started")), told=d.get("told") or None,
+                   checked_at=d.get("checked_at") or None, saved_on=d.get("saved_on") or None,
+                   dates_passed=bool(d.get("dates_passed")))
 
     @classmethod
     def load(cls, repo: Any, phone: str) -> Enquiry:

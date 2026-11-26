@@ -781,6 +781,11 @@ class AgentTools:
         def done(ok: bool, facts: dict[str, Any], note: str) -> dict[str, Any]:
             facts = {**not_ours, **facts}
             enq.started = True
+            if "available" in facts:  # a room check ran NOW: the saved (older) check no longer matters
+                enq.checked_at, enq.saved_on = bot.clock.now().isoformat(), None
+            if enq.dates_passed and (enq.check_in is None or enq.check_in >= today) and (
+                    args.get("check_in") or args.get("check_out")):
+                enq.dates_passed = False
             enq.save(repo, phone)
             if enq.place and (known := repo.get_property(enq.place)) is not None:
                 facts.setdefault("resort", bot._place_label(known))  # the resort code resolved (the eval checks it)
