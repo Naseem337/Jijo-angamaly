@@ -56,6 +56,8 @@ CREATE INDEX IF NOT EXISTS chat_phone ON chat(phone, id);
 CREATE TABLE IF NOT EXISTS chat_state (phone TEXT PRIMARY KEY, data TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0,
     paused_at TEXT);
 CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS photo_sends (wamid TEXT PRIMARY KEY, phone TEXT NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL,
+  property_id TEXT NOT NULL, room_type_id TEXT NOT NULL, room_number TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users (email TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS charges (id TEXT PRIMARY KEY, booking_id TEXT NOT NULL, description TEXT NOT NULL,
     amount INTEGER NOT NULL, at TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'other', added_by TEXT NOT NULL DEFAULT '');
@@ -283,7 +285,7 @@ class ResortRepo:
                 counts[table] = db.execute(f"DELETE FROM {table} WHERE booking_id IN ({marks})", ids).rowcount \
                     if ids else 0
             counts["bookings"] = db.execute("DELETE FROM bookings WHERE guest_phone = ?", (phone,)).rowcount
-            for table in ("chat", "chat_state", "guests"):
+            for table in ("chat", "chat_state", "guests", "photo_sends"):
                 counts[table] = db.execute(f"DELETE FROM {table} WHERE phone = ?", (phone,)).rowcount
         return counts
 
@@ -440,6 +442,23 @@ class ResortRepo:
             cur = self._db.execute("INSERT INTO chat(phone, direction, text, at, source, wamid) VALUES(?,?,?,?,?,?)",
                                    (m.phone, m.direction, m.text, _iso(m.at), m.source, m.wamid or ""))
             return int(cur.lastrowid)
+
+    def save_photo_send(self, wamid: str, phone: str, kind: str, ref: str, property_id: str, room_type_id: str,
+                        room_number: str, at: datetime) -> None:
+        """A photo or room label we sent: its WhatsApp id -> the photo id (ref) and its room, as it was AT SENDING
+        (room_type_id 'resort' = a general resort photo). A swipe-reply to it finds the room even if the dashboard
+        changes later."""
+        if not wamid:
+            return
+        self._run("INSERT OR REPLACE INTO photo_sends(wamid, phone, kind, ref, property_id, room_type_id, room_number, at) "
+                  "VALUES(?,?,?,?,?,?,?,?)", (wamid, phone, kind, ref, property_id, room_type_id, room_number, _iso(at)))
+
+    def photo_send(self, phone: str, wamid: str) -> dict[str, str] | None:
+        """The photo / label this guest's swipe-reply points at, or None."""
+        if not wamid:
+            return None
+        r = self._one("SELECT * FROM photo_sends WHERE phone=? AND wamid=?", (phone, wamid))
+        return dict(r) if r else None
 
     def chat_by_wamid(self, phone: str, wamid: str) -> ChatMessage | None:
         """The stored message with this WhatsApp id (the one a guest swipe-replied to), or None."""

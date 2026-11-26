@@ -836,6 +836,20 @@ def ai_status(request: Request, auth: Auth = Depends(require_owner)):
         return JSONResponse({"llm_chain": [], "error": str(exc)[:300]})
 
 
+@router.get("/photo-check")
+def photo_check(request: Request, auth: Auth = Depends(require_owner)):
+    """Owner only: does every photo map to one room? Lists what to fix, plus each list's photo count."""
+    from app.resort.agent import photo_map
+    repo = get_repo()
+    counts = []
+    for p in repo.list_properties(active_only=False):
+        counts.append({"where": f"{p.name}: general resort photos", "photos": len(p.photo_urls or [])})
+        for rt in repo.list_room_types(p.id, False):
+            counts.append({"where": f"{p.name} / {rt.name}", "photos_without_room_number": len(rt.photo_urls or []),
+                           "photos_by_room_number": {n: len(r) for n, r in (rt.number_photos or {}).items() if r}})
+    return JSONResponse({"to_fix": photo_map.check(repo), "counts": counts})
+
+
 @router.post("/delete-all-bookings")
 async def delete_all_bookings(request: Request, auth: Auth = Depends(require_owner)):
     """Owner only: delete every booking (chats, guests, rooms and settings stay). Needs confirm=DELETE."""

@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any
 
+from app.resort.agent import photo_map
+
 log = logging.getLogger(__name__)
 
 
@@ -180,7 +182,7 @@ def bot_outbox(bot: Any, phone: str, *, dry_run: bool = False) -> Outbox:
         latest_in = max((m.at for m in rows if m.direction == "in"), default=None)
         return latest_in is not None and latest_in > started
 
-    return Outbox(phone, exact, lambda to, refs: bot._send_photos(to, refs),
+    return Outbox(phone, exact, lambda to, refs: send_photos(bot, to, refs),
                   dry_run=dry_run, send_staff=lambda to, text: bot.wa.send_text(to, text), send_exact=exact,
                   photo_gap_s=photo_gap(), superseded=newer)
 
@@ -205,5 +207,44 @@ def _send_exact(bot: Any, phone: str, text: str) -> bool:
     except Exception as exc:  # WhatsApp error or network failure: logged, never crashes the turn
         log.error("Could not send to %s: %s", phone[-4:], exc)
         return False
-    bot._log(phone, text, wamid=wamid if isinstance(wamid, str) else "")
+    wamid = wamid if isinstance(wamid, str) else ""
+    bot._log(phone, text, wamid=wamid)
+    if wamid and (room := photo_map.label_room(bot.repo, text)):  # a room label: its WhatsApp id -> that room
+        _remember(bot, wamid, phone, "label", "", room)
     return True
+
+
+def send_photos(bot: Any, phone: str, refs: list[str]) -> int:
+    """The agent's photo sender (bot._send_photos plus the room map): each photo is uploaded and sent, logged in the
+    chat with its WhatsApp id, and that id is saved with the photo id and its room AT SENDING (photo_map), from
+    whichever thread sends it. One bad photo never stops the rest."""
+    from app.resort import photos as ph
+
+    sent = 0
+    for ref in refs:
+        path = ph.local_path(ref)
+        if path is None:
+            continue
+        try:
+            media_id = bot.wa.upload_media(path.read_bytes(), ph.mime_of(path), path.name)
+            wamid = bot.wa.send_image(phone, media_id, "")
+        except Exception as exc:
+            log.warning("Photo send failed: %s", exc)
+            continue
+        wamid = wamid if isinstance(wamid, str) else ""
+        bot._log(phone, f"[photo] {ref}", wamid=wamid)
+        if wamid:
+            room = photo_map.photo_room(bot.repo, ref)
+            if room is None:
+                log.warning("Photo %s is in no room or resort list: a swipe-reply to it cannot be matched", ref)
+            else:
+                _remember(bot, wamid, phone, "photo", ref, room)
+        sent += 1
+    return sent
+
+
+def _remember(bot: Any, wamid: str, phone: str, kind: str, ref: str, room: tuple[str, str, str]) -> None:
+    try:
+        bot.repo.save_photo_send(wamid, phone, kind, ref, *room, at=bot.clock.now())
+    except Exception as exc:  # the map is a help for swipe-replies: never a reason to fail a send
+        log.warning("Could not save the photo map for %s: %s", phone[-4:], exc)

@@ -29,6 +29,7 @@ from typing import Any
 from app.providers.llm import ChatMessage
 from app.resort.agent import conversation, guard
 from app.resort.agent import language as turn_language
+from app.resort.agent import photo_map
 from app.resort.agent import photos_plan as pp
 from app.resort.agent import usage
 from app.resort.agent.outbox import Outbox, near_same
@@ -132,26 +133,43 @@ def greeted(bot: Any, phone: str) -> bool:
 
 
 def swipe_note(bot: Any, phone: str, context_id: str | None) -> str:
-    """A line for a swipe-reply: which earlier message the guest answered ('' when it is not one of ours to find)."""
+    """A line for a swipe-reply: which earlier message the guest answered ('' when it is not a swipe-reply). Owner,
+    2026-11-26: WhatsApp id -> photo id -> room from the photo map saved at sending (photo_map); photos sent before the
+    map existed are looked up from the chat log."""
     if not context_id:
         return ""
+    sent = bot.repo.photo_send(phone, context_id)
     quoted = bot.repo.chat_by_wamid(phone, context_id)
-    if quoted is None:  # an old message or one we never logged: the room is not known (owner, 2026-11-26)
+    what = "the photo" if (sent and sent["kind"] == "photo") or (quoted and quoted.text.startswith("[photo]"))         else "the label"
+    if sent is not None:
+        if sent["room_type_id"] == photo_map.RESORT:
+            prop = bot.repo.get_property(sent["property_id"])
+            return (f"{SWIPE_MARK} a general photo of the resort{f' ({prop.name})' if prop else ''}, not of a room. "
+                    "Treat the message as a question about the resort, never as a room choice.]")
+        rt = bot.repo.get_room_type(sent["room_type_id"])
+        if rt is not None:
+            return _room_note(what, rt, sent["room_number"])
+    if quoted is None:  # an old message or one we never logged: the room is not known
         return f"{SWIPE_MARK} an earlier message that cannot be found. If they mean a room, ask: \"{WHICH_ROOM}\"]"
     if quoted.direction == "out":
-        photo = quoted.text.startswith("[photo]")
         if room := bot._room_of_message(quoted.text):
-            rt, number = room
-            label = f"Room {number} — {rt.name}" if number else rt.name
-            pick = f'{{"room_type": "{rt.name}"' + (f', "room_number": "{number}"' if number else "") + "}"
-            return (f"{SWIPE_MARK} {'the photo' if photo else 'the label'} of {label}. Their message is about THIS room: "
-                    f"choosing it in any words or language ('this one', 'that room', 'I need this', 'book this', "
-                    f"'ithu venam') → update_enquiry(room_picks=[{pick}]); price → get_price(room_type=\"{rt.name}\"); "
-                    "a question → answer about this room.]")
-        if photo:  # a general resort photo, or a photo no room has any more
-            return f"{SWIPE_MARK} a photo that shows no particular room. If they mean a room, ask: \"{WHICH_ROOM}\"]"
+            return _room_note(what, *room)
+        if quoted.text.startswith("[photo]"):
+            ref = quoted.text[len("[photo] "):].strip()
+            if (found := photo_map.photo_room(bot.repo, ref)) and found[1] == photo_map.RESORT:
+                return (f"{SWIPE_MARK} a general photo of the resort, not of a room. Treat the message as a question "
+                        "about the resort, never as a room choice.]")
+            return f"{SWIPE_MARK} a photo whose room is not known. If they mean a room, ask: \"{WHICH_ROOM}\"]"
         return f'{SWIPE_MARK} your message: "{quoted.text[:300]}"]'
     return f'[Guest swiped-replied to their own earlier message: "{quoted.text[:300]}"]'
+
+
+def _room_note(what: str, rt: Any, number: str) -> str:
+    label = f"Room {number} — {rt.name}" if number else rt.name
+    pick = f'{{"room_type": "{rt.name}"' + (f', "room_number": "{number}"' if number else "") + "}"
+    return (f"{SWIPE_MARK} {what} of {label}. Their message is about THIS room: choosing it in any words or language "
+            f"('this one', 'that room', 'I need this', 'book this', 'ithu venam') → update_enquiry(room_picks=[{pick}]); "
+            f"price → get_price(room_type=\"{rt.name}\"); a question → answer about this room.]")
 
 
 def _with_guest_message(messages: list[ChatMessage], text: str, swipe: str) -> list[ChatMessage]:
