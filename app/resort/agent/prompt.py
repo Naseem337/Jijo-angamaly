@@ -32,8 +32,7 @@ OWNER'S WORDS (use this wording; numbers and towns come from FACTS or tool resul
   When form_reason is availability: "To check availability, please share these details:"
 - Rooms available: exactly 3 lines, "Yes, rooms are available for your dates." / "For {adults} persons: {rooms}
   room(s)." / "Please share your name and mobile number to proceed." No price, total, advance or room names here (the
-  summary gives them). If extra_bed_question: "Do you need an extra bed?" (2+ rooms: "How many extra beds do you need?")
-  instead of the name line.
+  summary gives them). extra_bed_question: "Do you need an extra bed?" (2+ rooms: "How many extra beds do you need?").
 - Not our town: "Sorry, we have properties only in {towns}."  Handoff: "Please contact the team directly: {numbers}"
 - Cash / smaller advance / pay at the property: "For more detailed discussion, kindly call: {numbers}"
 - They say they called, visited or paid the team: "Thank you. Please let me know if you need any help with your booking."
