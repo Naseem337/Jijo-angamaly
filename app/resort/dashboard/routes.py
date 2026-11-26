@@ -871,9 +871,7 @@ def photo_check(request: Request, auth: Auth = Depends(require_owner)):
 DUP_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Duplicate photos</title><body style="font-family:system-ui;max-width:900px;margin:24px auto;padding:0 16px;
 background:#fff;color:#111"><p><a href="{base}/properties">&larr; Properties</a></p><h2>Duplicate photos</h2>
-<p>Photos with the same photo id, the same file name or the same file. Nothing is removed unless you click.
-"Keep as Common" marks the kept photo as a resort photo (courtyard, beach, entrance): it is sent once per chat with
-the resort photos, never as a room's photo.</p>{msg}{body}</body>"""
+<p>Photos with the same photo id, the same file name or the same file. Nothing is removed unless you click.</p>{msg}{body}</body>"""
 
 
 def _place_key(pl) -> str:
@@ -901,7 +899,7 @@ def duplicate_photos(request: Request, auth: Auth = Depends(require_owner), msg:
                 f"<form method='post' style='margin:4px 0'><input type='hidden' name='csrf' value='{auth.csrf}'>"
                 f"<input type='hidden' name='keep' value='{escape(_place_key(pl))}'>"
                 f"<input type='hidden' name='common' value='{c}'><button>{label}</button></form>"
-                for c, label in (("1", "Keep as Common, remove others"), ("0", "Keep here, remove others")))
+                for c, label in (("0", "Keep here, remove others"),))
             parts.append(f"<figure style='margin:0;width:200px'><a href='{escape(pl.ref)}' target='_blank'>"
                          f"<img src='{escape(pl.ref)}' style='width:200px;height:140px;object-fit:cover;"
                          f"border-radius:6px'></a><figcaption style='font-size:13px'>"

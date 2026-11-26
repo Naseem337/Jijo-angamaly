@@ -64,7 +64,6 @@
     <figcaption>
       {% if not loop.first %}<form method="post" action="{{ action }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="cover"><input type="hidden" name="ref" value="{{ ref }}"><button class="btn sm">Make cover</button></form>{% endif %}
       <form method="post" action="{{ action }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="remove"><input type="hidden" name="ref" value="{{ ref }}"><button class="btn sm danger" data-confirm="Remove this photo?">Remove</button></form>
-      {% if common is not none %}<form method="post" action="{{ action }}" title="A resort photo (courtyard, beach, entrance): sent once per chat with the resort photos, never as this room's photo"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="common"><input type="hidden" name="ref" value="{{ ref }}"><label class="btn sm"><input type="checkbox" name="common" {{ 'checked' if ref in common }} data-autocheck> Common photo</label><noscript><button class="btn sm">Save</button></noscript></form>{% endif %}
     </figcaption>
   </figure>{% endfor %}
   </div>{% endif %}

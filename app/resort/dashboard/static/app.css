@@ -493,3 +493,6 @@ html.collapsed .sidebar{width:260px}html.collapsed .sidebar nav a span,html.coll
 /* tiles: round icon, plain arrow, no extra squares */
 .stat-ic,.stat-ic.c1,.stat-ic.c2,.stat-ic.c3,.stat-ic.c4,.stat-ic.c5{border-radius:50%}
 .stat::after{background:none;width:auto;height:auto;border-radius:0;font-size:18px;color:var(--brand)}
+
+.back-btn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.back-btn .ic{width:16px;height:16px}
+@media(max-width:560px){.back-btn span{display:none}}

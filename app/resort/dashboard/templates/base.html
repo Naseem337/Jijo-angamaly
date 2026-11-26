@@ -50,6 +50,7 @@
   <div class="main">
     <header class="topbar">
       <button class="menu-btn" id="menu-btn" aria-label="Menu">{{ icon('menu') }}</button>
+      {% if nav != 'home' %}<a class="btn ghost back-btn" id="back-btn" href="{{ BASE }}/" title="Back">{{ icon('left') }} <span>Back</span></a>{% endif %}
       <button class="icon-btn collapse-btn" id="collapse-btn" type="button" aria-label="Collapse the menu" title="Collapse the menu">{{ icon('left') }}</button>
       <form class="search" action="{{ BASE }}/search" method="get">
         {{ icon('search') }}<input id="global-search" name="q" placeholder="Search anything..." value="{{ q if nav == '' else '' }}" autocomplete="off">

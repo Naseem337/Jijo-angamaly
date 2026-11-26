@@ -280,3 +280,13 @@ document.querySelectorAll('input[data-autocheck]').forEach(function (input) {
     });
   });
 })();
+
+// Back (owner, 2026-11-27): the previous dashboard page; Home when the page was opened directly
+(function () {
+  var b = document.getElementById('back-btn');
+  if (!b) return;
+  b.addEventListener('click', function (e) {
+    var ref = document.referrer || '';
+    if (ref.indexOf(location.origin) === 0 && history.length > 1) { e.preventDefault(); history.back(); }
+  });
+})();
