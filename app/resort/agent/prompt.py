@@ -17,7 +17,7 @@ from typing import Any
 from app.providers.llm.base import CACHE_SPLIT
 from app.resort.agent import conversation
 from app.resort.agent.state import Enquiry
-from app.resort.agent.tools import towns_and
+from app.resort.agent.tools import towns_and, towns_or
 from app.resort.i18n import status_name
 
 SYSTEM = """You are the WhatsApp front desk of {brand} (resorts in {towns}). You understand any words, spelling or language.
@@ -134,7 +134,7 @@ def guest_records(bot: Any, phone: str, fresh: bool) -> str:
 def static_prompt(bot: Any) -> str:
     """The cached part: the rules and FACTS. The same for every guest and every turn; it changes only when the owner
     edits the dashboard. Nothing per guest or per turn may go in here."""
-    rules = SYSTEM.replace("{brand}", bot._brand()).replace("{towns_or}", bot._towns_text())
+    rules = SYSTEM.replace("{brand}", bot._brand()).replace("{towns_or}", towns_or(bot))
     return "\n\n".join([rules.replace("{towns}", towns_and(bot)), "FACTS\n" + bot._facts()])
 
 

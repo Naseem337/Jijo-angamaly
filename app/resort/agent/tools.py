@@ -382,16 +382,30 @@ def _label(d: date) -> str:
     return f"{d.day} {d.strftime('%b')}"
 
 
-def towns_and(bot: Any) -> str:
-    """'Alleppey and Kanthalloor': where the OPEN resorts are, from the dashboard (never written in code)."""
+def open_towns(bot: Any) -> list[str]:
+    """Where the OPEN resorts are, from the dashboard: a resort switched off is never offered (owner, 2026-11-26)."""
     towns: list[str] = []
     for p in bot._places():
         town = (p.city or p.place or p.name).split(",")[0].strip()
         if p.active and town and town.casefold() not in (x.casefold() for x in towns):
             towns.append(town)
+    return towns
+
+
+def _join(towns: list[str], word: str) -> str:
     if not towns:
         return ""
-    return towns[0] if len(towns) == 1 else ", ".join(towns[:-1]) + " and " + towns[-1]
+    return towns[0] if len(towns) == 1 else ", ".join(towns[:-1]) + f" {word} " + towns[-1]
+
+
+def towns_and(bot: Any) -> str:
+    """'Alleppey and Kanthalloor': the open resorts' towns."""
+    return _join(open_towns(bot), "and")
+
+
+def towns_or(bot: Any) -> str:
+    """'Alleppey or Kanthalloor': the open resorts' towns, for the owner's location question."""
+    return _join(open_towns(bot), "or")
 
 
 # send_photos found nothing to send: what the AI tells the guest instead
@@ -612,7 +626,7 @@ class AgentTools:
             prop = self._only_resort()  # one resort only: the place is set and the location question never goes
         if prop is None or not prop.active:
             enq.place = None
-            facts = {"missing": ["place"], "towns": bot._towns_text()}
+            facts = {"missing": ["place"], "towns": towns_or(bot)}
             if ignored:
                 facts["place_ignored"] = f"the guest has not written '{ignored}' in this chat"
             return done(True, facts, SENT_NOTE)
@@ -911,7 +925,7 @@ class AgentTools:
         if prop is None or not prop.active:  # no resort yet: the location question first, the request is kept (rule 6)
             enq.photo_wish = {"kind": kind, "room_type": room_type, "insist": insist}
             enq.save(repo, phone)
-            return self._result(True, {"photos": 0, "missing": ["place"], "towns": bot._towns_text()}, start, enq,
+            return self._result(True, {"photos": 0, "missing": ["place"], "towns": towns_or(bot)}, start, enq,
                                 "Ask which location with reply(); the photos follow once the guest names the resort.")
         view = Enquiry(place=enq.place, room_picks=enq.room_picks, language=enq.language)  # photos with no dates
         note = SENT_NOTE
@@ -1273,7 +1287,7 @@ class AgentTools:
             enq.booking_id, enq.link_open = held[0].id, True
         prop = self._the_resort(enq, held)
         if prop is None:
-            return self._result(False, {"problem": "no resort is known yet", "towns": bot._towns_text()}, start, enq,
+            return self._result(False, {"problem": "no resort is known yet", "towns": towns_or(bot)}, start, enq,
                                 "Ask which location with reply().")
         if not prop.map_url:
             return self._result(True, {"map": False, "numbers": self._numbers(prop)}, start, enq,
