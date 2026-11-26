@@ -543,11 +543,14 @@ class AgentTools:
     def _group_too_big(self, prop: Property, ci: date, co: date, adults: int) -> tuple[int, int] | None:
         """(free rooms, most adults they hold) when the free ACTIVE rooms on these dates are too few for the group;
         None when they can hold it or nothing at all is free (that is the plain 'not available' answer)."""
+        rooms, most = self._free_capacity(prop, ci, co)
+        return (rooms, most) if rooms and most < adults else None
+
+    def _free_capacity(self, prop: Property, ci: date, co: date) -> tuple[int, int]:
+        """(free ACTIVE rooms on these dates, the most adults they hold at 3 per room incl. extra bed)."""
         repo, now = self.bot.repo, self.bot.clock.now()
         free = [(rt, repo.free_rooms(rt, ci, co, now, self.phone)) for rt in repo.list_room_types(prop.id)]
-        rooms = sum(n for _, n in free if n > 0)
-        most = sum(n * av.room_cap(rt) for rt, n in free if n > 0)
-        return (rooms, most) if rooms and most < adults else None
+        return (sum(n for _, n in free if n > 0), sum(n * av.room_cap(rt) for rt, n in free if n > 0))
 
     def _big_group_alert(self, prop: Property, ci: date, co: date, adults: int, free_n: int, most: int) -> None:
         """'Big group enquiry' for the team, once per enquiry (resort + dates), never again on the next messages."""
@@ -892,6 +895,16 @@ class AgentTools:
         if ids:  # owner, 2026-11-26: every room type the guest named is checked for THEIR dates, one by one
             notes["picked_rooms_check"] = self._pick_check(prop, ids, ci, co)
         parts, mix = self._plan(prop, bk, wanted)
+        if not parts and not wanted:
+            # owner, 2026-11-27: 2 per room does not fit, but 3 per room (extra bed) in the free rooms does (15 adults, 6
+            # free rooms -> 5 rooms): the NORMAL flow with the fewest rooms that work, and the extra-bed question
+            free_n, most = self._free_capacity(prop, ci, co)
+            if free_n and most >= adults:
+                for n in range(max(least or 1, 1), free_n + 1):
+                    parts, mix = self._plan(prop, {**bk, "rooms": n}, n)
+                    if parts:
+                        wanted = bk["rooms"] = n
+                        break
         if ids and parts and {p["rt"].id for p in parts} != set(ids):
             # the picks were not used as asked: say why (never a silent switch to other rooms)
             check = notes["picked_rooms_check"]
