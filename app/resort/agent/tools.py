@@ -61,7 +61,8 @@ LANGUAGE_FIELD = {"type": "string", "enum": list(LANGUAGES),
 DATE_FIELD = {"type": "object",
               "description": "For relative dates ('today', 'tomorrow', 'day after tomorrow' / 'മറ്റന്നാൾ' / 'naalai', "
                              "'next Friday', 'this weekend', 'the next day' for check-out), compute the exact date from "
-                             "TODAY and give day, month and year. For dates the guest wrote as numbers / months, copy "
+                             "TODAY and give day, month and year (आज / कल / परसों, nale, mattannal, naalai too). Only a check-out "
+                             "said → pass only check_out, never a guessed check_in. For dates the guest wrote as numbers / months, copy "
                              "only what they said: '20 Nov' → {day: 20, month: 11}; never fill month or year yourself.",
               "properties": {"day": {"type": "integer", "description": "1-31"},
                              "month": {"type": "integer", "description": "1-12, or null"},
@@ -89,7 +90,10 @@ TOOL_SCHEMAS = [
             "check_in": DATE_FIELD,
             "check_out": DATE_FIELD,
             "nights": {"type": "integer", "description": "instead of check_out"},
-            "adults": {"type": "integer", "description": "adults above 6 years, as the guest said (never assume)"},
+            "adults": {"type": "integer", "description": "adults above 6 years. Others coming WITH the guest: count the "
+                       "guest too ('2 people with me', 'me and 2 friends', 'എന്റെ കൂടെ 2 പേര്', 'मेरे साथ 2 लोग', "
+                       "'ennoda 2 per' → 3). 'We are 4', '4 per', '4 people' → 4. Truly unclear → leave it out and "
+                       "ask 'Including you, how many adults?'"},
             "rooms": {"type": "integer", "description": "only if the guest said a number of rooms"},
             "room_picks": {"type": "array", "description": "ONLY a clear CHOICE ('take X', 'change to X', 'X venam', "
                                                          "'book X', 'room 103', a swipe-reply 'this one' on a room's "
