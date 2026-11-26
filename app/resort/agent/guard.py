@@ -1,16 +1,19 @@
-"""Guards on the AI's reply() text (AI-first simplification, 2026-11-26). Tool messages are never checked or changed.
+"""Guards on the AI's reply() text (guard audit, 2026-11-27). Tool messages are never checked or changed. ONLY these:
 
-Only these checks:
-    a) every ₹ amount must appear in a tool result, FACTS or the guest's messages anywhere in THIS CONVERSATION (an
-       amount the guest typed, like 8000, may always be repeated)
-    b) "booked / confirmed / reserved" only when a booking of this guest is paid; "a room is free / available"
-       only when a tool returned a free room THIS turn
-       -> a), b): ONE retry with the problem told to the AI (turn.py); still flagged -> only the offending sentence is
-          removed and the rest goes. A non-empty answer is never replaced by a fallback.
-    c) stripped quietly: the payment provider's name, booking ids, links no tool or FACTS gave
+    a) no invented ₹: every amount must be in a tool result, FACTS or the guest's messages of THIS CONVERSATION
+    b) no booked / confirmed / reserved before a booking of this guest is paid
+    c) no internal talk: team told / system / tools / gateway sentences, the payment provider's name, booking ids
+    d) no availability claim (free / not free / only X free) without a tool result of THIS turn
+    e) no identical repeat: a line code sent this turn, or a reply (nearly) equal to one of the last 3 bot messages
+    f) the team's numbers at most in 2 of the last 5 bot messages (a 3rd time only the numbers are replaced)
+    g) the AI never writes a payment URL (or any link not in FACTS); no pay ask without a matching open link
 
-Regex here only reads the AI's own reply and code-made facts; nothing here decides what the GUEST meant (the guest's
-messages are only searched for the same amounts the AI wrote).
+a), b), d) -> ONE retry with the reasons (turn.py); still flagged -> only the offending sentences go. c), e), f), g)
+remove sentences / parts quietly. A reply the guards empty -> the AI is asked ONCE more with the reasons, then the open
+step. "Sorry, could you say that again?" only for an unreadable guest message (turn.unreadable). English letters are
+the outbox's job (_send_exact); "never say why a price is what it is" is a prompt rule.
+
+Regex here only reads the AI's own reply and code-made facts; nothing here decides what the GUEST meant.
 """
 
 from __future__ import annotations
@@ -56,17 +59,13 @@ NEG_CLAIM = re.compile(r"\b(?:(?:is|are)\s*(?:not|n't)\s+(?:free|available)|(?:i
                        r"not (?:free|available)|fully booked|sold out|no rooms?\b|only\b[^.!?]{0,60}\b(?:free|available))",
                        re.IGNORECASE)
 ROOM_WORDS = re.compile(r"\b(?:rooms?|cottages?|suites?|for your dates|on your dates)\b", re.IGNORECASE)
-INDIC = re.compile(r"[ऀ-ॿ஀-௿ഀ-ൿ]")  # Hindi, Tamil, Malayalam script
-# why a price is what it is is never said (owner, 2026-11-26): only the price from the tool
-PRICE_REASON = re.compile(r"\b(?:seasonal|season|peak|high[- ]season|off[- ]season|weekend (?:rate|price|tariff)s?|"
-                          r"holiday (?:rate|price|tariff)s?|rates? (?:have |has )?changed|special (?:rate|price)s?)\b",
-                          re.IGNORECASE)
 AMOUNTS_KEY = "agent_amounts"  # guest state: the numbers tool results gave in this conversation
 
 
 @dataclass
 class Sources:
     """Everything an amount in the AI's reply may come from (this whole conversation)."""
+    facts: str = ""  # FACTS only: the one place a link in the AI's reply may come from (the map pin)
     code: str = ""  # tool results of this conversation + our own messages + FACTS + the saved enquiry
     guest: str = ""  # the guest's messages in this conversation
     paid: bool = False  # a booking of this guest is paid
@@ -97,9 +96,6 @@ def numbers_in(text: str) -> set[float]:
 def sentence_problem(sentence: str, src: Sources, known: set[float] | None = None) -> str:
     """What is wrong with one sentence of the reply ('' = fine), said so the AI can fix it."""
     known = numbers_in(src.everything) if known is None else known
-    if INDIC.search(sentence):  # the bot writes English letters only (the guest may write any script)
-        return ("Write in English letters only: Malayalam script → Manglish, Tamil → Tanglish, Hindi → Hinglish "
-                "(the same words in English letters).")
     for a, b in AMOUNT.findall(sentence):
         raw = a or b
         if (value := _num(raw)) is not None and value not in known:
@@ -109,9 +105,6 @@ def sentence_problem(sentence: str, src: Sources, known: set[float] | None = Non
             and not FUTURE.search(sentence[:hit.start()]):
         return (f'"{hit.group(0)}": nothing is paid yet. Never say booked, confirmed or reserved before the payment is '
                 "received.")
-    if hit := PRICE_REASON.search(sentence):
-        return (f'"{hit.group(0)}": never say why a price is what it is (season, peak, weekend or holiday rate, rates '
-                "changed, special rate). Give only the price from the tool.")
     if not src.checked_now and NEG_CLAIM.search(sentence) and ROOM_WORDS.search(sentence):
         return ("Check with the tool first: no tool checked availability this turn, so never say a room is not free, "
                 "fully booked or that only some rooms are free (update_enquiry with room_picks for every type named).")
@@ -156,11 +149,12 @@ def retry_message(found: list[str]) -> str:
 
 
 def clean(reply: str, src: Sources) -> str:
-    """c) The payment provider's name, booking ids and links no tool or FACTS gave are taken out."""
+    """c) + g): the provider's name, booking ids, internal-action sentences, every link not in FACTS (code sends the
+    payment link, never the AI) and a pay ask without a matching open link go."""
     pieces = []
     for i, piece in enumerate(re.split(r"(https?://\S+)", reply)):
         if i % 2:
-            pieces.append(piece if piece.rstrip(".,!?)") in src.code else "")
+            pieces.append(piece if src.facts and piece.rstrip(".,!?)") in src.facts else "")  # g) never a pay URL
         else:
             pieces.append(PROVIDER.sub("", BOOKING_ID.sub("", piece)))
     text = "".join(pieces)
@@ -289,5 +283,5 @@ def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_te
         want is None or want == got for want, got in ((enq.place, held[0].property_id),
                                                       (enq.check_in, held[0].check_in),
                                                       (enq.check_out, held[0].check_out)))
-    return Sources(code=tools + "\n" + facts, guest="\n".join([*said, guest_text]), paid=paid,
+    return Sources(code=tools + "\n" + facts, facts=build_facts(bot), guest="\n".join([*said, guest_text]), paid=paid,
                    free_now=free_in(calls), checked_now=checked_in(calls), paid_done=paid_done, pay_ok=pay_ok)
