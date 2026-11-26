@@ -255,11 +255,6 @@ def _int(args: dict[str, Any], key: str, default: int | None = None) -> int | No
     return int(value)
 
 
-def _words(text: str) -> str:
-    """Lower-case letters and digits only, one space apart (matches a message whatever its emoji / marks)."""
-    return " ".join("".join(ch if ch.isalnum() else " " for ch in text.lower()).split())
-
-
 def _beds_on(booking: Any) -> int:
     """The extra beds on a booking: its notes carry 'Extra beds: N'."""
     for note in (booking.notes or "").split(";"):

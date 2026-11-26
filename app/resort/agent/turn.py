@@ -47,6 +47,8 @@ TEMPERATURE = 0.2
 AI_DOWN_ALERT_GAP = timedelta(minutes=30)  # one staff alert per outage, not per message
 SKIPPED_ROWS = ("[invoice]", "[template", "[image]", "[voice note: not understood")  # log lines, never shown to the AI
 REPLY_AGAIN = "[SYSTEM] Nothing was sent to the guest. Call reply() with your answer to the guest."
+SWIPE_MARK = "[Guest swiped-replied to"  # every swipe-reply note starts with it
+WHICH_ROOM = "Which room do you mean?"  # a swipe-reply's last fallback: never 'say that again' (owner, 2026-11-26)
 
 
 @dataclass
@@ -131,16 +133,24 @@ def greeted(bot: Any, phone: str) -> bool:
 
 def swipe_note(bot: Any, phone: str, context_id: str | None) -> str:
     """A line for a swipe-reply: which earlier message the guest answered ('' when it is not one of ours to find)."""
-    quoted = bot.repo.chat_by_wamid(phone, context_id or "")
-    if quoted is None:
+    if not context_id:
         return ""
+    quoted = bot.repo.chat_by_wamid(phone, context_id)
+    if quoted is None:  # an old message or one we never logged: the room is not known (owner, 2026-11-26)
+        return f"{SWIPE_MARK} an earlier message that cannot be found. If they mean a room, ask: \"{WHICH_ROOM}\"]"
     if quoted.direction == "out":
+        photo = quoted.text.startswith("[photo]")
         if room := bot._room_of_message(quoted.text):
             rt, number = room
             label = f"Room {number} — {rt.name}" if number else rt.name
-            what = "the photo of" if quoted.text.startswith("[photo]") else "the label of"
-            return f"[Guest swiped-replied to {what} {label}]"
-        return f'[Guest swiped-replied to your message: "{quoted.text[:300]}"]'
+            pick = f'{{"room_type": "{rt.name}"' + (f', "room_number": "{number}"' if number else "") + "}"
+            return (f"{SWIPE_MARK} {'the photo' if photo else 'the label'} of {label}. Their message is about THIS room: "
+                    f"choosing it in any words or language ('this one', 'that room', 'I need this', 'book this', "
+                    f"'ithu venam') → update_enquiry(room_picks=[{pick}]); price → get_price(room_type=\"{rt.name}\"); "
+                    "a question → answer about this room.]")
+        if photo:  # a general resort photo, or a photo no room has any more
+            return f"{SWIPE_MARK} a photo that shows no particular room. If they mean a room, ask: \"{WHICH_ROOM}\"]"
+        return f'{SWIPE_MARK} your message: "{quoted.text[:300]}"]'
     return f'[Guest swiped-replied to their own earlier message: "{quoted.text[:300]}"]'
 
 
@@ -350,7 +360,10 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
         result.outcome = "say_again"
         log.warning("Agent: 'say again' for %s: the AI sent nothing twice (notes: %s)", phone[-4:],
                     " | ".join(result.notes)[:300] or "none")
-        outbox.text("say_again_short", t("say_again_short", lang))
+        if SWIPE_MARK in swipe:  # a swipe-reply never gets 'say that again' (owner, 2026-11-26)
+            outbox.text("say_again_short", WHICH_ROOM)
+        else:
+            outbox.text("say_again_short", t("say_again_short", lang))
     outbox.flush()
     result.sent = outbox.keys
     usage.record(bot, phone, result, dry_run=outbox.dry_run)
