@@ -239,6 +239,17 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             tools.lang.take(args.get("language"))  # the reply's language is this turn's language
         src = sources()
         reply = guard.clean(str(args.get("text") or "").strip(), src)
+        # a line code already sent this turn (the availability line, the rooms sentence ...) is never written again
+        code_lines = [ln for i in outbox.queue + outbox.sent if i.kind == "text" and i.key != "ai"
+                      for ln in i.text.split("\n") if ln.strip()]
+        if code_lines and reply:
+            kept = "\n".join(ln for ln in reply.split("\n")
+                             if not (ln.strip() and any(near_same(ln, c) for c in code_lines))).strip()
+            if not kept:
+                return {"ok": False, "facts": {"problem": "every line repeats what code already sent"},
+                        "note": "Those lines already went. Call reply() with ONLY the next step (e.g. the extra-bed "
+                                "question or the name and mobile ask)."}
+            reply = kept
         if not reply:
             return {"ok": False, "facts": {"problem": "the text is empty"}, "note": "Call reply() with your answer."}
         found = guard.problems(reply, src)

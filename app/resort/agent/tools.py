@@ -81,7 +81,8 @@ TOOL_SCHEMAS = [
         "A place or resort name on its own ('Alleppey', 'kanthaloor', even misspelt) IS booking information → call "
         "update_enquiry(place=...). Pass the FULL stay (CURRENT ENQUIRY + what the guest just said); leave out what is "
         "unknown. Give check_out OR nights: code works out the other. It returns what is missing and checks the "
-        "rooms (room photos and labels go out by themselves); then tell the guest with reply().",
+        "rooms (the availability line, the rooms sentence, the photos and labels go out by themselves); then "
+        "reply() with ONLY the next step.",
         {"type": "object", "properties": {
             "place": {"type": "string", "description": "the resort or town as the guest wrote it in this chat; never one the "
                                                      "guest did not name"},
@@ -903,6 +904,14 @@ class AgentTools:
         if answered_only:  # only the answer to the extra-bed question came: nothing new to show
             return done(True, facts, SENT_NOTE)
         shown = list((cur.checked or {}).get("labels") or [])  # the room labels the last room check sent
+        # owner, 2026-11-26: CODE sends the availability line and the rooms sentence first, then waits, then the glimpse
+        # and photos; the AI's reply (extra-bed question or the name / mobile ask) comes last
+        beds_now = sum(p["beds"] for p in parts)
+        rooms_line = (t("rooms_beds", lang, persons=adults, rooms=quoted, beds=beds_now, rate=f"{prop.extra_bed_rate:,}")
+                      if beds_now else t("rooms_plain", lang, persons=adults, rooms=quoted))
+        self.out.text("rooms_ok", t("rooms_ok", lang) + "\n" + rooms_line)
+        self.out.wait(3)
+        facts["availability_and_rooms_sent"] = True
         # new dates: the glimpse and the general photos, then each room's label and photos; only persons, rooms or the
         # room type changed: a new room's label and photos
         self._stay_photos(enq, prop, parts, bool(mix), price, not same_dates, shown)

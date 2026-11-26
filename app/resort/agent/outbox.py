@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Item:
-    kind: str  # "text" | "photos" | "staff" | "marker"
+    kind: str  # "text" | "photos" | "staff" | "marker" | "wait" (a pause of `seconds`, nothing sent)
     key: str  # what it is, e.g. "rooms_ok", "ask_contact", "ai" (the AI's own line), "photos:6", "staff:handoff"
     text: str = ""
     refs: tuple[str, ...] = ()  # photo references
@@ -81,6 +81,10 @@ class Outbox:
         """An alert for the resort's team (never the guest): a dry run only records it."""
         self.queue.append(Item("staff", key, text=text, to=tuple(numbers)))
 
+    def wait(self, seconds: float) -> None:
+        """A pause before the next item (owner, 2026-11-26: >= 3 s after the availability lines, then the glimpse)."""
+        self.queue.append(Item("wait", f"wait:{seconds:g}", text=str(seconds)))
+
     def marker(self, key: str) -> None:
         """A placeholder in `sent` that sends nothing."""
         self.queue.append(Item("marker", key))
@@ -134,7 +138,9 @@ class Outbox:
             if not self.dry_run and n and self.queue[n - 1].kind == "photos" and item.kind == "text" \
                     and self.photo_gap_s > 0:
                 self._sleep(self.photo_gap_s)
-            if not self.dry_run:
+            if not self.dry_run and item.kind == "wait":
+                self._sleep(float(item.text or 0))
+            elif not self.dry_run:
                 if item.kind == "text" and item.key in EXACT_KEYS and self._send_exact is not None:
                     self._send_exact(self.phone, item.text)
                 elif item.kind == "text" and self._send_text is not None:
