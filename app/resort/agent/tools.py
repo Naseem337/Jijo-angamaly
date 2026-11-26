@@ -118,6 +118,13 @@ TOOL_SCHEMAS = [
                                       "booking (anything else; the default). Comes back as form_reason."},
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
+        "compare_rooms",
+        "The guest wants a cheaper room / a lower budget / anything cheaper ('cheap room undo?'). This is NOT a discount "
+        "ask. For the guest's current stay it lists every room type FREE on those dates (their own hold not counted) "
+        "with the total for the same stay, cheapest first; `current` marks the room they have now. Facts only: nothing "
+        "is sent or changed. No stay known yet: it returns what is missing (form_reason price).",
+        {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
+    ToolSpec(
         "get_price",
         "Every question about price, rate, cost, total or advance (e.g. 'cost of the cottage'). Answers for the stay "
         "already given (or on the open link): the amounts come back in facts. No stay known yet: it returns what is "
@@ -1123,6 +1130,60 @@ class AgentTools:
         for reason in ctx.staff:
             self._staff(reason, prop.id if prop else None, lang)
 
+    # ------------------------------------------------------------------ compare_rooms
+
+    def compare_rooms(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Owner, 2026-11-26: a cheaper room. Every room type free for the same stay, with its total from the dashboard
+        rates now, cheapest first. Only an answer: the Enquiry, the booking and the link are never changed."""
+        bot, phone, repo = self.bot, self.phone, self.bot.repo
+        start = len(self.out.keys)
+        enq = Enquiry.load(repo, phone)
+        style = _style(args, enq.language)
+        held = bot._held_stay(phone)
+        if enq.place and enq.check_in and enq.check_out and enq.adults:
+            prop = repo.get_property(enq.place)
+            ci, co, adults, wanted, early = enq.check_in, enq.check_out, enq.adults, enq.rooms or 0, enq.early_checkin
+            beds = enq.extra_beds
+            current = (enq.checked or {}).get("pref") or ""
+        elif held:  # the payment link is out: its stay is what we know
+            prop = repo.get_property(held["property_id"])
+            ci, co = date.fromisoformat(held["check_in"]), date.fromisoformat(held["check_out"])
+            adults, wanted = held["adults"], int(held.get("rooms") or 0)
+            early = any("Early check-in" in (b.notes or "") for b in bot._open_hold(phone))
+            beds = sum(_beds_on(b) for b in bot._open_hold(phone))
+            current = ""
+        else:  # no stay yet: the price form first, then compare
+            result = self.update_enquiry({"language": style, "reason": "price"})
+            result["sent"] = self.out.keys[start:]
+            return result
+        if prop is None:
+            return self._result(False, {"problem": "unknown resort"}, start, enq, "Call update_enquiry first.")
+        if held and held.get("room_type_ids"):
+            current = held["room_type_ids"][0]
+        bk = {"property_id": prop.id, "check_in": ci.isoformat(), "check_out": co.isoformat(), "adults": adults,
+              "children": 0, "rooms": wanted, "own": phone}
+        if not current:
+            parts0, _ = self._plan(prop, bk, wanted)
+            current = parts0[0]["rt"].id if parts0 else ""
+        options = []
+        for rt, counts in bot._fits(prop, bk):
+            parts = [{"rt": rt, "rooms": counts[0], "beds": 0}]
+            self._apply_beds(parts, beds if prop.extra_bed_rate else 0)
+            price = self._price_of(prop, parts, ci, co, early)
+            options.append({"room_type": rt.name, "rooms": counts[0], "extra_beds": parts[0]["beds"],
+                            "total": price["total"], "current": rt.id == current})
+        options.sort(key=lambda o: o["total"])
+        facts: dict[str, Any] = {"dates": av.fmt_range(ci, co), "adults": adults, "free_rooms": options}
+        mine = next((o for o in options if o["current"]), None)
+        if mine is not None and options and options[0]["current"]:
+            facts["already_cheapest"] = True
+        cheaper = [o for o in options if mine is not None and o["total"] < mine["total"]]
+        facts["cheaper_options"] = cheaper[:2] if mine is not None else options[:2]
+        return self._result(True, facts, start, enq,
+                            "Only an answer: nothing is changed. Name at most 2 cheaper free options with their total "
+                            "from facts and ask if they want to change; already_cheapest → 'You already have our most "
+                            "affordable room for these dates.' A pick → update_enquiry with room_picks.")
+
     # ------------------------------------------------------------------ get_price
 
     def get_price(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -1475,7 +1536,8 @@ class AgentTools:
 
     def call(self, name: str, args: dict[str, Any] | None) -> dict[str, Any]:
         """Run one tool the AI asked for. An unknown name or a crash is a normal result, never an exception."""
-        handlers = {"update_enquiry": self.update_enquiry, "get_price": self.get_price, "send_photos": self.send_photos,
+        handlers = {"update_enquiry": self.update_enquiry, "get_price": self.get_price,
+                    "compare_rooms": self.compare_rooms, "send_photos": self.send_photos,
                     "send_map": self.send_map, "create_booking": self.create_booking,
                     "check_payment": self.check_payment, "send_payment_link": self.send_payment_link,
                     "my_bookings": self.my_bookings, "change_name": self.change_name,

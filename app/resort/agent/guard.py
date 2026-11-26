@@ -38,6 +38,10 @@ SENTENCE = re.compile(r"(?<=[.!?])\s+")
 FREE_CLAIM = re.compile(r"\b(?:is|are)\s+(?:also\s+|still\s+)?(?:free|available)\b", re.IGNORECASE)
 ROOM_WORDS = re.compile(r"\b(?:rooms?|cottages?|suites?|for your dates|on your dates)\b", re.IGNORECASE)
 INDIC = re.compile(r"[ऀ-ॿ஀-௿ഀ-ൿ]")  # Hindi, Tamil, Malayalam script
+# why a price is what it is is never said (owner, 2026-11-26): only the price from the tool
+PRICE_REASON = re.compile(r"\b(?:seasonal|season|peak|high[- ]season|off[- ]season|weekend (?:rate|price|tariff)s?|"
+                          r"holiday (?:rate|price|tariff)s?|rates? (?:have |has )?changed|special (?:rate|price)s?)\b",
+                          re.IGNORECASE)
 AMOUNTS_KEY = "agent_amounts"  # guest state: the numbers tool results gave in this conversation
 
 
@@ -83,6 +87,9 @@ def sentence_problem(sentence: str, src: Sources, known: set[float] | None = Non
             and not FUTURE.search(sentence[:hit.start()]):
         return (f'"{hit.group(0)}": nothing is paid yet. Never say booked, confirmed or reserved before the payment is '
                 "received.")
+    if hit := PRICE_REASON.search(sentence):
+        return (f'"{hit.group(0)}": never say why a price is what it is (season, peak, weekend or holiday rate, rates '
+                "changed, special rate). Give only the price from the tool.")
     if not src.free_now and FREE_CLAIM.search(sentence) and ROOM_WORDS.search(sentence) \
             and not NOT_YET.search(sentence):
         return ("No tool returned a free room this turn: never say a room is free or available without one "
