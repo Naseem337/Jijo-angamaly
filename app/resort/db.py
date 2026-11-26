@@ -421,7 +421,7 @@ class ResortRepo:
         if end:
             where.append("check_in < ?")
             args.append(end.isoformat())
-        rows = self._all(f"SELECT * FROM bookings WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT ?",
+        rows = self._all(f"SELECT * FROM bookings WHERE {' AND '.join(where)} ORDER BY created_at DESC, rowid DESC LIMIT ?",
                          (*args, limit))
         return [_booking(r) for r in rows]
 

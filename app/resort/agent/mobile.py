@@ -3,7 +3,7 @@
 Accepted: an Indian mobile (10 digits starting 6-9; +91 / 91 / 0 prefix allowed; spaces, dashes, dots and brackets
 ignored), a foreign number with '+' and a country code (8-15 digits, E.164), or 'same' / 'same number' / 'this number'
 (the guest's WhatsApp number). Rejected as fake: all one digit, a running sequence up or down, a repeating 2-digit
-pattern, one digit 7+ times in a row, a wrong length, an Indian number not starting with 6-9.
+pattern, one digit 8+ times in a row, a wrong length, an Indian number not starting with 6-9.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def _looks_fake(digits: str) -> bool:
     run = 1
     for a, b in zip(digits, digits[1:]):
         run = run + 1 if a == b else 1
-        if run >= 7:  # 9000000000
+        if run >= 8:  # 9000000000 (owner rule: one digit 8+ times in a row)
             return True
     return False
 
