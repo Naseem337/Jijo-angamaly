@@ -474,8 +474,6 @@ class AgentTools:
             new.append("location_question")
         if facts.get("price") and "get_price" in self.ran[-1:]:
             new.append("price")
-        if facts.get("extra_bed_question") and not facts.get("extra_bed_question_already_asked"):
-            new.append("extra_bed_question")
         if facts.get("summary_and_link_sent") or facts.get("new_summary_and_link_sent"):
             new.append("summary_and_link")
         told["items"] = already + [x for x in new if x not in already]
@@ -484,8 +482,10 @@ class AgentTools:
             enq.save(repo, self.phone)
         result["changed"], result["already_told"] = changed, already
         if not changed and already:
-            result["note"] = ("Nothing changed: the guest only answered. Reply in ONE message: a short acknowledgement "
-                              "first ('Ok.' in their language), then ONLY the next step. Never repeat anything in "
+            result["note"] = ("Nothing changed in the stay. Reply in ONE message: if the guest answered your question, "
+                              "a short acknowledgement first ('Ok.' in their language); if they asked something, answer "
+                              "it in one short line from facts (no 'Ok.'). Then ONLY the open step (next_step): a question "
+                              "not answered yet (extra bed) is asked again in one short line. Never repeat anything in "
                               "already_told. " + str(result.get("note") or ""))
         return result
 
