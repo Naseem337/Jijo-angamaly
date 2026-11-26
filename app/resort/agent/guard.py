@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.resort.agent import conversation
+from app.resort.agent.facts import build_facts
 from app.resort.flow import BOOKING_ID
 
 AMOUNT = re.compile(r"(?:₹|\brs\.?|\binr)\s*(\d[\d,]*(?:\.\d+)?)|(\d[\d,]*(?:\.\d+)?)\s*(?:/-|rupees\b|rs\b)", re.IGNORECASE)
@@ -218,7 +219,7 @@ def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_te
     saved = bot.repo.get_state(phone).get(AMOUNTS_KEY) or {}
     earlier = " ".join(str(n) for n in saved.get("nums") or []) if saved.get("conv") == conv else ""
     prop = bot.repo.get_property(enq.place) if enq.place else None
-    facts = "\n".join([bot._facts(), enq.render(bot._place_label(prop) if prop else ""), earlier])
+    facts = "\n".join([build_facts(bot), enq.render(bot._place_label(prop) if prop else ""), earlier])
     tools = "\n".join([json.dumps(c.get("result"), ensure_ascii=False, default=str) for c in calls] + tool_texts + ours)
     paid = enq.paid or any(b.status == "paid" for b in bot.repo.list_bookings(phone=phone, limit=20))
     latest = next(iter(bot.repo.list_bookings(phone=phone, limit=1)), None)
