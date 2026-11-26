@@ -350,36 +350,93 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     return result
 
 
-FORM_HEAD = re.compile(r"^\s*(?:to check (?:the price|availability),\s*)?please share these details\s*:?", re.IGNORECASE)
-CONTACT_ASK = re.compile(r"^\s*please share your name and mobile number to proceed\.?\s*$", re.IGNORECASE)
+FORM_HEAD = re.compile(r"(?:to check (?:the price|availability),\s*)?please share these details\s*:?", re.IGNORECASE)
+CONTACT_ASK = re.compile(r"please share your name and mobile number to proceed\.?", re.IGNORECASE)
+LOCATION_HEAD = re.compile(r"sure,?\s*kindly confirm the location\s*📍?", re.IGNORECASE)
+OWNER_LINE = re.compile(r"(?:please contact the team directly\s*:|for more detailed discussion,?\s*kindly call)",
+                        re.IGNORECASE)
 FORM_LINE = re.compile(r"^\s*(?:check[ -]?in|check[ -]?out|number of adults|number of rooms)\b.*:\s*$", re.IGNORECASE)
+# a sentence of the AI's own line that asks again for what the form / ask / location question asks
+REASK = re.compile(r"\b(?:share|provide|send|tell|give|let (?:me|us) know|confirm|type)\b[^.?!]*\b(?:dates?|check[- ]?in|"
+                   r"check[- ]?out|details|adults|persons|people|guests|rooms?|name|mobile|number|location|place)\b",
+                   re.IGNORECASE)
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 def is_form(text: str) -> bool:
-    return bool(FORM_HEAD.match(text.split("\n", 1)[0]))
+    return bool(FORM_HEAD.match(text.split("\n", 1)[0].strip()))
+
+
+def _cut_lines(reply: str) -> list[str]:
+    """Each line, cut where an owner block starts inside it ('Sorry, 12 Nov has passed. Please share these details:'
+    -> two lines), and after the name / mobile ask."""
+    out: list[str] = []
+    for line in reply.split("\n"):
+        while True:
+            hits = [m for rx in (FORM_HEAD, CONTACT_ASK, LOCATION_HEAD, OWNER_LINE) if (m := rx.search(line))]
+            first = min(hits, key=lambda m: m.start()) if hits else None
+            if first is None:
+                out.append(line)
+                break
+            if first.start() > 0 and line[:first.start()].strip():
+                out.append(line[:first.start()].rstrip())
+                line = line[first.start():]
+                continue
+            if first.re is CONTACT_ASK and line[first.end():].strip():
+                out.append(line[:first.end()])
+                line = line[first.end():].lstrip()
+                continue
+            out.append(line)
+            break
+    return out
 
 
 def split_reply(reply: str) -> list[str]:
-    """The AI's text as WhatsApp messages: its own answer first, then the owner's form block (the head line and the
-    form lines), then the name / mobile ask. Only the AI's own reply is read here, never the guest's text."""
+    """Owner, 2026-11-26 (every reply): the AI's own line first, then each owner block as its OWN WhatsApp message: the
+    location question, the team's numbers line, the form (head + lines), the name / mobile ask. When a block follows,
+    the AI's line never asks for the same thing again (those sentences are dropped). Only the AI's own reply is read
+    here, never the guest's text."""
     answer: list[str] = []
+    location: list[str] = []
+    owner: list[str] = []
     form: list[str] = []
     ask: list[str] = []
-    in_form = False
-    for line in reply.split("\n"):
-        if FORM_HEAD.match(line):
-            in_form = True
-            form.append(line.strip())
-        elif CONTACT_ASK.match(line):
-            ask.append(line.strip())
-            in_form = False
-        elif in_form and (not line.strip() or FORM_LINE.match(line)):
+    mode = ""
+    for line in _cut_lines(reply):
+        text = line.strip()
+        if FORM_HEAD.match(text):
+            mode = "form"
+            form.append(text)
+        elif CONTACT_ASK.match(text):
+            mode = ""
+            ask.append(text)
+        elif LOCATION_HEAD.match(text):
+            mode = "location"
+            location.append(text)
+        elif OWNER_LINE.match(text):
+            mode = ""
+            owner.append(text)
+        elif mode == "form" and (not text or FORM_LINE.match(line)):
             form.append(line.rstrip())
+        elif mode == "location" and text and len(location) == 1:
+            location.append(text)  # the towns line ('Alleppey or Kanthalloor ?')
+            mode = ""
         else:
-            in_form = False
+            mode = ""
             answer.append(line)
-    parts = ["\n".join(answer).strip(), "\n".join(form).strip(), " ".join(ask).strip()]
-    return [p for p in parts if p]
+    own = "\n".join(answer).strip()
+    if own and (form or ask or location):
+        kept = []
+        for line in own.split("\n"):
+            sentences = [x for x in SENTENCE_END.split(line) if not (x.strip() and REASK.search(x))]
+            if " ".join(sentences).strip() or not line.strip():
+                kept.append(" ".join(sentences).strip())
+        own = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+        if own and not re.search(r"[A-Za-z0-9]", own):
+            own = ""
+    parts = [own, "\n".join(location).strip(), "\n".join(owner).strip(), "\n".join(form).strip(),
+             " ".join(ask).strip()]
+    return [x for x in parts if x]
 
 
 def form_recent(bot: Any, phone: str, form: str) -> bool:
