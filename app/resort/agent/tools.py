@@ -71,8 +71,7 @@ DATE_FIELD = {"type": "object",
               "required": ["day"]}
 
 # the tools that send something to the guest or the team: each runs at most ONCE per turn (fix round 2)
-ONCE_TOOLS = ("send_payment_link", "send_photos", "create_booking", "check_payment", "talk_to_owner", "send_map",
-              "send_glimpse")
+ONCE_TOOLS = ("send_payment_link", "send_photos", "create_booking", "check_payment", "talk_to_owner", "send_map")
 ONCE_NOTE = "Already done this turn: nothing more was sent. Do not call it again."
 
 # Descriptions are short (one example each) and do not repeat the system prompt: they are sent on every call (cached).
@@ -128,20 +127,15 @@ TOOL_SCHEMAS = [
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "get_price",
-        "ONLY when the guest's LATEST message asks about price, rate, cost, total or advance (e.g. 'cost of the "
-        "cottage'). Never on your own (not after 'ok', photos or a room check). Answers for the stay already given (or "
-        "on the open link): code sends the price block. No stay known yet: it returns what is missing (form_reason "
-        "price).",
+        "Every question about price, rate, cost, total or advance (e.g. 'cost of the cottage'). Answers for the stay "
+        "already given (or on the open link): the amounts come back in facts. No stay known yet: it returns what is "
+        "missing (form_reason price).",
         {"type": "object", "properties": {
-            "guest_words": {"type": "string", "description": "the exact words of the guest's latest message that ask "
-                                                             "about the price, copied as written"},
             "room_type": {"type": "string", "description": "only if the guest named a room type"},
-            "language": LANGUAGE_FIELD},
-         "required": ["guest_words"]}),
+            "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_photos",
-        "The guest asks for photos / pics / images of rooms or the resort, in any words ('pics?'). A general 'details' "
-        "question is send_glimpse, not this. kind: room_type (also pass room_type), "
+        "The guest wants to see rooms or the resort, in any words ('pics?'). kind: room_type (also pass room_type), "
         "resort, other_room, all_rooms, default (no room named), more. purpose: see = they only want to look (no "
         "availability check, never say free); consider = another room, switching, or is it free (checks THEIR dates). "
         "No dates yet: no photos unless insist=true (they insist: 'just send photos', 'photos first', asked again). "
@@ -154,12 +148,6 @@ TOOL_SCHEMAS = [
             "room_type": {"type": "string", "description": "only for kind room_type: a room type name from FACTS"},
             "language": LANGUAGE_FIELD},
          "required": ["kind", "purpose"]}),
-    ToolSpec(
-        "send_glimpse",
-        "The guest asks about the resort in general, in any words ('details', 'tell me about the resort', 'what do you "
-        "have', 'what facilities'): code sends the resort's glimpse (the owner's intro text), once per chat. Never "
-        "photos for this: photos only when they ask for photos / pics / images (send_photos).",
-        {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_map",
         "ONLY when the guest asks for the map, the location pin or directions. 'Where is it' / 'evde aanu' / 'how far "
@@ -257,11 +245,6 @@ def _int(args: dict[str, Any], key: str, default: int | None = None) -> int | No
     if value is None or value == "":
         return default
     return int(value)
-
-
-def _words(text: str) -> str:
-    """Lower-case letters and digits only, one space apart (to match a message whatever its emoji / marks)."""
-    return " ".join("".join(ch if ch.isalnum() else " " for ch in text.lower()).split())
 
 
 def _beds_on(booking: Any) -> int:
@@ -1023,10 +1006,11 @@ class AgentTools:
         shown = list(shown or [])
         sent = pp.sent_refs(self.bot, self.phone, self.out)
         if first_time:
-            if prop.intro:
+            if prop.intro and enq.intro_sent != prop.id:
                 nights = (enq.check_out - enq.check_in).days
                 per = price.get("per_room_per_night") or round(price["total"] / max(1, nights * sum(p["rooms"] for p in parts)))
-                self._queue_glimpse(enq, prop, per, parts[0]["rt"].name)
+                self.out.text("glimpse", prop.intro.replace("{price}", _money(per)).replace("{room}", parts[0]["rt"].name))
+                enq.intro_sent = prop.id
             if general := pp.general_photos(prop, sent):
                 self.out.photos(f"photos:{len(general)}", general)
                 sent |= set(general)
@@ -1058,13 +1042,10 @@ class AgentTools:
                 self._send_free(plan.room, lang)
             return {"photos": 0, **PHOTO_PROBLEMS[plan.problem](plan.room)}
         facts: dict[str, Any] = {}
-        at = len(self.out.queue)  # owner, 2026-11-26: the glimpse (once per conversation) goes before the photos
         if plan.also_free and plan.steps and plan.steps[0][0] is not None:  # another free room: shown, never switched
             facts["also_free_for_your_dates"] = plan.steps[0][0].name
             self._send_free(plan.steps[0][0].name, lang)
         count = pp.queue_steps(self.out, plan.steps, bot, enq, phone)
-        if count and self._queue_glimpse(enq, prop, at=at):
-            facts["glimpse_sent"] = True
         return {**facts, "photos": count, "kind": kind, "rooms": [rt.name for rt, _ in plan.steps if rt is not None]}
 
     def _send_free(self, room: str, lang: str) -> None:
@@ -1283,13 +1264,6 @@ class AgentTools:
         style = _style(args, enq.language)
         lang = I18N_LANG[style]
         held = bot._held_stay(phone)
-        quoted = _words(str(args.get("guest_words") or ""))
-        if self.guest_text is not None and not (quoted and quoted in _words(self.guest_text)):
-            # owner, 2026-11-26: the price block only when the guest asked; the AI must point to the guest's own words
-            log.info("get_price for %s: guest_words not in the guest's message: no price sent", phone[-4:])
-            return self._result(False, {"problem": "the guest's latest message does not ask about the price"}, start,
-                                enq, "No price was sent. Never send prices on your own: answer only what the guest "
-                                "asked with reply().")
         if (paid := self._paid_no_enquiry(enq)) is not None:
             # owner, 2026-11-26: after the confirmation the stay is the PAID booking: never priced again as a new stay
             return self._result(True, {"paid_booking": True, "dates": av.fmt_range(paid.check_in, paid.check_out),
@@ -1391,60 +1365,6 @@ class AgentTools:
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ shared by the tools below
-
-    def _glimpse_sent(self, prop: Property) -> bool:
-        """The resort's glimpse already went (or is queued) in this conversation: it never goes twice (owner,
-        2026-11-26). Matched on its first line, since {price} may differ."""
-        if any(i.key == "glimpse" for i in (*self.out.queue, *self.out.sent)):
-            return True
-        head = _words(next((ln for ln in prop.intro.split("\n") if ln.strip()), ""))
-        if not head:
-            return False
-        rows = self.bot.repo.list_chat(self.phone, limit=200)
-        return any(m.direction == "out" and _words(m.text).startswith(head)
-                   for m in rows[conversation.start_index(rows):])
-
-    def _queue_glimpse(self, enq: Enquiry, prop: Property, per: int | None = None, room: str = "",
-                       at: int | None = None) -> bool:
-        """Queue the glimpse (Property.intro) as its own message, once per conversation. With no stay, {price} and {room}
-        come from the first-priority room type's base rate. `at`: its place in the queue (before the photos)."""
-        if not prop.intro or self._glimpse_sent(prop):
-            return False
-        if per is None or not room:
-            rts = sorted((r for r in self.bot.repo.list_room_types(prop.id) if r.active),
-                         key=lambda r: (r.priority, r.base_rate))
-            if rts:
-                per = per if per is not None else rts[0].base_rate
-                room = room or rts[0].name
-        text = prop.intro.replace("{price}", _money(per or 0)).replace("{room}", room)
-        if at is None:
-            self.out.text("glimpse", text)
-        else:
-            from app.resort.agent.outbox import Item
-            self.out.queue.insert(at, Item("text", "glimpse", text=text))
-        enq.intro_sent = prop.id
-        return True
-
-    def send_glimpse(self, args: dict[str, Any]) -> dict[str, Any]:
-        """The resort's glimpse for a general question about the resort ('details', 'what do you have'). No photos."""
-        bot = self.bot
-        start, enq, style, lang = self._ctx(args)
-        held = bot._open_hold(self.phone)
-        prop = self._the_resort(enq, held)
-        if prop is None:
-            return self._result(False, {"problem": "no resort is known yet", "towns": towns_or(bot)}, start, enq,
-                                "Ask which location with reply().")
-        enq.place = enq.place or prop.id
-        if not prop.intro:
-            return self._result(True, {"glimpse": False}, start, enq,
-                                "No glimpse is saved: answer from FACTS in two or three short lines.")
-        if not self._queue_glimpse(enq, prop):
-            enq.save(bot.repo, self.phone)
-            return self._result(True, {"glimpse_already_sent": True}, start, enq,
-                                "The glimpse already went in this chat: answer only what is new, in one short line.")
-        enq.save(bot.repo, self.phone)
-        return self._result(True, {"glimpse": True}, start, enq,
-                            "The glimpse went by itself. reply() only with the open step (e.g. the form), or nothing.")
 
     def _ctx(self, args: dict[str, Any]) -> tuple[int, Enquiry, str, str]:
         """(outbox position, the saved Enquiry with this call's language, language style, i18n language code)."""
@@ -1758,7 +1678,7 @@ class AgentTools:
         """Run one tool the AI asked for. An unknown name or a crash is a normal result, never an exception."""
         handlers = {"update_enquiry": self.update_enquiry, "get_price": self.get_price,
                     "compare_rooms": self.compare_rooms, "send_photos": self.send_photos,
-                    "send_map": self.send_map, "send_glimpse": self.send_glimpse, "create_booking": self.create_booking,
+                    "send_map": self.send_map, "create_booking": self.create_booking,
                     "check_payment": self.check_payment, "send_payment_link": self.send_payment_link,
                     "my_bookings": self.my_bookings, "change_name": self.change_name,
                     "talk_to_owner": self.talk_to_owner, "recall_old_chat": self.recall_old_chat,

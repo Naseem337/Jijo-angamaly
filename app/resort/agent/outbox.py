@@ -115,9 +115,8 @@ class Outbox:
         for n, item in enumerate(texts):
             if id(item) not in queued:
                 continue  # already sent this turn: never taken back
-            if item.key == "ai":  # the same as a tool's message, or as an earlier AI text of this turn
-                others = [o for o in texts if o is not item and (o.key != "ai" or (texts.index(o) < n
-                                                                                    and id(o) not in gone))]
+            if item.key == "ai":
+                others = [o for o in texts if o is not item and o.key != "ai"]
             else:
                 others = [o for o in texts[:n] if o.key != "ai" and id(o) not in gone]
             if any(near_same(item.text, o.text) for o in others):
