@@ -1,7 +1,8 @@
 """ONE open hold per guest (owner, 2026-11-26).
 
 A guest's open hold is their newest unpaid booking together with the other parts of the same stay (a stay over two room
-types is one group: same group_id and payment link). Every other unpaid booking of that guest is CANCELLED with
+types is one group: same group_id and payment link). Every other unpaid booking of that guest whose dates OVERLAP the
+kept stay (2026-11-27) is CANCELLED with
 '[replaced by <id>]': its payment link is closed and its rooms are free again. Paid bookings are never touched.
 
 Enforced after every new booking (tools._make_booking), before every guest turn (gate.handle) and by the sweeper (every
@@ -55,6 +56,8 @@ def keep_newest(bot: Any, phone: str, keep: set[str] | None = None, *, mark: str
         stale = b.status == "expired" and REPLACED_OLD in (b.notes or "")
         if b.status != "hold" and not stale:
             continue  # paid, checked in / out, cancelled, a plain expired hold: never touched
+        if b.status == "hold" and not any(b.check_in < k.check_out and k.check_in < b.check_out for k in kept):
+            continue  # owner, 2026-11-27: only an older hold whose dates OVERLAP the kept stay is replaced
         if b.status == "hold" and b.payment_link_id and b.payment_link_id not in kept_links:
             try:
                 bot.payments.cancel_link(b.payment_link_id)
