@@ -528,6 +528,13 @@ class AgentTools:
         outs = [m.text for m in self.bot.repo.list_chat(self.phone, limit=20) if m.direction == "out"][-3:]
         return any(near_same(text, o) for o in outs)
 
+    def _paid_no_enquiry(self, enq: Enquiry) -> Any:
+        """The guest's latest booking when it is PAID and no new enquiry or open link has started since, else None."""
+        latest = next(iter(self.bot.repo.list_bookings(phone=self.phone, limit=1)), None)
+        if latest is None or latest.status not in ("paid", "checked_in", "checked_out") or self.bot._open_hold(self.phone):
+            return None
+        return latest if (enq.paid or not enq.active) else None
+
     def _form_recent(self, lines: list[str]) -> bool:
         """The same form lines are in one of the bot's last 3 messages (owner, 2026-11-26: never the same form twice)."""
         want = {str(ln).strip().lower() for ln in lines if str(ln).strip()}
@@ -1257,6 +1264,13 @@ class AgentTools:
         style = _style(args, enq.language)
         lang = I18N_LANG[style]
         held = bot._held_stay(phone)
+        if (paid := self._paid_no_enquiry(enq)) is not None:
+            # owner, 2026-11-26: after the confirmation the stay is the PAID booking: never priced again as a new stay
+            return self._result(True, {"paid_booking": True, "dates": av.fmt_range(paid.check_in, paid.check_out),
+                                       "total": paid.total, "paid": paid.paid_amount,
+                                       "balance_at_property": paid.balance}, start, enq,
+                                "The booking is PAID. A balance question → \"The balance of ₹{balance_at_property} is "
+                                "paid at the property during check-in.\" Never ask for the advance or a payment link.")
         if enq.place and enq.check_in and enq.check_out and enq.adults:
             prop = repo.get_property(enq.place)
             ci, co, adults, children = enq.check_in, enq.check_out, enq.adults, 0
@@ -1454,10 +1468,13 @@ class AgentTools:
                  if b.payment_link_id and not (b.group_id and b.group_id != b.id)]
         if not links:
             latest = next(iter(repo.list_bookings(phone=phone, limit=1)), None)
-            if latest is not None and latest.status == "paid":
+            if latest is not None and latest.status in ("paid", "checked_in", "checked_out"):
                 return self._result(True, {"already_paid": True}, start, enq,
-                                    "This booking is already paid and its confirmation was sent: say nothing more, or one "
-                                    "warm line.")
+                                    "The payment provider confirmed this booking: reply only \"Your booking is already "
+                                    "confirmed ✅\".")
+            if latest is None:
+                return self._result(True, {"no_booking": True}, start, enq,
+                                    "There is no booking yet: say so in one short line and offer to help book.")
             return self._result(True, {"checked": False, "reason": "no open payment link"}, start, enq,
                                 "There is nothing to check: follow next_step (the guest has no payment link yet).")
         last = bot.__dict__.setdefault("_pay_checked", {})

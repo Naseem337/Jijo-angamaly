@@ -35,6 +35,9 @@ PROVIDER = re.compile(r"[ \t]*\b(?:(?:via|through|using|on|by)[ \t]+)?(?:razor[ 
 LINK = re.compile(r"https?://\S+")
 # owner, 2026-11-26: never tell the guest what happens behind the scenes (team alerted, the system, tools, the payment
 # gateway or provider, how payments are processed): such a sentence is removed quietly
+# a paid booking with no new enquiry: never ask for the advance or point at a payment link (owner, 2026-11-26)
+PAY_ASK = re.compile(r"\b(?:pay(?:ing)?\s+(?:the\s+)?advance|advance\s+(?:payment|amount|of)|payment\s+link|pay\s+online|"
+                     r"link\s+above|complete\s+(?:the\s+)?payment)\b", re.IGNORECASE)
 INTERNAL = re.compile(
     r"\b(?:pass(?:ed|ing)?|forward(?:ed|ing)?|escalat\w*|inform(?:ed|ing)?|alert(?:ed|ing)?|notif(?:y|ied|ying)|"
     r"flag(?:ged|ging)?|relay(?:ed|ing)?|shar(?:ed|ing)|sent|send(?:ing)?|let)\b[^.!?\n]{0,40}\b(?:the |our )?"
@@ -68,6 +71,7 @@ class Sources:
     paid: bool = False  # a booking of this guest is paid
     free_now: bool = False  # a tool returned a free room this turn
     checked_now: bool = False  # a tool checked availability this turn (free or not)
+    paid_done: bool = False  # the latest booking is PAID and no new enquiry / link has started
 
     @property
     def everything(self) -> str:
@@ -160,7 +164,8 @@ def clean(reply: str, src: Sources) -> str:
     text = "".join(pieces)
     lines = []
     for line in text.split("\n"):  # an internal-action sentence goes, the rest stays
-        kept = [s for s in SENTENCE.split(line) if not INTERNAL.search(s)]
+        kept = [s for s in SENTENCE.split(line) if not INTERNAL.search(s)
+                and not (src.paid_done and PAY_ASK.search(s))]
         if kept or not line.strip():
             lines.append(" ".join(kept))
     text = "\n".join(lines)
@@ -216,5 +221,8 @@ def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_te
     facts = "\n".join([bot._facts(), enq.render(bot._place_label(prop) if prop else ""), earlier])
     tools = "\n".join([json.dumps(c.get("result"), ensure_ascii=False, default=str) for c in calls] + tool_texts + ours)
     paid = enq.paid or any(b.status == "paid" for b in bot.repo.list_bookings(phone=phone, limit=20))
+    latest = next(iter(bot.repo.list_bookings(phone=phone, limit=1)), None)
+    paid_done = (latest is not None and latest.status in ("paid", "checked_in", "checked_out")
+                 and not bot._open_hold(phone) and (enq.paid or not enq.active))
     return Sources(code=tools + "\n" + facts, guest="\n".join([*said, guest_text]), paid=paid,
-                   free_now=free_in(calls), checked_now=checked_in(calls))
+                   free_now=free_in(calls), checked_now=checked_in(calls), paid_done=paid_done)
