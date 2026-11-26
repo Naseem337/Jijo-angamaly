@@ -20,11 +20,10 @@ NEXT_STEPS = ("ask_location", "ask_details", "check", "ask_extra_bed", "ask_cont
 
 _NEXT_TEXT = {
     "ask_location": "the resort is not known: ask the location",
-    "ask_details": "dates or persons are missing: send the booking form",
+    "ask_details": "dates or persons are missing: ask with the details form (only the missing lines)",
     "check": "everything is known: check the rooms",
-    "ask_extra_bed": "a room will hold 3 adults and the extra-bed question was asked ('Do you need an extra bed?' for one "
-                     "such room, 'How many extra beds do you need?' for two or more): wait for the answer, then call "
-                     "update_enquiry with extra_beds (the number, 0 for no; more than the 3-adult rooms is capped)",
+    "ask_extra_bed": "a room will hold 3 adults: ask 'Do you need an extra bed?' (one such room) or 'How many extra beds "
+                     "do you need?' (two or more) once, then pass the answer to update_enquiry as extra_beds (0 = no)",
     "ask_contact": "rooms are available: ask for the guest's name and mobile number",
     "pay": "guest should pay the advance",
     "done": "booking paid and confirmed",
@@ -60,7 +59,7 @@ class Enquiry:
 
     @property
     def active(self) -> bool:
-        """A booking is under way: the code appends the open step at the end of a turn (turn.py)."""
+        """A booking is under way."""
         return bool(self.started or self.place or self.check_in or self.adults or self.booking_id or self.photo_wish)
 
     # ------------------------------------------------------------------ computed

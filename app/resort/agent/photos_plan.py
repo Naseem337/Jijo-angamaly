@@ -10,10 +10,10 @@ AI decides and passes `kind`; this file only applies the owner's rules to it:
   4. kinds: room_type (a named room, only if free on the guest's dates), resort (general photos only), other_room (the
      next free room by priority), all_rooms (every free room not shown yet), default / more (the offered room, else the
      next free one, else the resort's own photos once every room was shown);
-  5. before the dates room photos go freely, then the dates line and the form once;
+  5. before the dates room photos go freely (the AI asks for the dates in its reply);
   6. no resort yet: the location question first, the request is kept and answered once the place is known;
   7. a room label (text) goes before each room's photos;
-  8. after the photos the booking step still open is repeated, unless it is the message just above.
+  8. after the photos the AI reminds the guest of the open step in its own reply (2026-11-26: no code appender).
 
 No text matching of any kind happens here (no `re`, no keyword lists): room names the AI passes are matched by name.
 """
@@ -283,57 +283,11 @@ def queue_steps(out: Outbox, steps: list[tuple[RoomType | None, list[str]]], bot
 
 
 FORM_REASONS = ("booking", "price", "availability")
+FORM_LINES = (("check_in", "Check in :"), ("check_out", "Check out :"), ("persons", "Number of adults (above 6 years) :"),
+              ("rooms", "Number of rooms:"))  # the owner's form lines (i18n 'form'); rooms is optional
 
 
-def form_text(bot: Any, lang: str, got: dict[str, Any], reason: str = "booking") -> str:
-    """The owner's form with only the missing lines. Its first line says why it is asked (owner, 2026-11-26):
-    price -> 'To check the price, ...', availability -> 'To check availability, ...', booking -> unchanged."""
-    text = bot._missing_form(lang, got)
-    if reason in ("price", "availability"):
-        head = t("form", lang).split("\n", 1)[0]
-        text = text.replace(head, t(f"form_head_{reason}", lang), 1)
-    return text
-
-
-def open_step(bot: Any, enq: Enquiry, lang: str, reason: str = "booking") -> tuple[str, str] | None:
-    """The booking step still open, as the owner's text: the location question, the form with the missing lines, or the
-    name and mobile ask. None when nothing is waiting for the guest."""
-    step = enq.next_step
-    if step == "ask_location":
-        return "ask_location", t("ask_location", lang, towns=bot._towns_text())
-    if step == "ask_details" and enq.missing:
-        got = {"check_in": bool(enq.check_in), "check_out": bool(enq.check_out), "persons": bool(enq.adults),
-               "rooms": enq.rooms or 0}
-        return "form", form_text(bot, lang, got, reason)
-    if step == "ask_extra_bed":
-        key = "ask_extra_beds" if int((enq.checked or {}).get("extra_bed_max") or 1) > 1 else "ask_extra_bed"
-        return key, t(key, lang)
-    if step == "ask_contact":
-        return "ask_contact", t("ask_contact", lang)
-    return None
-
-
-STEP_LANGS = ("en", "mn", "tn", "hn")  # the i18n codes of the 4 reply languages (tools.I18N_LANG)
-
-
-def step_said(bot: Any, phone: str, enq: Enquiry, out: Outbox) -> bool:
-    """The open step's owner text already went in this conversation, in ANY language (eval 2026-11-25: the name ask
-    went in Manglish, then again in English after 'Can u speak in english'), and a form counts with any first line (price / availability / booking)."""
-    return any((s := open_step(bot, enq, code, why)) is not None and already_said(bot, phone, out, s[1])
-               for code in STEP_LANGS for why in FORM_REASONS)
-
-
-def queue_open_step(bot: Any, phone: str, enq: Enquiry, lang: str, out: Outbox, *, dates_line: bool = True) -> None:
-    """After the photos the guest is taken back to the booking: before any dates the reason (once per conversation),
-    then the step still open, ONLY when its owner text never went in this conversation (the step starts now). After
-    that the AI reminds the guest in its own words (AI-first rebalance, 2026-11-25)."""
-    step = open_step(bot, enq, lang)
-    if step is None:
-        return
-    key, text = step
-    if dates_line and key == "form" and not enq.check_in:
-        line = t("dates_for_availability", lang)
-        if not already_said(bot, phone, out, line):
-            out.text("dates_for_availability", line)
-    if not step_said(bot, phone, enq, out):
-        out.text(key, text)
+def form_lines(got: dict[str, Any]) -> list[str]:
+    """The lines of the owner's form the guest has not filled yet ('dec 20 nu' leaves Check out and Number of adults).
+    The AI writes the form with exactly these lines (prompt: OWNER'S WORDS)."""
+    return [line for key, line in FORM_LINES if not got.get(key)]

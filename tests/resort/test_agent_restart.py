@@ -140,3 +140,41 @@ def test_recent_messages_never_reach_past_the_restart(agent):
     restart(w)
     assert pp.recent_texts(w.bot, GUEST, 2) == [GREET]
     assert w.repo.list_chat(GUEST)[-2].text == RESTART_MARK
+
+
+# --------------------------------------------------------------------------- reference-only records, 'reset all'
+
+
+def test_guest_records_are_reference_only_with_and_without_restart(agent):
+    w = agent
+    send(w, m("hi"), reply(GREET))
+    assert "reference only" in dynamic(w.llm.calls[-1])
+    restart(w)
+    send(w, m("hi"), reply(GREET))
+    assert "reference only" in dynamic(w.llm.calls[-1])
+
+
+@pytest.mark.parametrize("text", ["reset all", "Reset All", "RESET ALL.", "resetall"])
+def test_reset_all_is_matched(text):
+    assert command(text) == "resetall"
+
+
+def test_reset_all_deletes_this_testers_bookings_and_memory(agent):
+    from test_agent_tester_switch import with_config
+    w = agent
+    with_config(w, agent_test_phones=GUEST)
+    book_live(w)
+    b = live_link(w.bot, GUEST)
+    b.status = "paid"
+    w.repo.save_booking(b)
+    assert send(w, m("reset all")) == "reset_all"
+    assert w.wa.texts(GUEST)[-1] == "Reset done." and w.llm.calls[-0:] is not None
+    assert w.repo.list_bookings(phone=GUEST) == [] and w.repo.get_guest(GUEST) is None
+    assert w.repo.get_state(GUEST) == {} and [c.text for c in w.repo.list_chat(GUEST)] in ([], ["Reset done."])
+
+
+def test_reset_all_is_a_normal_message_for_non_testers(agent):
+    w = agent  # no AGENT_TEST_PHONES: everyone is answered, nobody is a listed tester
+    book_live(w)
+    assert send(w, m("reset all"), reply("Sorry?")) != "reset_all"
+    assert w.repo.list_bookings(phone=GUEST) != []

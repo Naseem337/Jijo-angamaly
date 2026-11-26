@@ -272,6 +272,21 @@ class ResortRepo:
                 db.execute(f"DELETE FROM {table}")
         return counts
 
+    def delete_phone_data(self, phone: str) -> dict[str, int]:
+        """Tester 'reset all': this one phone's bookings (with their charges, refunds and ID proofs, so the rooms are
+        free again), its chat, its chat state and its guest record. Nothing of any other phone is touched."""
+        counts = {}
+        with self._tx() as db:
+            ids = [r[0] for r in db.execute("SELECT id FROM bookings WHERE guest_phone = ?", (phone,)).fetchall()]
+            marks = ",".join("?" * len(ids))
+            for table in ("charges", "refunds", "id_proofs"):
+                counts[table] = db.execute(f"DELETE FROM {table} WHERE booking_id IN ({marks})", ids).rowcount \
+                    if ids else 0
+            counts["bookings"] = db.execute("DELETE FROM bookings WHERE guest_phone = ?", (phone,)).rowcount
+            for table in ("chat", "chat_state", "guests"):
+                counts[table] = db.execute(f"DELETE FROM {table} WHERE phone = ?", (phone,)).rowcount
+        return counts
+
     def create_holds(self, parts: list[Booking], now: datetime, replace_own: bool = False) -> list[Booking]:
         """One stay over several room types (1 Basic + 1 Standard): all parts are held together or none (SoldOut).
         Every part gets group_id = the first part's id."""

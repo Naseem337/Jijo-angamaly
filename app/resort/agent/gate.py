@@ -27,11 +27,13 @@ from app.resort.models import ChatMessage as Chat
 log = logging.getLogger(__name__)
 
 IMAGE_NOTE = "[Guest sent an image]"
-COMMANDS = ("stop", "start", "restart")  # the ONLY words code reads; anything else goes to the AI
+COMMANDS = ("stop", "start", "restart", "resetall")  # the ONLY words code reads; anything else goes to the AI
+RESET_DONE = "Reset done."
 
 
 def command(text: str) -> str:
-    """'stop' / 'start' / 'restart' when the whole message is exactly that word, else ''. Case, spaces and trailing
+    """'stop' / 'start' / 'restart' / 'resetall' ('reset all', testers only) when the whole message is exactly that
+    word, else ''. Case, spaces and trailing
     marks (a dot, '!', an emoji) do not count: 'Restart.', ' RESTART 🙏', 're start'."""
     word = "".join(text.split()).lower()
     while word and not word[-1].isalnum():
@@ -78,6 +80,10 @@ def handle(bot: Any, msg: Any, *, dry_run: bool = False) -> str:
 
     with bot._guest_lock(phone):  # one guest's messages are answered one after another
         cmd = command(text) if source == "text" else ""
+        if cmd == "resetall":
+            if listed_tester(bot, phone):
+                return _reset_all(bot, phone, box)
+            cmd = ""  # not a tester: 'reset all' is a normal message for the AI
         if cmd in ("stop", "start") and (outcome := _opt(bot, phone, cmd, box, lang)):
             return outcome
         paused, since = bot.repo.is_paused(phone)
@@ -98,6 +104,12 @@ def is_tester(bot: Any, phone: str) -> bool:
     """AGENT_TEST_PHONES lists the phones the agent answers during the owner's test; empty = everyone."""
     testers = list(getattr(bot.config, "agent_test_phones", []) or [])
     return not testers or (try_normalize_phone(phone) or phone) in testers
+
+
+def listed_tester(bot: Any, phone: str) -> bool:
+    """The phone is named in AGENT_TEST_PHONES (an empty list names nobody)."""
+    testers = list(getattr(bot.config, "agent_test_phones", []) or [])
+    return (try_normalize_phone(phone) or phone) in testers
 
 
 def staff_override(bot: Any) -> None:
@@ -171,6 +183,18 @@ def _restart(bot: Any, phone: str, box: Outbox) -> str:
     box.text("greet", t("greet", "en"))
     box.flush()
     return "restart"
+
+
+def _reset_all(bot: Any, phone: str, box: Outbox) -> str:
+    """Tester-only 'reset all': what restart does (unpaid links closed) PLUS every booking of this phone deleted (the
+    rooms are free again) and everything stored about it gone: chat, chat state (enquiry, language, pause, opt-out)
+    and the guest record. Then "Reset done." Other phones are never touched."""
+    close_unpaid(bot, phone)
+    counts = bot.repo.delete_phone_data(phone)
+    log.info("Reset all for %s: %s", mask_phone(phone), counts)
+    box.text("reset_done", RESET_DONE)
+    box.flush()
+    return "reset_all"
 
 
 def close_unpaid(bot: Any, phone: str) -> int:
