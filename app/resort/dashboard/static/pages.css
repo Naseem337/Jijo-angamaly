@@ -134,3 +134,15 @@ html body a,html body a:hover,html body a:focus{text-decoration:none}
 #photos .gallery{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
 #photos .ph img{aspect-ratio:4/3;object-fit:cover}
 .mg-pager{display:flex;gap:6px}
+
+/* Active / Inactive as a switch (owner, 2026-11-27) */
+.check.toggle{gap:10px;cursor:pointer;user-select:none}
+.check.toggle input[type=checkbox]{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:44px;height:24px;margin:0;border-radius:999px;background:#cbd5e1;cursor:pointer;transition:background .2s}
+.check.toggle input[type=checkbox]::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}
+.check.toggle input[type=checkbox]:checked{background:var(--green,#15803d)}
+.check.toggle input[type=checkbox]:checked::after{transform:translateX(20px)}
+.check.toggle input[type=checkbox]:focus-visible{outline:2px solid var(--brand,#2490ef);outline-offset:2px}
+.check.toggle .on{display:none;color:var(--green,#15803d);font-weight:600}
+.check.toggle .off{color:#64748b;font-weight:600}
+.check.toggle input:checked ~ .on{display:inline}
+.check.toggle input:checked ~ .off{display:none}

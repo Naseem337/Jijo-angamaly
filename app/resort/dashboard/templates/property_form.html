@@ -83,7 +83,7 @@
   {{ field("Early check-in from", "early_checkin_time", p.early_checkin_time, "time", "Leave empty if not offered") }}
   {{ field("Early check-in charge (per room, ₹)", "early_checkin_rate", p.early_checkin_rate, "number", attrs='min="0"') }}
 </div>
-<label class="check"><input type="checkbox" name="active" {{ 'checked' if p.active }}> Active</label></section>
+<label class="check toggle"><input type="checkbox" name="active" role="switch" {{ 'checked' if p.active }}><span class="on">Active</span><span class="off">Inactive</span></label></section>
 
 <section class="card" id="payment"><h3>Payment and cancellation</h3><div class="cols">
   {{ field("Advance to pay online (%)", "advance_pct", p.advance_pct, "number", attrs='min="1" max="100"') }}

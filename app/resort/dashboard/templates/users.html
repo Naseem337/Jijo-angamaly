@@ -13,5 +13,5 @@
 {{ field("Email", "email", "", "email", required=True) }}{{ field("Name", "name") }}{{ field("Password", "password", "", "password", "At least 8 characters for a new user", attrs='autocomplete="new-password"') }}
 <label class="field"><span>Role</span><select name="role"><option value="manager">Manager</option><option value="owner">Owner</option></select></label></div>
 <div class="field"><span>Manager can see</span>{% for p in props %}<label class="check"><input type="checkbox" name="property_ids" value="{{ p.id }}"> {{ p.name }}</label>{% endfor %}</div>
-<label class="check"><input type="checkbox" name="active" checked> Active</label><button class="btn primary">Save user</button></form>
+<label class="check toggle"><input type="checkbox" name="active" role="switch" checked><span class="on">Active</span><span class="off">Inactive</span></label><button class="btn primary">Save user</button></form>
 {% endblock %}

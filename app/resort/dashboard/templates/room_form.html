@@ -39,7 +39,7 @@
 </div></section>
 <section class="card"><h3>Details</h3>
   {{ area("Description", "description", rt.description, 3) }}{{ area("Amenities", "amenities", rt.amenities, 2, "e.g. AC, balcony, private pool") }}
-  <label class="check"><input type="checkbox" name="active" {{ 'checked' if rt.active }}> Active</label></section>
+  <label class="check toggle"><input type="checkbox" name="active" role="switch" {{ 'checked' if rt.active }}><span class="on">Active</span><span class="off">Inactive</span></label></section>
 <div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties/{{ prop.id }}">Back</a><button class="btn primary">Save</button></div>
 </form>
 {% if not is_new %}
