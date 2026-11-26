@@ -28,6 +28,7 @@ from app.resort.agent import photos_plan as pp
 from app.resort.agent.language import TurnLanguage
 from app.resort.agent.outbox import Outbox
 from app.resort.agent.state import LANGUAGES, Enquiry
+from app.resort.agent.mobile import check as check_mobile
 from app.resort.agent.script import to_latin
 from app.resort.chat import _Turn, _count_name, _money, close_word, latin_places
 from app.resort.i18n import status_name, t
@@ -1388,6 +1389,25 @@ class AgentTools:
             return self._result(False, {"problem": "the extra-bed question is not answered yet"}, start, enq,
                                 "'Do you need an extra bed?' was already sent. When the guest answers, call update_enquiry "
                                 "with extra_beds (a number for yes, 0 for no), then create_booking.")
+        raw_mobile = str(args.get("mobile") or "").strip()
+        if raw_mobile:  # owner, 2026-11-26: the number is checked in code; a fake one makes no booking or link
+            mobile = check_mobile(raw_mobile)
+            if not mobile:
+                st = repo.get_state(phone)
+                conv = str((st.get(conversation.STATE_KEY) or {}).get("started_at") or "")
+                bad = st.get("bad_mobiles") or {}
+                tries = (int(bad.get("n") or 0) if bad.get("conv") == conv else 0) + 1
+                st["bad_mobiles"] = {"conv": conv, "n": tries}
+                repo.set_state(phone, st)
+                if tries >= 3:
+                    return self._result(False, {"invalid_mobile": True, "wrong_numbers": tries,
+                                                "numbers": self._numbers(prop)}, start, enq,
+                                        "Three wrong numbers: reply only \"Please contact the team directly: "
+                                        "{numbers}\" in the guest's language. No booking was made.")
+                return self._result(False, {"invalid_mobile": True, "wrong_numbers": tries}, start, enq,
+                                    "No booking was made. Reply short in the guest's language: \"That number doesn't "
+                                    "look right. Please share a valid mobile number.\" The name, if given, is kept.")
+            args = {**args, "mobile": mobile}
         ids, _, problem = self._picks(prop, list(enq.room_picks or []), [])
         if problem:
             return self._result(False, {"problem": problem}, start, enq, "Ask the guest which room they mean.")
