@@ -177,6 +177,45 @@ def clean(reply: str, src: Sources) -> str:
     return text.strip() if re.search(r"[A-Za-z0-9]", text) else ""
 
 
+# ------------------------------------------------------------------ the team's numbers, once (owner, 2026-11-27)
+
+NUMBERS_WINDOW = 5  # the team's numbers given in one of the bot's last 5 messages are not given again
+
+
+def team_tails(bot: Any) -> set[str]:
+    """The last 10 digits of every number the guests are given for the team (all resorts)."""
+    out = set()
+    for p in bot.repo.list_properties(active_only=False):
+        for n in p.contact_numbers or []:
+            if len(d := re.sub(r"\D", "", n)) >= 10:
+                out.add(d[-10:])
+    return out
+
+
+def has_team_number(text: str, tails: set[str]) -> bool:
+    digits = re.sub(r"\D", "", text)
+    return any(t in digits for t in tails)
+
+
+def numbers_given_recently(bot: Any, phone: str, tails: set[str]) -> bool:
+    from app.resort.agent import photos_plan as pp
+    return bool(tails) and any(has_team_number(t, tails) for t in pp.recent_texts(bot, phone, NUMBERS_WINDOW))
+
+
+def strip_team_numbers(reply: str, tails: set[str]) -> str:
+    """The reply without the sentences that carry a team number."""
+    lines = []
+    for line in reply.split("\n"):
+        if not line.strip():
+            lines.append("")
+            continue
+        kept = [s for s in SENTENCE.split(line) if s.strip() and not has_team_number(s, tails)]
+        if kept:
+            lines.append(" ".join(kept))
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    return text if re.search(r"[A-Za-z0-9]", text) else ""
+
+
 # ------------------------------------------------------------------ building the sources
 
 

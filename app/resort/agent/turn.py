@@ -300,6 +300,24 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             reply = kept
         if not reply:
             return {"ok": False, "facts": {"problem": "the text is empty"}, "note": "Call reply() with your answer."}
+        # owner, 2026-11-27: the team's numbers once. Given in the last 5 bot messages -> every sentence carrying them
+        # goes, unless the guest explicitly asked for the number / contact (the AI says so: guest_asked_contact)
+        tails = guard.team_tails(bot)
+        if not args.get("guest_asked_contact") and guard.numbers_given_recently(bot, phone, tails):
+            stripped = guard.strip_team_numbers(reply, tails)
+            if stripped != reply:
+                log.info("Agent: team numbers already given to %s; removed from the reply", phone[-4:])
+                if not stripped:
+                    repeats.append(reply)
+                    if len(repeats) > 1:
+                        stripped = "Okay 👍"
+                    else:
+                        return {"ok": False, "facts": {"problem": "the team's numbers were already given"},
+                                "note": "The team's numbers are in your last messages: never give them again unless "
+                                        "the guest explicitly asks for the number or how to contact (then "
+                                        "guest_asked_contact=true). Reply one short line in your own words ('ok' / "
+                                        "'thanks' → 'Okay 👍'; another discount ask → 'The price is fixed, sorry.')."}
+                reply = stripped
         # owner, 2026-11-27: never a text identical to one of the bot's last 3 messages (the handoff line three times)
         if any(near_same(reply, old) for old in pp.recent_texts(bot, phone, RECENT)):
             repeats.append(reply)

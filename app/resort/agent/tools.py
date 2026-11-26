@@ -235,6 +235,8 @@ TOOL_SCHEMAS = [
         "once per turn with your whole answer (it may come together with other tool calls).",
         {"type": "object", "properties": {
             "text": {"type": "string", "description": "the message for the guest"},
+            "guest_asked_contact": {"type": "boolean", "description": "true only when the guest explicitly asks for "
+                                    "the team's number or how to contact / call them"},
             "language": LANGUAGE_FIELD},
          "required": ["text"]}),
     ToolSpec(
@@ -1894,6 +1896,11 @@ class AgentTools:
         staff_line = note if reason == "other" and note else (f"{OWNER_REASONS[reason]}: {note}" if note
                                                                else OWNER_REASONS[reason])
         self._staff(staff_line, prop.id if prop else None, lang)
+        from app.resort.agent import guard
+        if guard.numbers_given_recently(bot, self.phone, guard.team_tails(bot)):
+            return self._result(True, {"team_told": True, "reason": reason, "numbers_already_given": True}, start, enq,
+                                "The team's numbers are already in your last messages: never give them again. Reply "
+                                "one short line without them (another discount ask → 'The price is fixed, sorry.').")
         return self._result(True, {"team_told": True, "reason": reason, "numbers": self._numbers(prop)}, start, enq,
                             "Nothing was sent to the guest: answer with reply(). Never agree to anything yourself, "
                             "never promise a call back or say the team will contact them.")
