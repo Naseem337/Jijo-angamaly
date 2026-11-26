@@ -58,7 +58,7 @@ def check(repo: Any) -> list[str]:
         for rt in repo.list_room_types(p.id, False):
             where = f"{p.name} / {rt.name}"
             for ref in rt.photo_urls or []:
-                seen.setdefault(ref, []).append(f"{where} (room type, no room number)")
+                seen.setdefault(ref, []).append(f"{where} (all rooms of this type)")
             for num, refs in (rt.number_photos or {}).items():
                 for ref in refs:
                     seen.setdefault(ref, []).append(f"{where} / Room {num}")

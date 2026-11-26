@@ -43,10 +43,10 @@
 <div class="savebar"><a class="btn ghost" href="{{ BASE }}/properties/{{ prop.id }}">Back</a><button class="btn primary">Save</button></div>
 </form>
 {% if not is_new %}
-{% if rt.photo_urls and not rt.room_list %}{{ photo_gallery(rt.photo_urls, BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/photos", csrf, "Add room numbers above to give each room its own photos.", "Room photos", '', 'photos', common) }}{% endif %}
-{% if not rt.room_list %}<section class="card"><h3>Room photos</h3><p class="muted">Add the room numbers above, then each room gets its own photos here.</p></section>{% endif %}
+{{ photo_gallery(rt.photo_urls, BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/photos", csrf, "Upload once: the bot sends these for every room of this type, once per chat, right after the room's name.", "Photos for all rooms of this type", '', 'photos', common) }}
+{% if not rt.room_list %}<section class="card"><h3>Photos for one room only</h3><p class="muted">Add the room numbers above to give a room its own extra photos.</p></section>{% endif %}
 {% for num in rt.room_list %}
-{{ photo_gallery(rt.number_photos.get(num, []), BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/numbers/" ~ num|urlq ~ "/photos", csrf, "", "Room " ~ num ~ " photos", "Sent when the guest gets room " ~ num, "room-" ~ num, common) }}
+{{ photo_gallery(rt.number_photos.get(num, []), BASE ~ "/properties/" ~ prop.id ~ "/rooms/" ~ rt.id ~ "/numbers/" ~ num|urlq ~ "/photos", csrf, "Optional: extra photos only room " ~ num ~ " has. Sent after the shared photos when the guest gets this room.", "Photos for room " ~ num ~ " only", "", "room-" ~ num, common) }}
 {% endfor %}
 <section class="card" id="seasons"><h3>Season prices</h3>
   <table class="list"><thead><tr><th>From</th><th>To</th><th>Label</th><th class="r">Rate</th><th></th></tr></thead><tbody>

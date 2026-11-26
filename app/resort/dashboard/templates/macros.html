@@ -55,6 +55,7 @@
       <label class="btn primary">{{ icon('plus') }} <span data-label>Add photos</span>
         <input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/heic" multiple required data-autosubmit></label>
     </form></div>
+  {% if hint %}<p class="muted">{{ hint }}</p>{% endif %}
   {% if not photos %}<p class="muted">No photos yet.</p>{% endif %}
   {% if photos %}<div class="gallery">
   {% for ref in photos %}<figure class="ph{{ ' cover' if loop.first }}">

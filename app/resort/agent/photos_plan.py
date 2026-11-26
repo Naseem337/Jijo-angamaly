@@ -127,14 +127,16 @@ def room_label(rt: RoomType, number: str = "") -> str:
 
 def offered_sets(bot: Any, rt: RoomType, enq: Enquiry, rooms: int, sent: set[str], phone: str = ""
                  ) -> list[tuple[str, list[str]]]:
-    """Each offered room of this type as (label, its photos not sent yet), one per room the guest would get. A room
-    with no photos of its own shows the room type's photos (once). A label goes even when there is no photo."""
+    """Each offered room of this type as (label, photos not sent yet), one per room the guest would get: the type's
+    shared photos once per chat (after the first label of this type), then that room's own photos. A label goes even
+    when there is no photo."""
     used = sent.copy() if isinstance(sent, pd.SentPhotos) else set(sent)
+    shared = room_only(bot, list(rt.photo_urls or []), sent)
     out: list[tuple[str, list[str]]] = []
     for number in next_numbers(bot, rt, enq, rooms, phone) or [""]:
         own = room_only(bot, rt.number_photos.get(number, []), sent) if number else []
         refs = []
-        for r in dict.fromkeys(own or room_only(bot, rt.photo_urls, sent)):
+        for r in dict.fromkeys([*shared, *own]):
             if r not in used:
                 refs.append(r)
                 used.add(r)
@@ -143,27 +145,31 @@ def offered_sets(bot: Any, rt: RoomType, enq: Enquiry, rooms: int, sent: set[str
 
 
 def room_refs(bot: Any, rt: RoomType, enq: Enquiry, rooms: int = 1, phone: str = "") -> list[str]:
-    """Photos of the exact room the guest would get, else the room type's photos, else any room number's photos."""
+    """The room type's shared photos, then the own photos of the exact room the guest would get; else any room
+    number's photos."""
     own = room_only(bot, [r for n in next_numbers(bot, rt, enq, rooms, phone) for r in rt.number_photos.get(n, [])])
-    if own:
-        return list(dict.fromkeys(own))
-    if typ := room_only(bot, list(rt.photo_urls)):
-        return typ
+    typ = room_only(bot, list(rt.photo_urls or []))
+    if typ or own:
+        return list(dict.fromkeys([*typ, *own]))
     return room_only(bot, list(dict.fromkeys(r for n in rt.room_list for r in rt.number_photos.get(n, []))))
 
 
-def label_sets(rt: RoomType, refs: list[str]) -> list[tuple[str, list[str]]]:
-    """A room type's photos split by room number, each with its label ('*Room 108 - Beach View Standard*'). Photos of no
-    number go under the room type's name."""
-    out: list[tuple[str, list[str]]] = []
-    left = list(refs)
+def label_sets(rt: RoomType, refs: list[str], number: str = "") -> list[tuple[str, list[str]]]:
+    """A room type's photos under labels: the first label (the room the guest would get, `number`) carries the type's
+    shared photos and then that room's own photos; other room numbers' own photos follow under their own labels."""
+    shared_set = set(rt.photo_urls or [])
+    by_num: list[tuple[str, list[str]]] = []
+    left = [r for r in refs if r not in shared_set]
     for num in rt.room_list:
         mine = [r for r in left if r in set(rt.number_photos.get(num, []))]
         if mine:
-            out.append((f"*Room {num} - {rt.name}*", mine))
+            by_num.append((num, mine))
             left = [r for r in left if r not in mine]
-    if left:
-        out.append((f"*{rt.name}*", left))
+    shared = [r for r in refs if r in shared_set] + left  # photos of no number go with the shared ones
+    first = number or (by_num[0][0] if by_num else "")
+    first_own = next((m for n, m in by_num if n == first), [])
+    out = [(room_label(rt, first), [*shared, *first_own])]
+    out += [(room_label(rt, n), m) for n, m in by_num if n != first]
     return out
 
 
@@ -288,9 +294,7 @@ def queue_room(out: Outbox, rt: RoomType, refs: list[str], number: str = "") -> 
     """The room's label as a text, then its photos (owner, 2026-11-20: a text between two rooms' photos says which room
     and number they are). The label names the room the guest would get (`number`); photos of several room numbers are
     split under each number's own label. A label goes even with no photo. Returns the number of photos queued."""
-    sets = label_sets(rt, refs)
-    if len(sets) <= 1 and not (sets and sets[0][0].startswith("*Room ")):  # one room's own photos keep their number
-        sets = [(room_label(rt, number), list(refs))]
+    sets = label_sets(rt, refs, number)
     count = 0
     for label, part in sets:
         out.text("room_label", label)

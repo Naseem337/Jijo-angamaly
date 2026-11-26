@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import sqlite3
 import threading
@@ -22,6 +23,8 @@ from typing import Any
 from app.resort.availability import allocate_rooms, free_units
 from app.resort.models import (BLOCKING, Booking, new_id, Charge, ChatMessage, DashboardUser, Guest, IdProof, Property,
                                RateRule, Refund, RoomType)
+
+log = logging.getLogger(__name__)
 
 
 class SoldOut(Exception):
@@ -124,22 +127,45 @@ class ResortRepo:
         if "wamid" not in {r["name"] for r in self._db.execute("PRAGMA table_info(chat)")}:
             self._db.execute("ALTER TABLE chat ADD COLUMN wamid TEXT NOT NULL DEFAULT ''")
         self._db.execute("CREATE INDEX IF NOT EXISTS chat_wamid ON chat(wamid)")
-        self._move_room_type_photos()
+        self._share_room_type_photos()
 
-    def _move_room_type_photos(self) -> None:
-        """Photos live on each room number now, not on the room type (owner, 2026-11-19). A room type's old photos
-        are copied to each of its room numbers that has none, then cleared, so nothing is lost."""
+    def _share_room_type_photos(self) -> None:
+        """Once (owner, 2026-11-27): a photo that is in EVERY room number of a room type (same id, file name or file)
+        moves to the type's shared photos (RoomType.photo_urls) once, and the per-number copies are removed from the
+        lists. Nothing else changes; no file is deleted."""
+        mark = "migration:shared_room_photos"
+        if self._db.execute("SELECT 1 FROM events WHERE id=?", (mark,)).fetchone():
+            return
+        from app.resort import photo_dups as pd
+        info = self.photo_infos()
         for row in self._db.execute("SELECT id, data FROM room_types").fetchall():
             data = json.loads(row["data"])
-            photos, numbers = data.get("photo_urls") or [], data.get("room_list") or []
-            if not photos or not numbers:
+            numbers = [n for n in data.get("room_list") or []]
+            own = {n: list((data.get("number_photos") or {}).get(n) or []) for n in numbers}
+            if len(numbers) < 2 or not all(own.values()):
                 continue
-            own = dict(data.get("number_photos") or {})
-            for n in numbers:
-                if not own.get(n):
-                    own[n] = list(photos)
-            data["number_photos"], data["photo_urls"] = own, []
-            self._db.execute("UPDATE room_types SET data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), row["id"]))
+            for ref in [*own[numbers[0]], *(r for n in numbers for r in own[n])]:
+                if ref not in info or not info[ref].get("sha"):
+                    sha = pd.sha_of_file(ref)
+                    info[ref] = {**info.get(ref, {"name": "", "common": False}), "sha": sha}
+            shared = list(data.get("photo_urls") or [])
+            moved = 0
+            for ref in list(own[numbers[0]]):
+                mine = pd.keys(ref, info)
+                if not all(any(pd.keys(r, info) & mine for r in own[n]) for n in numbers[1:]):
+                    continue
+                if not any(pd.keys(r, info) & mine for r in shared):
+                    shared.append(ref)
+                    moved += 1
+                for n in numbers:
+                    own[n] = [r for r in own[n] if not (pd.keys(r, info) & mine)]
+            if moved:
+                data["photo_urls"] = shared
+                data["number_photos"] = {**(data.get("number_photos") or {}), **own}
+                self._db.execute("UPDATE room_types SET data=? WHERE id=?",
+                                 (json.dumps(data, ensure_ascii=False), row["id"]))
+                log.warning("shared photos: %s moved %d photo(s) to 'all rooms of this type'", data.get("name"), moved)
+        self._db.execute("INSERT OR IGNORE INTO events(id, at) VALUES(?, datetime('now'))", (mark,))
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
