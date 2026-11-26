@@ -499,8 +499,8 @@ class AgentTools:
             enq.save(repo, self.phone)
         result["changed"], result["already_told"] = changed, already
         if not changed and already:
-            result["note"] = ("Nothing changed in the stay. Reply in ONE message: if the guest answered your question, "
-                              "a short acknowledgement first ('Ok.' in their language); if they asked something, answer "
+            result["note"] = ("Nothing changed in the stay. Reply in ONE message: 'Ok.' ONLY if the guest agreed or "
+                              "answered a yes / no question; if they asked something, answer "
                               "it in one short line from facts (no 'Ok.'). Then ONLY the open step (next_step): a question "
                               "not answered yet (extra bed) is asked again in one short line. Never repeat anything in "
                               "already_told. " + str(result.get("note") or ""))
@@ -520,6 +520,12 @@ class AgentTools:
             out.append({"room_type": rt.name, "asked": asked, "free_rooms": free, "free": free >= asked,
                         "max_adults_per_room": av.room_cap(rt)})
         return out
+
+    def _said_recently(self, text: str) -> bool:
+        """This text (nearly) is among the bot's last 3 messages."""
+        from app.resort.agent.outbox import near_same
+        outs = [m.text for m in self.bot.repo.list_chat(self.phone, limit=20) if m.direction == "out"][-3:]
+        return any(near_same(text, o) for o in outs)
 
     def _form_recent(self, lines: list[str]) -> bool:
         """The same form lines are in one of the bot's last 3 messages (owner, 2026-11-26: never the same form twice)."""
@@ -952,6 +958,18 @@ class AgentTools:
         if enq.contact and changed and not pending and not held:
             # the answer came after the link was closed: the new summary and link go at once (name and mobile are known)
             return self._relink(enq, prop, bk, parts, mix, [], lang, facts, start, contact=enq.contact)
+        bed_answer = (bool((cur.checked or {}).get("extra_bed_pending")) and not pending and not held
+                      and ((cur.checked or {}).get("base") or "").split("|")[:7] == base.split("|")[:7])
+        if bed_answer:  # owner, 2026-11-26: the rooms sentence, then the name / mobile ask once, last; no photos again
+            beds_now = sum(p["beds"] for p in parts)
+            self.out.text("rooms_line", t("rooms_beds", lang, persons=adults, rooms=quoted, beds=beds_now,
+                                          rate=f"{prop.extra_bed_rate:,}") if beds_now
+                          else t("rooms_plain", lang, persons=adults, rooms=quoted))
+            if not self._said_recently(t("ask_contact", lang)):
+                self.out.text("ask_contact", t("ask_contact", lang))
+            return done(True, {**facts, "rooms_sentence_and_contact_ask_sent": True},
+                        "The rooms sentence and the name / mobile ask went by themselves: send nothing more unless the "
+                        "guest also asked something else (then only that answer, never 'Ok.' or the ask again).")
         if not changed:
             return done(True, facts, UNCHANGED_NOTE)
         if answered_only:  # only the answer to the extra-bed question came: nothing new to show

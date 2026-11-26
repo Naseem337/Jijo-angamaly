@@ -57,8 +57,10 @@ class Outbox:
                  send_photos: Callable[[str, list[str]], object] | None = None, *, dry_run: bool = False,
                  send_staff: Callable[[str, str], object] | None = None,
                  send_exact: Callable[[str, str], object] | None = None, photo_gap_s: float = 0.0,
-                 sleep: Callable[[float], object] = time.sleep) -> None:
+                 sleep: Callable[[float], object] = time.sleep,
+                 superseded: Callable[[], bool] | None = None) -> None:
         self.phone = phone
+        self._superseded = superseded  # a newer guest message came in: this turn's AI text is not sent
         self.dry_run = dry_run
         self._send_text, self._send_photos, self._send_staff = send_text, send_photos, send_staff
         self._send_exact = send_exact
@@ -138,6 +140,12 @@ class Outbox:
             if not self.dry_run and n and self.queue[n - 1].kind == "photos" and item.kind == "text" \
                     and self.photo_gap_s > 0:
                 self._sleep(self.photo_gap_s)
+            if not self.dry_run and item.kind == "text" and item.key in ("ai", "ask_contact") \
+                    and self._superseded is not None and self._superseded():
+                # owner, 2026-11-26: one reply set per guest message. The guest wrote again while this turn was still
+                # sending (photos are slow): the next turn answers both, so this turn's answer and ask do not go
+                log.info("Outbox: a newer guest message came in for %s: '%s' not sent", self.phone[-4:], item.key)
+                continue
             if not self.dry_run and item.kind == "wait":
                 self._sleep(float(item.text or 0))
             elif not self.dry_run:
@@ -165,9 +173,16 @@ def bot_outbox(bot: Any, phone: str, *, dry_run: bool = False) -> Outbox:
     # every agent text goes word for word (fix round 3): the old send path's 'sir' filter (bot._ease_sir) never touches
     # the AI's line or the owner's texts
     exact = lambda to, text: _send_exact(bot, to, text)  # noqa: E731
+    started = bot.clock.now()
+
+    def newer() -> bool:
+        rows = bot.repo.list_chat(phone, limit=5)
+        latest_in = max((m.at for m in rows if m.direction == "in"), default=None)
+        return latest_in is not None and latest_in > started
+
     return Outbox(phone, exact, lambda to, refs: bot._send_photos(to, refs),
                   dry_run=dry_run, send_staff=lambda to, text: bot.wa.send_text(to, text), send_exact=exact,
-                  photo_gap_s=photo_gap())
+                  photo_gap_s=photo_gap(), superseded=newer)
 
 
 def photo_gap() -> float:

@@ -233,7 +233,14 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     def send(reply: str) -> None:
         # owner, 2026-11-26: the AI's own answer, the owner's form and the name / mobile ask are separate messages, in
         # that order; a form the bot sent among its last 3 messages is not sent again
+        code_spoke = any(i.kind in ("text", "photos") and i.key != "ai" for i in outbox.queue + outbox.sent)
         for part in split_reply(reply):
+            if CONTACT_ASK.fullmatch(part.strip()) and (ask_recent(bot, phone) or any(
+                    i.key == "ask_contact" for i in outbox.queue + outbox.sent)):
+                log.info("Agent: the name / mobile ask is among the last 3 messages for %s: not sent again", phone[-4:])
+                continue
+            if code_spoke and LONE_ACK.fullmatch(part.strip()):
+                continue  # code already answered this turn: a bare 'Ok.' would be a message of its own
             if is_form(part) and form_recent(bot, phone, part):
                 log.info("Agent: the same form is among the last 3 messages for %s: not sent again", phone[-4:])
                 continue
@@ -437,6 +444,16 @@ def split_reply(reply: str) -> list[str]:
     parts = [own, "\n".join(location).strip(), "\n".join(owner).strip(), "\n".join(form).strip(),
              " ".join(ask).strip()]
     return [x for x in parts if x]
+
+
+LONE_ACK = re.compile(r"(?:ok(?:ay)?|got it|sure|noted|fine|alright|sheri|seri|theek hai)[.!]?\s*(?:👍)?",
+                      re.IGNORECASE)
+
+
+def ask_recent(bot: Any, phone: str) -> bool:
+    """The name / mobile ask is among the bot's last 3 messages."""
+    outs = [m.text for m in bot.repo.list_chat(phone, limit=20) if m.direction == "out"][-3:]
+    return any(CONTACT_ASK.search(o) for o in outs)
 
 
 def form_recent(bot: Any, phone: str, form: str) -> bool:
