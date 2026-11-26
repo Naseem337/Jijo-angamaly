@@ -149,7 +149,8 @@ TOOL_SCHEMAS = [
          "required": ["kind", "purpose"]}),
     ToolSpec(
         "send_map",
-        "The guest asks for the location, map, pin or directions.",
+        "ONLY when the guest asks for the map, the location pin or directions. 'Where is it' / 'evde aanu' / 'how far "
+        "from town' is answered from FACTS in one short line (area, landmark, distance), with no map.",
         {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "create_booking",
@@ -454,6 +455,10 @@ class AgentTools:
 
     def _result(self, ok: bool, facts: dict[str, Any], start: int, enq: Enquiry, note: str) -> dict[str, Any]:
         sent = self.out.keys[start:]
+        if facts.get("form_lines") and self._form_recent(facts["form_lines"]):
+            facts = {**facts, "form_already_sent": True}
+            note = ("The same form is among your last 3 messages: do NOT send it again. Only if useful, remind in a few "
+                    "words ('Please share your dates to check availability.'). " + note)
         if any(not k.startswith("staff:") and k != "confirmed" for k in sent) and not note.startswith(ALREADY_SENT):
             note = f"{ALREADY_SENT} {note}"  # every tool that sent the guest something says so first
         return {"ok": ok, "facts": facts, "sent": sent, "next_step": enq.next_step, "note": note}
@@ -500,6 +505,17 @@ class AgentTools:
                               "not answered yet (extra bed) is asked again in one short line. Never repeat anything in "
                               "already_told. " + str(result.get("note") or ""))
         return result
+
+    def _form_recent(self, lines: list[str]) -> bool:
+        """The same form lines are in one of the bot's last 3 messages (owner, 2026-11-26: never the same form twice)."""
+        want = {str(ln).strip().lower() for ln in lines if str(ln).strip()}
+        outs = [m.text for m in self.bot.repo.list_chat(self.phone, limit=20) if m.direction == "out"][-3:]
+        for text in outs:
+            if "please share these details" in text.lower():
+                got = {ln.strip().lower() for ln in text.split("\n")[1:] if ln.strip().endswith(":")}
+                if got == want:
+                    return True
+        return False
 
     def _only_resort(self) -> Property | None:
         """The one open resort, when there is exactly one: then the place is never asked."""

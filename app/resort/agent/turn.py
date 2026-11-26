@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
@@ -230,7 +231,13 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
                              conv["started_at"])
 
     def send(reply: str) -> None:
-        outbox.text("ai", reply)
+        # owner, 2026-11-26: the AI's own answer, the owner's form and the name / mobile ask are separate messages, in
+        # that order; a form the bot sent among its last 3 messages is not sent again
+        for part in split_reply(reply):
+            if is_form(part) and form_recent(bot, phone, part):
+                log.info("Agent: the same form is among the last 3 messages for %s: not sent again", phone[-4:])
+                continue
+            outbox.text("ai", part)
         result.reply = (result.reply + "\n" + reply).strip()
 
     def do_reply(args: dict[str, Any]) -> dict[str, Any]:
@@ -341,6 +348,50 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     result.sent = outbox.keys
     usage.record(bot, phone, result, dry_run=outbox.dry_run)
     return result
+
+
+FORM_HEAD = re.compile(r"^\s*(?:to check (?:the price|availability),\s*)?please share these details\s*:?", re.IGNORECASE)
+CONTACT_ASK = re.compile(r"^\s*please share your name and mobile number to proceed\.?\s*$", re.IGNORECASE)
+FORM_LINE = re.compile(r"^\s*(?:check[ -]?in|check[ -]?out|number of adults|number of rooms)\b.*:\s*$", re.IGNORECASE)
+
+
+def is_form(text: str) -> bool:
+    return bool(FORM_HEAD.match(text.split("\n", 1)[0]))
+
+
+def split_reply(reply: str) -> list[str]:
+    """The AI's text as WhatsApp messages: its own answer first, then the owner's form block (the head line and the
+    form lines), then the name / mobile ask. Only the AI's own reply is read here, never the guest's text."""
+    answer: list[str] = []
+    form: list[str] = []
+    ask: list[str] = []
+    in_form = False
+    for line in reply.split("\n"):
+        if FORM_HEAD.match(line):
+            in_form = True
+            form.append(line.strip())
+        elif CONTACT_ASK.match(line):
+            ask.append(line.strip())
+            in_form = False
+        elif in_form and (not line.strip() or FORM_LINE.match(line)):
+            form.append(line.rstrip())
+        else:
+            in_form = False
+            answer.append(line)
+    parts = ["\n".join(answer).strip(), "\n".join(form).strip(), " ".join(ask).strip()]
+    return [p for p in parts if p]
+
+
+def form_recent(bot: Any, phone: str, form: str) -> bool:
+    """The same form (same missing lines) is among the bot's last 3 messages."""
+    want = {ln.strip().lower() for ln in form.split("\n")[1:] if ln.strip()}
+    outs = [m.text for m in bot.repo.list_chat(phone, limit=20) if m.direction == "out"][-3:]
+    for text in outs:
+        if is_form(text) or "please share these details" in text.lower():
+            got = {ln.strip().lower() for ln in text.split("\n") if FORM_LINE.match(ln)}
+            if got == want:
+                return True
+    return False
 
 
 RECENT = 3  # a TOOL text (nearly) the same as one of our last 3 messages is dropped (room labels, glimpse ...)

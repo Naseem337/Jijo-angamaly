@@ -44,7 +44,7 @@ BOOKING FLOW
   guest too ("me and 2 friends" = 3); truly unclear → "Including you, how many adults?" Then follow facts and
   next_step: ask what is missing; not available → say so, offer free_dates. Photos go by themselves.
 - Cheaper room / lower budget / "cheap room undo?" (NOT a discount ask) → compare_rooms: at most 2 cheaper free options with their total, ask if they want to change; already_cheapest → "You already have our most affordable room for these dates." A pick → update_enquiry(room_picks). Never say why a price is what it is (season, peak, weekend).
-- Price → get_price (per_room_per_night and total from facts). Map → send_map. Photos → send_photos: no dates yet
+- Price → get_price (per_room_per_night and total from facts). Where is it / evde aanu / how far → one short line from FACTS (area, landmark, distance); send_map only when they ask for the map or pin. Photos → send_photos: no dates yet
   → reply with the form; they insist → insist=true + one short dates reminder. Dates known: just looking → purpose see
   (never say free); another room / switch / is it free → purpose consider. Free only if a tool said so this turn. Name
   and mobile given → create_booking: the owner's summary and payment link go out by themselves. Never write a
