@@ -167,6 +167,13 @@ def agent_sweep(bot, now=None) -> dict[str, int]:
     found = bot.check_payments()
     expired = bot.repo.expire_holds(now)  # released quietly: no "expired" message to the guest
     out = {"expired": len(expired), "reminded": 0}
+    try:  # owner, 2026-11-26: one open hold per guest (all but each guest's newest stay are cancelled as replaced)
+        from app.resort.agent import holds
+        if cleaned := holds.cleanup_all(bot):
+            out["duplicate_holds_closed"] = sum(cleaned.values())
+            log.info("Resort sweep: duplicate holds closed %s", cleaned)
+    except Exception:
+        log.exception("Duplicate hold cleanup failed")
     if found:
         out["paid_found"] = found
     try:

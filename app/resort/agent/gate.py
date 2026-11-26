@@ -14,7 +14,7 @@ import logging
 from typing import Any
 
 from app.core.phone import mask_phone, try_normalize_phone
-from app.resort.agent import conversation
+from app.resort.agent import conversation, holds
 from app.resort.agent.outbox import Outbox, bot_outbox
 from app.resort.agent.state import Enquiry
 from app.resort.agent.tools import I18N_LANG
@@ -97,6 +97,7 @@ def handle(bot: Any, msg: Any, *, dry_run: bool = False) -> str:
         _mark_read(bot, msg)
         if cmd == "restart":
             return _restart(bot, phone, box)
+        holds.keep_newest(bot, phone)  # one open hold per guest, also for holds older code left behind
         llm = bot._llm() if bot._llm else None
         note = "\n".join(n for n in (voice_note, swipe_note(bot, phone, msg.context_id)) if n)
         result = run_turn(bot, llm, phone, text, box, swipe=note)

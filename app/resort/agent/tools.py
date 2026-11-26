@@ -23,7 +23,7 @@ from typing import Any
 
 from app.providers.llm import ToolSpec
 from app.resort import availability as av
-from app.resort.agent import conversation
+from app.resort.agent import conversation, holds
 from app.resort.agent import photos_plan as pp
 from app.resort.agent.language import TurnLanguage
 from app.resort.agent.outbox import Outbox
@@ -1193,6 +1193,10 @@ class AgentTools:
                     "Ask the guest for the missing detail with reply(). Do not guess it.")
             return ctx, made, self._result(False, {"problem": made.get("error", "the payment link could not be made"),
                                                    "numbers": self._numbers(prop)}, start, enq, note)
+        # owner, 2026-11-26: ONE open hold per guest. The new stay (all its parts) stays; every other unpaid booking of
+        # this guest is cancelled as replaced, its link closed and its rooms freed (paid bookings never touched)
+        if (new := bot.repo.get_booking(made["booking_id"])) is not None:
+            holds.keep_newest(bot, self.phone, {b.id for b in bot.repo.list_group(new)})
         return ctx, made, None
 
     def _staff(self, reason: str, property_id: str | None, lang: str) -> None:

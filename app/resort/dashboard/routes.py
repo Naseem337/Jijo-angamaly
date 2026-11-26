@@ -836,6 +836,24 @@ def ai_status(request: Request, auth: Auth = Depends(require_owner)):
         return JSONResponse({"llm_chain": [], "error": str(exc)[:300]})
 
 
+@router.get("/hold-cleanup")
+def hold_cleanup(request: Request, auth: Auth = Depends(require_owner)):
+    """Owner only: runs the one-hold-per-guest cleanup now, then lists every booking it ever closed (masked phones)."""
+    from app.core.phone import mask_phone
+    from app.resort.agent import holds
+    from app.resort.services import get_services
+    now_closed = holds.cleanup_all(get_services().bot)
+    repo = get_repo()
+    props, rooms = _names(repo)
+    closed = [b for b in repo.list_bookings(status="cancelled", limit=5000) if holds.CLEANUP in (b.notes or "")]
+    by_guest: dict[str, list[str]] = {}
+    for b in closed:
+        by_guest.setdefault(mask_phone(b.guest_phone), []).append(
+            f"{b.id} {rooms[b.room_type_id].name if b.room_type_id in rooms else b.room_type_id} {b.check_in}..{b.check_out}")
+    return JSONResponse({"closed_just_now": now_closed, "total_closed_by_cleanup": len(closed),
+                         "guests": len(by_guest), "by_guest": by_guest})
+
+
 @router.get("/photo-check")
 def photo_check(request: Request, auth: Auth = Depends(require_owner)):
     """Owner only: does every photo map to one room? Lists what to fix, plus each list's photo count."""
