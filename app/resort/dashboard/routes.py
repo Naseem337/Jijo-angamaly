@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -24,6 +25,7 @@ from app.resort.paying import DESK_METHODS, METHODS, PaymentError, apply_payment
 from app.resort.models import (Booking, Charge, ChatMessage, DashboardUser, Property, RateRule, RoomType)
 
 router = APIRouter(prefix=BASE)
+log = logging.getLogger(__name__)
 public_router = APIRouter(prefix="/resort")  # pages opened without logging in (the uploaded photos)
 
 STATUSES = ["hold", "paid", "checked_in", "checked_out", "failed", "expired", "cancelled"]
@@ -1249,6 +1251,7 @@ async def room_save(property_id: str, room_id: str, request: Request, auth: Auth
     f = await form_of(request, auth)
     repo = get_repo()
     prop, rt = _room(repo, auth, property_id, room_id)
+    was = (rt.active, rt.units) if rt else (False, 0)
     rt = rt or RoomType(prop.id, "")
     name = f.get("name", "").strip()
     if not name:
@@ -1265,6 +1268,15 @@ async def room_save(property_id: str, room_id: str, request: Request, auth: Auth
         rt.units = len(rt.room_list)
     rt.active = f.get("active") == "on"  # photos are managed by the photo gallery (room_photos)
     repo.save_room_type(rt)
+    if rt.active and (not was[0] or rt.units > was[1]):  # owner, 2026-11-27: rooms switched on -> open big groups
+        try:
+            from app.resort.agent import group_watch
+            from app.resort.services import get_services
+            bot = get_services().bot
+            if bot.config.agent_mode == "agent":
+                log.info("Rooms switched on at %s: %s", prop.id, group_watch.rooms_switched_on(bot, prop.id))
+        except Exception:
+            log.exception("Big-group re-check after switching rooms on failed")
     raise redirect(toast_url(f"{BASE}/properties/{prop.id}/rooms/{rt.id}", "Room type saved"))
 
 

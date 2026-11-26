@@ -537,6 +537,10 @@ class ResortRepo:
             "ORDER BY c.id DESC LIMIT ?", (limit,))
         return [dict(r) for r in rows]
 
+    def list_states(self) -> list[tuple[str, dict[str, Any]]]:
+        """Every guest's chat state as (phone, data) (the big-group watch looks for open enquiries)."""
+        return [(r["phone"], json.loads(r["data"])) for r in self._all("SELECT phone, data FROM chat_state")]
+
     def get_state(self, phone: str) -> dict[str, Any]:
         row = self._one("SELECT data FROM chat_state WHERE phone=?", (phone,))
         return json.loads(row["data"]) if row else {}

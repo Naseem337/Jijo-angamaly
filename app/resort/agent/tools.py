@@ -979,7 +979,17 @@ class AgentTools:
                     setattr(enq, f, getattr(cur, f))
             key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults}"
             facts_big = {"available": False, "group_too_big": True, "free_rooms": free_n, "max_people": most}
-            if self._big_group().get("key") == key:
+            before = self._big_group()
+            if before.get("key") == key and free_n > int(before.get("free") or 0):
+                # owner, 2026-11-27: more rooms are free than when the message went (still too few): the message once
+                # more with the NEW numbers (no new team alert)
+                self._save_big_group({**before, "free": free_n, "most": most})
+                self.out.text("group_too_big", t("group_too_big", lang, free_rooms=free_n, max_people=most,
+                                                 numbers=self._numbers(prop)))
+                return done(True, {**facts_big, "owner_message_sent": True, "more_rooms_now": True},
+                            f"More rooms are free now; the owner's message went again with the new numbers. Your "
+                            f"reply() is ONLY: \"Do you want to book the available {free_n} rooms for {most} people?\"")
+            if before.get("key") == key:
                 # owner, 2026-11-27: the message goes ONCE per enquiry; after that the AI answers in its own words
                 return done(True, {**facts_big, "adults": adults, "group_message_already_sent": True,
                                    "numbers": self._numbers(prop)},
@@ -1003,6 +1013,13 @@ class AgentTools:
                         f"The owner's message went. Your reply() is ONLY this one question, in the guest's language: "
                         f"\"Do you want to book the available {free_n} rooms for {most} people?\" Nothing else: no "
                         "link, no pay ask, no room details, no other rooms.")
+        rec = self._big_group()
+        if parts and rec.get("prop") == prop.id and rec.get("ci") == ci.isoformat() and                 rec.get("co") == co.isoformat() and not rec.get("booked") and not rec.get("fits_told") and                 int(rec.get("adults") or 0) <= adults:
+            # owner, 2026-11-27: the live re-check finds the big group now fits (rooms switched on): told once, then
+            # the normal flow (rooms sentence, photos, extra bed, name / mobile)
+            self._save_big_group({**rec, "fits_told": True})
+            self.out.text("group_fits", f"Good news, rooms are now available for your {adults} people.")
+            notes["group_now_fits"] = True
         if not parts:  # not available: never a dead end (extra-bed offer, or the nearest free dates)
             scratch: dict[str, Any] = {"lang": lang}
             text = bot._no_room_answer(scratch, prop, bk, ci, co, adults, children, wanted)

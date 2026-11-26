@@ -837,3 +837,69 @@ def test_a_crash_after_the_reply_went_adds_nothing(agent, monkeypatch):
         raise RuntimeError("late")
     monkeypatch.setattr(gate, "run_turn", half)
     assert say(agent, "pool?")[1] == ["Yes, the pool is open."]
+
+
+# --------------------------------------------------------------------------- rooms switched on after a big group
+
+
+def _more_rooms(w, units):
+    w.repo.save_room_type(RoomType(w.p1.id, "Garden Room", units=units, base_rate=3000))
+
+
+def test_a_big_group_that_now_fits_hears_good_news_then_the_normal_flow(world):
+    call(world, "update_enquiry", BIG, said="Alleppey 10 to 12 nov 30 people")
+    _more_rooms(world, 10)
+    _, sent = call(world, "update_enquiry", BIG, said="any rooms now?")
+    assert keys(sent)[:2] == ["group_fits", "rooms_ok"]
+    assert sent[0][1] == "Good news, rooms are now available for your 30 people."
+
+
+def test_the_good_news_line_goes_once(world):
+    call(world, "update_enquiry", BIG, said="Alleppey 10 to 12 nov 30 people")
+    _more_rooms(world, 10)
+    call(world, "update_enquiry", BIG, said="any rooms now?")
+    _, sent = call(world, "update_enquiry", {**BIG, "check_in": "2026-11-10"}, said="ok check again")
+    assert "group_fits" not in keys(sent)
+
+
+def test_more_free_rooms_still_too_few_resend_the_big_group_message(world):
+    call(world, "update_enquiry", BIG, said="Alleppey 10 to 12 nov 30 people")
+    _more_rooms(world, 2)
+    res, sent = call(world, "update_enquiry", BIG, said="any more rooms?")
+    assert res["facts"]["more_rooms_now"] and keys(sent) == ["group_too_big"] and res["facts"]["free_rooms"] == 7
+
+
+def test_switching_rooms_on_tells_a_recent_guest_once_and_the_team(world):
+    from app.resort.agent import group_watch as gw
+    call(world, "update_enquiry", BIG, said="Alleppey 10 to 12 nov 30 people")
+    _more_rooms(world, 10)
+    assert gw.rooms_switched_on(world.bot, world.p1.id) == {"notified": 1, "team_call": 0}
+    assert world.wa.texts(GUEST)[-1] == gw.GUEST_TEXT.format(adults=30, dates="10 Nov – 12 Nov 2026")
+    assert world.wa.texts(STAFF)[-1].startswith("✅ Guest")
+    assert gw.rooms_switched_on(world.bot, world.p1.id) == {"notified": 0, "team_call": 0}
+
+
+def test_switching_rooms_on_after_24_hours_asks_the_team_to_call(world):
+    from app.resort.agent import group_watch as gw
+    call(world, "update_enquiry", BIG, said="Alleppey 10 to 12 nov 30 people")
+    world.clock.advance(hours=25)
+    before = len(world.wa.texts(GUEST))
+    _more_rooms(world, 10)
+    assert gw.rooms_switched_on(world.bot, world.p1.id) == {"notified": 0, "team_call": 1}
+    assert len(world.wa.texts(GUEST)) == before and world.wa.texts(STAFF)[-1].startswith("⚠️ Rooms now fit 30 people")
+
+
+def test_switching_rooms_on_that_still_do_not_fit_sends_nothing(world):
+    from app.resort.agent import group_watch as gw
+    call(world, "update_enquiry", BIG, said="Alleppey 10 to 12 nov 30 people")
+    _more_rooms(world, 2)
+    assert gw.rooms_switched_on(world.bot, world.p1.id) == {"notified": 0, "team_call": 0}
+
+
+def test_after_the_proactive_message_a_yes_check_has_no_second_good_news(world):
+    from app.resort.agent import group_watch as gw
+    call(world, "update_enquiry", BIG, said="Alleppey 10 to 12 nov 30 people")
+    _more_rooms(world, 10)
+    gw.rooms_switched_on(world.bot, world.p1.id)
+    _, sent = call(world, "update_enquiry", BIG, said="yes")
+    assert "group_fits" not in keys(sent) and "rooms_ok" in keys(sent)
