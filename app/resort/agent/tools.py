@@ -71,7 +71,8 @@ DATE_FIELD = {"type": "object",
               "required": ["day"]}
 
 # the tools that send something to the guest or the team: each runs at most ONCE per turn (fix round 2)
-ONCE_TOOLS = ("send_payment_link", "send_photos", "create_booking", "check_payment", "talk_to_owner", "send_map")
+ONCE_TOOLS = ("send_payment_link", "send_photos", "create_booking", "check_payment", "talk_to_owner", "send_map",
+              "send_details")
 ONCE_NOTE = "Already done this turn: nothing more was sent. Do not call it again."
 
 # Descriptions are short (one example each) and do not repeat the system prompt: they are sent on every call (cached).
@@ -135,7 +136,8 @@ TOOL_SCHEMAS = [
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_photos",
-        "The guest wants to see rooms or the resort, in any words ('pics?'). kind: room_type (also pass room_type), "
+        "The guest asks for photos / pics / images, or for a room type, in any words ('pics?'). A general 'details' "
+        "request is send_details, not this. kind: room_type (also pass room_type), "
         "resort, other_room, all_rooms, default (no room named), more. purpose: see = they only want to look (no "
         "availability check, never say free); consider = another room, switching, or is it free (checks THEIR dates). "
         "No dates yet: no photos unless insist=true (they insist: 'just send photos', 'photos first', asked again). "
@@ -148,6 +150,12 @@ TOOL_SCHEMAS = [
             "room_type": {"type": "string", "description": "only for kind room_type: a room type name from FACTS"},
             "language": LANGUAGE_FIELD},
          "required": ["kind", "purpose"]}),
+    ToolSpec(
+        "send_details",
+        "The guest wants details about the resort in general, in any words or language ('details', 'tell me about the "
+        "resort', 'what do you have', 'more info', 'about the property'). Code sends the glimpse (once per chat) and the "
+        "resort's general photos not sent yet. No availability check, no price, no form.",
+        {"type": "object", "properties": {"language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_map",
         "ONLY when the guest asks for the map, the location pin or directions. 'Where is it' / 'evde aanu' / 'how far "
@@ -245,6 +253,11 @@ def _int(args: dict[str, Any], key: str, default: int | None = None) -> int | No
     if value is None or value == "":
         return default
     return int(value)
+
+
+def _words(text: str) -> str:
+    """Lower-case letters and digits only, one space apart (matches a message whatever its emoji / marks)."""
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in text.lower()).split())
 
 
 def _beds_on(booking: Any) -> int:
@@ -1556,6 +1569,51 @@ class AgentTools:
         result["sent"] = self.out.keys[start:]
         return result
 
+    def send_details(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Owner, 2026-11-26: a 'details' request -> the glimpse (once per conversation) as its own message, then the
+        resort's GENERAL photos not sent yet. No availability check, no price, no form. Everything sent already -> the
+        'All the photos are sent above.' line. The open booking step comes back so the AI may add ONE short reminder,
+        unless that ask is among the bot's last 3 messages."""
+        bot = self.bot
+        start, enq, style, lang = self._ctx(args)
+        held = bot._open_hold(self.phone)
+        prop = self._the_resort(enq, held)
+        if prop is None:
+            return self._result(False, {"problem": "no resort is known yet", "towns": towns_or(bot)}, start, enq,
+                                "Ask which location with reply().")
+        enq.place = enq.place or prop.id
+        rows = bot.repo.list_chat(self.phone, limit=200)
+        outs = [m.text for m in rows[conversation.start_index(rows):] if m.direction == "out"]
+        facts: dict[str, Any] = {}
+        head = _words(next((ln for ln in prop.intro.split("\n") if ln.strip()), ""))
+        if prop.intro and not any(head and _words(o).startswith(head) for o in outs):
+            rts = sorted((r for r in bot.repo.list_room_types(prop.id) if r.active),
+                         key=lambda r: (r.priority, r.base_rate))
+            text = prop.intro
+            if rts:  # {price} / {room} in the owner's text: the first-priority room's base rate
+                text = text.replace("{price}", _money(rts[0].base_rate)).replace("{room}", rts[0].name)
+            self.out.text("glimpse", text)
+            facts["glimpse_sent"] = True
+        general = pp.general_photos(prop, pp.sent_refs(bot, self.phone, self.out))
+        if general:
+            self.out.photos(f"photos:{len(general)}", general)
+            facts["general_photos_sent"] = len(general)
+        if not facts:
+            self.out.text("all_photos_sent", "All the photos are sent above.")
+            facts["all_already_sent"] = True
+        # the open booking step: only an ask the bot already made in this conversation, not among its last 3 messages
+        step, last3 = "", outs[-3:]
+        if enq.next_step == "ask_details" and any("please share these details" in o.lower() for o in outs):
+            step = "" if any("please share these details" in o.lower() for o in last3) else "dates"
+        elif enq.next_step == "ask_contact" and any("name and mobile" in o.lower() for o in outs):
+            step = "" if any("name and mobile" in o.lower() for o in last3) else "name_mobile"
+        self.out.move_last(("ai",))  # a reminder the AI already wrote goes after the glimpse and photos
+        enq.save(bot.repo, self.phone)
+        note = ("Sent by code. Never write the glimpse, prices, availability or the form. "
+                + (f"You MAY add ONE short reminder in your own words for the open step ({step}), max 10 words, via "
+                   "reply(); otherwise send nothing." if step else "Send nothing more (no reply() needed)."))
+        return self._result(True, {**facts, "open_step_reminder": step}, start, enq, note)
+
     def send_map(self, args: dict[str, Any]) -> dict[str, Any]:
         """The resort's Google Maps link, then the booking step still open."""
         bot = self.bot
@@ -1678,7 +1736,8 @@ class AgentTools:
         """Run one tool the AI asked for. An unknown name or a crash is a normal result, never an exception."""
         handlers = {"update_enquiry": self.update_enquiry, "get_price": self.get_price,
                     "compare_rooms": self.compare_rooms, "send_photos": self.send_photos,
-                    "send_map": self.send_map, "create_booking": self.create_booking,
+                    "send_map": self.send_map, "send_details": self.send_details,
+                    "create_booking": self.create_booking,
                     "check_payment": self.check_payment, "send_payment_link": self.send_payment_link,
                     "my_bookings": self.my_bookings, "change_name": self.change_name,
                     "talk_to_owner": self.talk_to_owner, "recall_old_chat": self.recall_old_chat,
