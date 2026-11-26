@@ -113,6 +113,9 @@ TOOL_SCHEMAS = [
             "extra_beds": {"type": "integer", "description": "only the guest's answer to the extra-bed question (0 = "
                                                              "no) or an extra bed they ask for themselves"},
             "early_checkin": {"type": "boolean", "description": "true only if the guest asked for early check-in"},
+            "accept_free_rooms": {"type": "boolean", "description": "true when the group is too big for the free rooms "
+                                  "and the guest accepts the rooms that are free ('book the current rooms', 'book what's "
+                                  "available', 'ok book 4 rooms'): code books those rooms for as many adults as they hold"},
             "change_existing": {"type": "boolean", "description": "true when the guest wants to CHANGE a booking they "
                                 "already have (dates, persons, rooms, room type), not make another one. Before payment "
                                 "the booking is updated; a PAID booking is never changed here (code blocks it)."},
@@ -552,26 +555,49 @@ class AgentTools:
         free = [(rt, repo.free_rooms(rt, ci, co, now, self.phone)) for rt in repo.list_room_types(prop.id)]
         return (sum(n for _, n in free if n > 0), sum(n * av.room_cap(rt) for rt, n in free if n > 0))
 
-    def _big_group_alert(self, prop: Property, ci: date, co: date, adults: int, free_n: int, most: int) -> None:
-        """'Big group enquiry' for the team, once per enquiry (resort + dates), never again on the next messages."""
+    def _big_group(self) -> dict[str, Any]:
+        """The big-group record of this guest: {key: resort|check-in|check-out|adults, prop, ci, co, adults, free, most,
+        booked?: {rooms, adults}, booked_alerted?}. {} when none."""
+        saved = self.bot.repo.get_state(self.phone).get(BIG_GROUP_KEY)
+        return saved if isinstance(saved, dict) else {}
+
+    def _save_big_group(self, record: dict[str, Any]) -> None:
+        state = self.bot.repo.get_state(self.phone)
+        state[BIG_GROUP_KEY] = record
+        self.bot.repo.set_state(self.phone, state)
+
+    def _big_group_text(self, prop: Property, rec: dict[str, Any], extra: str = "") -> str:
         repo = self.bot.repo
-        key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}"
-        state = repo.get_state(self.phone)
-        if state.get(BIG_GROUP_KEY) == key:
-            return
-        state[BIG_GROUP_KEY] = key
-        repo.set_state(self.phone, state)
         guest = repo.get_guest(self.phone)
+        ci, co, adults = date.fromisoformat(rec["ci"]), date.fromisoformat(rec["co"]), int(rec["adults"])
         per_room = max((av.room_cap(rt) for rt in repo.list_room_types(prop.id)), default=3)
         nights = (co - ci).days
-        text = (f"Big group enquiry 👥\n"
+        return (f"Big group enquiry 👥\n"
                 f"Guest: {(guest.name if guest and guest.name else 'not given')} ({display_phone(self.phone)})\n"
                 f"Resort: {self.bot._place_label(prop)}\n"
                 f"Dates: {ci.strftime('%d %b %Y')} – {co.strftime('%d %b %Y')} ({nights} night{'s' if nights != 1 else ''})\n"
                 f"Adults: {adults}\n"
-                f"Free now: {free_n} rooms (up to {most})\n"
-                f"Needs: about {-(-adults // per_room)} rooms")
-        self.out.staff("staff:big_group", text, self.bot.staff_numbers(prop.id))
+                f"Free now: {rec['free']} rooms (up to {rec['most']})\n"
+                f"Needs: about {-(-adults // per_room)} rooms" + (f"\n{extra}" if extra else ""))
+
+    def _big_group_booked_alert(self, booking_id: str) -> None:
+        """When the booking link for the accepted free rooms is made: the team's alert again, with one more line,
+        once per enquiry."""
+        rec, b = self._big_group(), self.bot.repo.get_booking(booking_id)
+        if not rec.get("booked") or rec.get("booked_alerted") or b is None:
+            return
+        if (b.property_id, b.check_in.isoformat(), b.check_out.isoformat()) != (rec["prop"], rec["ci"], rec["co"]):
+            return
+        prop = self.bot.repo.get_property(b.property_id)
+        if prop is None:
+            return
+        held = self.bot.repo.list_group(b) or [b]
+        rooms, booked = sum(x.rooms for x in held), sum(x.adults for x in held)
+        left = max(int(rec["adults"]) - booked, 0)
+        self.out.staff("staff:big_group", self._big_group_text(
+            prop, rec, f"Guest booked {rooms} rooms for {booked}; {left} adults still need rooms."),
+            self.bot.staff_numbers(prop.id))
+        self._save_big_group({**rec, "booked_alerted": True})
 
     def _said_recently(self, text: str) -> bool:
         """This text (nearly) is among the bot's last 3 messages."""
@@ -841,6 +867,21 @@ class AgentTools:
         if ci and co and (problem := av.check_dates(ci, co, today)):
             return done(False, {"problem": problem}, "Ask the guest for the correct dates in one short line.")
 
+        if args.get("accept_free_rooms") and ci and co:
+            # owner, 2026-11-27: a big group takes the rooms that ARE free: all of them (or the number the guest said),
+            # with as many adults as they hold at 3 per room; then the normal flow (extra bed, name / mobile, link)
+            free_n, most = self._free_capacity(prop, ci, co)
+            rec = self._big_group()
+            same = (rec.get("prop"), rec.get("ci"), rec.get("co")) == (prop.id, ci.isoformat(), co.isoformat())
+            group = int(rec["adults"]) if same else adults
+            if free_n and group > most:
+                rooms_take = wanted if 0 < wanted <= free_n else free_n
+                adults = min(group, most if rooms_take == free_n else rooms_take * av.MAX_ADULTS_PER_ROOM, most)
+                wanted = rooms_take
+                if not same:  # accepted without the group message this enquiry: remembered so the team alert works
+                    rec = {"key": f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{group}", "prop": prop.id,
+                           "ci": ci.isoformat(), "co": co.isoformat(), "adults": group, "free": free_n, "most": most}
+                self._save_big_group({**rec, "booked": {"rooms": rooms_take, "adults": adults}})
         enq.check_in, enq.check_out, enq.adults, enq.children = ci, co, adults, None
         enq.extra_beds = beds_arg
         enq.rooms = wanted or None
@@ -926,11 +967,24 @@ class AgentTools:
                 for f in ("check_in", "check_out", "adults", "rooms", "room_picks", "extra_beds", "early_checkin",
                           "checked"):
                     setattr(enq, f, getattr(cur, f))
+            key = f"{prop.id}|{ci.isoformat()}|{co.isoformat()}|{adults}"
+            facts_big = {"available": False, "group_too_big": True, "free_rooms": free_n, "max_people": most}
+            if self._big_group().get("key") == key:
+                # owner, 2026-11-27: the message goes ONCE per enquiry; after that the AI answers in its own words
+                return done(True, {**facts_big, "group_message_already_sent": True, "numbers": self._numbers(prop)},
+                            "The owner's message about the free rooms already went: never send it again. Answer what "
+                            "the guest said now, short, in your own words; no link, no pay ask. Give the team numbers in "
+                            "one short line only if they ask. If they accept the free rooms ('book the current rooms', "
+                            "'book what's available', 'ok book 4 rooms', 'fine, those rooms') → call update_enquiry "
+                            "with accept_free_rooms=true (and rooms if they said a number).")
+            self._save_big_group({"key": key, "prop": prop.id, "ci": ci.isoformat(), "co": co.isoformat(),
+                                  "adults": adults, "free": free_n, "most": most})
             self.out.text("group_too_big", t("group_too_big", lang, free_rooms=free_n, max_people=most,
                                              numbers=self._numbers(prop)))
-            self._big_group_alert(prop, ci, co, adults, free_n, most)
+            self.out.staff("staff:big_group", self._big_group_text(prop, self._big_group()),
+                           self.bot.staff_numbers(prop.id))
             self.code_final = True
-            return done(True, {"available": False, "group_too_big": True, "owner_message_sent": True},
+            return done(True, {**facts_big, "owner_message_sent": True},
                         "The owner's message went. Send nothing more this turn.")
         if not parts:  # not available: never a dead end (extra-bed offer, or the nearest free dates)
             scratch: dict[str, Any] = {"lang": lang}
@@ -1207,6 +1261,7 @@ class AgentTools:
         self._retire({b.id for b in held} | set((contact or {}).get("old_ids") or []), made["booking_id"])
         self.out.text("summary", ctx.summary_message)
         self.out.text("pay", ctx.pay_message)
+        self._big_group_booked_alert(made["booking_id"])
         enq.booking_id, enq.link_open, enq.contact = made["booking_id"], True, None
         enq.save(bot.repo, self.phone)
         return self._result(True, {**facts, "booking_updated": True, "old_link_closed": True,
@@ -1531,6 +1586,7 @@ class AgentTools:
             return failure
         self.out.text("summary", ctx.summary_message)
         self.out.text("pay", ctx.pay_message)
+        self._big_group_booked_alert(made["booking_id"])
         enq.booking_id, enq.link_open, enq.photo_wish, enq.contact = made["booking_id"], True, None, None
         enq.save(repo, phone)
         return self._result(True, {"summary_and_link_sent": True}, start, enq,
