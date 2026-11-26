@@ -240,6 +240,7 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
     tools = AgentTools(bot, phone, outbox, guest_text=text, lang=words)
     result = TurnResult("answered")
     flagged: list[str] = []  # a reply() the guard sent back for its one retry (sent trimmed if no retry comes)
+    repeats: list[str] = []  # replies refused because they repeat one of the bot's last 3 messages
     latest: list[tuple[ChatMessage, str]] = []  # the last round's tool results (full) and their one-line summaries
 
     def complete() -> Any:
@@ -299,6 +300,14 @@ def run_turn(bot: Any, llm: Any, phone: str, text: str, outbox: Outbox, *, swipe
             reply = kept
         if not reply:
             return {"ok": False, "facts": {"problem": "the text is empty"}, "note": "Call reply() with your answer."}
+        # owner, 2026-11-27: never a text identical to one of the bot's last 3 messages (the handoff line three times)
+        if any(near_same(reply, old) for old in pp.recent_texts(bot, phone, RECENT)):
+            repeats.append(reply)
+            if len(repeats) > 1:
+                return {"ok": False, "facts": {"problem": "the same text again"}, "note": "Nothing was sent."}
+            return {"ok": False, "facts": {"problem": "this exact text is among your last 3 messages"},
+                    "note": "Never send the same line again. Answer what the guest asked NOW in your own words; a price "
+                            "question → get_price (or the form it returns), never the team handoff."}
         found = guard.problems(reply, src)
         if found and not result.retried:  # ONE retry with the reason
             result.retried, result.guard = True, result.guard + found

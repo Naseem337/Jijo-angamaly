@@ -135,9 +135,11 @@ TOOL_SCHEMAS = [
         "get_price",
         "Every question about price, rate, cost, total or advance (e.g. 'cost of the cottage'). Answers for the stay "
         "already given (or on the open link): the amounts come back in facts. No stay known yet: it returns what is "
-        "missing (form_reason price).",
+        "missing (form_reason price). A price question NEVER goes to the team: always this tool (a big group gets the "
+        "price of the rooms that are free; new dates after a paid booking → update_enquiry first, then this).",
         {"type": "object", "properties": {
             "room_type": {"type": "string", "description": "only if the guest named a room type"},
+            "per_night": {"type": "boolean", "description": "true when they ask per day / per night"},
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_photos",
@@ -1409,7 +1411,8 @@ class AgentTools:
                                        "total": paid.total, "paid": paid.paid_amount,
                                        "balance_at_property": paid.balance}, start, enq,
                                 "The booking is PAID. A balance question → \"The balance of ₹{balance_at_property} is "
-                                "paid at the property during check-in.\" Never ask for the advance or a payment link.")
+                                "paid at the property during check-in.\" Never ask for the advance or a payment link. "
+                                "A price for OTHER dates → update_enquiry with that new stay, then get_price again.")
         if enq.place and enq.check_in and enq.check_out and enq.adults:
             prop = repo.get_property(enq.place)
             ci, co, adults, children = enq.check_in, enq.check_out, enq.adults, 0
@@ -1444,28 +1447,56 @@ class AgentTools:
         parts, _ = self._plan(prop, bk, wanted)
         if not parts and wanted:
             parts, _ = self._plan(prop, {**bk, "rooms": 0}, 0)
+        priced_for: dict[str, Any] = {}
+        if not parts and not pref:
+            # owner, 2026-11-27: a price question is never a dead end. 3 per room in the free rooms, or (a group bigger
+            # than every free room) the price of the rooms that ARE free, for as many adults as they hold
+            parts, priced_for = self._free_rooms_parts(prop, bk, adults)
         if parts:
             self._apply_beds(parts, enq.extra_beds if (enq.place and enq.check_in and enq.adults)
                              else sum(_beds_on(b) for b in bot._open_hold(phone)))
         if not parts:
             rt = repo.get_room_type(pref) if pref else None
             return self._result(True, {"available": False, **({"room_not_free": rt.name} if rt is not None else {})},
-                                start, enq, SENT_NOTE)
+                                start, enq, "No room is free for this stay, so there is no price: say so in one short "
+                                "line and offer other dates (or another room). Never the team handoff for a price "
+                                "question.")
         price = self._price_of(prop, parts, ci, co, early and len(parts) == 1)
         beds = sum(p["beds"] for p in parts)
         room = " + ".join(_count_name(p["rooms"], p["rt"].name) for p in parts) if len(parts) > 1 else parts[0]["rt"].name
         rooms = sum(p["rooms"] for p in parts)
         facts = {"room_type": room, "rooms": rooms, "extra_beds": beds, "dates": av.fmt_range(ci, co),
                  "nights": (co - ci).days, "price": price}
+        if priced_for:
+            facts["priced_for_free_rooms"] = priced_for
         # owner, 2026-11-26: the price goes as CODE's structured block, its own message; the AI never rewrites it
-        self.out.text("price", self._price_block(prop, parts, ci, co, price))
+        self.out.text("price", self._price_block(prop, parts, ci, co, price, per_night=bool(args.get("per_night"))))
         facts["price_block_sent"] = True
-        return self._result(True, facts, start, enq, "Only a price answer: nothing is booked or changed. The price block "
-                            "went by itself as its own message: never repeat or rewrite the amounts; reply() only "
-                            "for anything else the guest asked (or nothing).")
+        note = ("Only a price answer: nothing is booked or changed. The price block went by itself as its own message: "
+                "never repeat or rewrite the amounts; reply() only for anything else the guest asked (or nothing).")
+        if priced_for.get("adults_left"):
+            note += (f" The block is for the {priced_for['rooms']} free rooms ({priced_for['adults']} people), not the "
+                     f"whole group: say that in one short line.")
+        return self._result(True, facts, start, enq, note)
+
+    def _free_rooms_parts(self, prop: Property, bk: dict[str, Any], adults: int
+                          ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """The fewest free rooms that hold the group at up to 3 per room; a group bigger than every free room gets
+        all the free rooms for as many adults as they hold. ([], {}) when nothing is free."""
+        free_n, most = self._free_capacity(prop, date.fromisoformat(bk["check_in"]), date.fromisoformat(bk["check_out"]))
+        if not free_n:
+            return [], {}
+        target = min(adults, most)
+        for n in range(max(1, -(-target // av.MAX_ADULTS_PER_ROOM)), free_n + 1):
+            parts, _ = self._plan(prop, {**bk, "adults": target, "rooms": n}, n)
+            if parts:
+                rooms = sum(p["rooms"] for p in parts)
+                return parts, ({"rooms": rooms, "adults": target, "adults_left": adults - target}
+                               if target < adults else {})
+        return [], {}
 
     def _price_block(self, prop: Property, parts: list[dict[str, Any]], ci: date, co: date,
-                     price: dict[str, Any]) -> str:
+                     price: dict[str, Any], per_night: bool = False) -> str:
         """The price as short lines (owner's layout): room name, dates, room cost, extra bed, total, advance, balance.
         Several room types: one line each. Every amount comes from _price_of (the dashboard rates)."""
         nights = (co - ci).days
@@ -1493,6 +1524,14 @@ class AgentTools:
             else:
                 lines.append(f"{label}{(' (' + str(p['rooms']) + ' rooms)') if p['rooms'] > 1 else ''}: "
                              f"{_money(room_cost)} ({night_s})")
+        per = price.get("per_room_per_night")
+        if per_night and not (len(parts) == 1 and per and parts[0]["rooms"] == 1):
+            # 'per day / per night' asked (owner, 2026-11-27): one line with the room cost of ONE night
+            nightly = sum(p["total"] - bed_rate * p["beds"] * nights - (fee if len(parts) == 1 else 0)
+                          for p in parts)
+            if nights and nightly % nights == 0:
+                lines.append(f"Per night: {_money(nightly // nights)}"
+                             + (" (all rooms)" if sum(p["rooms"] for p in parts) > 1 else ""))
         beds = sum(p["beds"] for p in parts)
         if beds:
             each = f" × {beds} beds" if beds > 1 else ""
