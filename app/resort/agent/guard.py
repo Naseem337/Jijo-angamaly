@@ -33,6 +33,17 @@ NOT_YET = re.compile(r"\b(?:not|n't|until|till|once|after|when|only|yet|before|i
 FUTURE = re.compile(r"\b(?:to|will(?: be)?|can be|would be)\s+$", re.IGNORECASE)
 PROVIDER = re.compile(r"[ \t]*\b(?:(?:via|through|using|on|by)[ \t]+)?(?:razor[ \t]?pay|rzp)\b", re.IGNORECASE)
 LINK = re.compile(r"https?://\S+")
+# owner, 2026-11-26: never tell the guest what happens behind the scenes (team alerted, the system, tools, the payment
+# gateway or provider, how payments are processed): such a sentence is removed quietly
+INTERNAL = re.compile(
+    r"\b(?:pass(?:ed|ing)?|forward(?:ed|ing)?|escalat\w*|inform(?:ed|ing)?|alert(?:ed|ing)?|notif(?:y|ied|ying)|"
+    r"flag(?:ged|ging)?|relay(?:ed|ing)?|shar(?:ed|ing)|sent|send(?:ing)?|let)\b[^.!?\n]{0,40}\b(?:the |our )?"
+    r"(?:team|staff|owner|manager|management)\b(?! directly)"
+    r"|\b(?:team|staff|owner|manager)\b[^.!?\n]{0,25}\b(?:has been|have been|is being|was|were|will be)\s+"
+    r"(?:informed|notified|alerted|told|updated|messaged)\b"
+    r"|\b(?:payment gateway|gateway|razor ?pay|rzp|our system|the system|in the system|tool|tools|"
+    r"processed (?:by|through|via)|payment processor)\b",
+    re.IGNORECASE)
 SENTENCE = re.compile(r"(?<=[.!?])\s+")
 # "X is (also) free / available": a room claim (free parking or a free cancellation is not one)
 FREE_CLAIM = re.compile(r"\b(?:is|are)\s+(?:also\s+|still\s+)?(?:free|available)\b", re.IGNORECASE)
@@ -147,6 +158,12 @@ def clean(reply: str, src: Sources) -> str:
         else:
             pieces.append(PROVIDER.sub("", BOOKING_ID.sub("", piece)))
     text = "".join(pieces)
+    lines = []
+    for line in text.split("\n"):  # an internal-action sentence goes, the rest stays
+        kept = [s for s in SENTENCE.split(line) if not INTERNAL.search(s)]
+        if kept or not line.strip():
+            lines.append(" ".join(kept))
+    text = "\n".join(lines)
     text = re.sub(r"[ \t]+([.,!?])", r"\1", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = "\n".join(line.strip() for line in text.split("\n"))

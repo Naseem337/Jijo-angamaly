@@ -441,6 +441,8 @@ def split_reply(reply: str) -> list[str]:
         own = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
         if own and not re.search(r"[A-Za-z0-9]", own):
             own = ""
+    if owner and any(OWNER_LINE.match(o) for o in owner):
+        return ["\n".join(owner).strip()]  # owner, 2026-11-26: a handoff is ONLY the team's numbers, nothing else
     parts = [own, "\n".join(location).strip(), "\n".join(owner).strip(), "\n".join(form).strip(),
              " ".join(ask).strip()]
     return [x for x in parts if x]
