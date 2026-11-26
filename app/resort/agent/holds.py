@@ -21,8 +21,10 @@ REPLACED_OLD = "[replaced by a newer booking]"  # the old code's mark (it set th
 CLEANUP = "[duplicate hold closed]"
 
 
-def _group(b: Any) -> str:
-    return b.group_id or b.payment_link_id or b.id
+def _tags(b: Any) -> set[str]:
+    """What ties the rows of one stay together: its group id and its payment link."""
+    return {t for t in (f"g:{b.group_id}" if b.group_id else "", f"l:{b.payment_link_id}" if b.payment_link_id else "")
+            if t} or {f"id:{b.id}"}
 
 
 def keep_newest(bot: Any, phone: str, keep: set[str] | None = None, *, mark: str = "") -> list[str]:
@@ -36,8 +38,15 @@ def keep_newest(bot: Any, phone: str, keep: set[str] | None = None, *, mark: str
             keep = set()
         else:
             newest = max(holds, key=lambda b: b.created_at)
-            keep = {b.id for b in holds if _group(b) == _group(newest)}
+            keep = {newest.id}
+    # a mixed stay is ONE hold: every row sharing a group id or a payment link with a kept row is kept with it
+    grown = True
+    while grown:
+        tags = {t for b in rows if b.id in keep for t in _tags(b)}
+        more = {b.id for b in holds if b.id not in keep and _tags(b) & tags}
+        grown, keep = bool(more), keep | more
     kept = [b for b in rows if b.id in keep]
+    kept_links = {b.payment_link_id for b in kept if b.payment_link_id}
     new_id = next((b.id for b in kept if b.group_id in ("", b.id)), kept[0].id if kept else "")
     done: list[str] = []
     for b in rows:
@@ -46,7 +55,7 @@ def keep_newest(bot: Any, phone: str, keep: set[str] | None = None, *, mark: str
         stale = b.status == "expired" and REPLACED_OLD in (b.notes or "")
         if b.status != "hold" and not stale:
             continue  # paid, checked in / out, cancelled, a plain expired hold: never touched
-        if b.status == "hold" and b.payment_link_id:
+        if b.status == "hold" and b.payment_link_id and b.payment_link_id not in kept_links:
             try:
                 bot.payments.cancel_link(b.payment_link_id)
             except Exception as exc:  # a link that cannot be closed must never stop the cleanup
