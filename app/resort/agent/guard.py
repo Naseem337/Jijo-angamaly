@@ -3,7 +3,8 @@
 Only these checks:
     a) every ₹ amount must appear in a tool result, FACTS or the guest's messages anywhere in THIS CONVERSATION (an
        amount the guest typed, like 8000, may always be repeated)
-    b) "booked / confirmed / reserved" only when a booking of this guest is paid
+    b) "booked / confirmed / reserved" only when a booking of this guest is paid; "a room is free / available"
+       only when a tool returned a free room THIS turn
        -> a), b): ONE retry with the problem told to the AI (turn.py); still flagged -> only the offending sentence is
           removed and the rest goes. A non-empty answer is never replaced by a fallback.
     c) stripped quietly: the payment provider's name, booking ids, links no tool or FACTS gave
@@ -33,6 +34,9 @@ FUTURE = re.compile(r"\b(?:to|will(?: be)?|can be|would be)\s+$", re.IGNORECASE)
 PROVIDER = re.compile(r"[ \t]*\b(?:(?:via|through|using|on|by)[ \t]+)?(?:razor[ \t]?pay|rzp)\b", re.IGNORECASE)
 LINK = re.compile(r"https?://\S+")
 SENTENCE = re.compile(r"(?<=[.!?])\s+")
+# "X is (also) free / available": a room claim (free parking or a free cancellation is not one)
+FREE_CLAIM = re.compile(r"\b(?:is|are)\s+(?:also\s+|still\s+)?(?:free|available)\b", re.IGNORECASE)
+ROOM_WORDS = re.compile(r"\b(?:rooms?|cottages?|suites?|for your dates|on your dates)\b", re.IGNORECASE)
 AMOUNTS_KEY = "agent_amounts"  # guest state: the numbers tool results gave in this conversation
 
 
@@ -42,6 +46,7 @@ class Sources:
     code: str = ""  # tool results of this conversation + our own messages + FACTS + the saved enquiry
     guest: str = ""  # the guest's messages in this conversation
     paid: bool = False  # a booking of this guest is paid
+    free_now: bool = False  # a tool returned a free room this turn
 
     @property
     def everything(self) -> str:
@@ -74,6 +79,10 @@ def sentence_problem(sentence: str, src: Sources, known: set[float] | None = Non
             and not FUTURE.search(sentence[:hit.start()]):
         return (f'"{hit.group(0)}": nothing is paid yet. Never say booked, confirmed or reserved before the payment is '
                 "received.")
+    if not src.free_now and FREE_CLAIM.search(sentence) and ROOM_WORDS.search(sentence) \
+            and not NOT_YET.search(sentence):
+        return ("No tool returned a free room this turn: never say a room is free or available without one "
+                "(update_enquiry or send_photos purpose consider).")
     return ""
 
 
@@ -141,6 +150,15 @@ def remember_amounts(bot: Any, phone: str, conv: str, result: Any) -> None:
     bot.repo.set_state(phone, st)
 
 
+def free_in(calls: list[dict[str, Any]]) -> bool:
+    """A tool of this turn returned a free room."""
+    for c in calls:
+        facts = (c.get("result") or {}).get("facts") or {}
+        if facts.get("available") is True or facts.get("also_free_for_your_dates"):
+            return True
+    return False
+
+
 def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_texts: list[str], guest_text: str,
             conv: str = "") -> Sources:
     rows = bot.repo.list_chat(phone, limit=200)
@@ -153,4 +171,5 @@ def sources(bot: Any, phone: str, enq: Any, calls: list[dict[str, Any]], tool_te
     facts = "\n".join([bot._facts(), enq.render(bot._place_label(prop) if prop else ""), earlier])
     tools = "\n".join([json.dumps(c.get("result"), ensure_ascii=False, default=str) for c in calls] + tool_texts + ours)
     paid = enq.paid or any(b.status == "paid" for b in bot.repo.list_bookings(phone=phone, limit=20))
-    return Sources(code=tools + "\n" + facts, guest="\n".join([*said, guest_text]), paid=paid)
+    return Sources(code=tools + "\n" + facts, guest="\n".join([*said, guest_text]), paid=paid,
+                   free_now=free_in(calls))

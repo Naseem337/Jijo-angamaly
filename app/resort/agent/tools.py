@@ -116,17 +116,19 @@ TOOL_SCHEMAS = [
             "language": LANGUAGE_FIELD}}),
     ToolSpec(
         "send_photos",
-        "The guest wants to see rooms or the resort, in any words ('pics?'). Never refuse, never ask for dates first. "
-        "Any stage, also after payment. kind: room_type (also pass room_type), resort, other_room, all_rooms, default "
-        "(no room named), more. A QUESTION about another room ('do you have X also?', 'is there a cottage?', 'any "
-        "deluxe?') → kind room_type (with room_type) or other_room: code says if it is free and shows it; it never "
-        "switches their room. Only a clear CHOICE ('take X', 'change to X', 'X venam', 'book X') → update_enquiry "
-        "room_picks.",
+        "The guest wants to see rooms or the resort, in any words ('pics?'). kind: room_type (also pass room_type), "
+        "resort, other_room, all_rooms, default (no room named), more. purpose: see = they only want to look (no "
+        "availability check, never say free); consider = another room, switching, or is it free (checks THEIR dates). "
+        "No dates yet: no photos unless insist=true (they insist: 'just send photos', 'photos first', asked again). "
+        "It never switches their room: only a clear CHOICE ('take X', 'X venam') → update_enquiry room_picks.",
         {"type": "object", "properties": {
             "kind": {"type": "string", "enum": list(pp.KINDS)},
+            "purpose": {"type": "string", "enum": ["see", "consider"]},
+            "insist": {"type": "boolean", "description": "true only when no dates are known and the guest insists on "
+                                                         "photos first"},
             "room_type": {"type": "string", "description": "only for kind room_type: a room type name from FACTS"},
             "language": LANGUAGE_FIELD},
-         "required": ["kind"]}),
+         "required": ["kind", "purpose"]}),
     ToolSpec(
         "send_map",
         "The guest asks for the location, map, pin or directions.",
@@ -653,7 +655,7 @@ class AgentTools:
         # 2. dates or persons missing: the owner's form with only the missing lines
         if not (ci and co and adults and adults >= 1):
             facts = {}
-            if wish:  # photos asked for before the resort was known go first (rule 6)
+            if wish and wish.get("insist"):  # photos asked (and insisted on) before the resort was known go first
                 facts = self._photos(enq, prop, str(wish.get("kind") or "default"), str(wish.get("room_type") or ""), lang)
             reason = str(args.get("reason") or "booking")
             got = {"check_in": bool(ci), "check_out": bool(co), "persons": bool(adults), "rooms": wanted}
@@ -850,12 +852,19 @@ class AgentTools:
         if plan.problem == "photos_sent" and not sent:
             return {"photos": 0, "info": "no photo has been uploaded for this resort yet"}
         if plan.problem:  # photos_sent | no_other_room | room_not_free | other_free
+            if plan.problem == "other_free":
+                self._send_free(plan.room, lang)
             return {"photos": 0, **PHOTO_PROBLEMS[plan.problem](plan.room)}
         facts: dict[str, Any] = {}
         if plan.also_free and plan.steps and plan.steps[0][0] is not None:  # another free room: shown, never switched
             facts["also_free_for_your_dates"] = plan.steps[0][0].name
+            self._send_free(plan.steps[0][0].name, lang)
         count = pp.queue_steps(self.out, plan.steps, bot, enq, phone)
         return {**facts, "photos": count, "kind": kind, "rooms": [rt.name for rt, _ in plan.steps if rt is not None]}
+
+    def _send_free(self, room: str, lang: str) -> None:
+        """'Yes, X is also free for your dates.' before its label and photos: a code-checked fact, so code says it."""
+        self.out.text("also_free", t("also_free", lang, room=room))
 
     def send_photos(self, args: dict[str, Any]) -> dict[str, Any]:
         bot, phone, repo = self.bot, self.phone, self.bot.repo
@@ -878,20 +887,37 @@ class AgentTools:
         if prop is None or not prop.active:
             if (prop := self._only_resort()) is not None:  # one resort only: never the location question
                 enq.place = prop.id
+        purpose, insist = str(args.get("purpose") or "consider"), bool(args.get("insist"))
         if prop is None or not prop.active:  # no resort yet: the location question first, the request is kept (rule 6)
-            enq.photo_wish = {"kind": kind, "room_type": room_type}
+            enq.photo_wish = {"kind": kind, "room_type": room_type, "insist": insist}
             enq.save(repo, phone)
             return self._result(True, {"photos": 0, "missing": ["place"], "towns": bot._towns_text()}, start, enq,
                                 "Ask which location with reply(); the photos follow once the guest names the resort.")
+        view = Enquiry(place=enq.place, room_picks=enq.room_picks, language=enq.language)  # photos with no dates
+        note = SENT_NOTE
         if enq.paid or self._paid_stay(enq):
             # after payment photos are still always allowed: planned without dates, so the guest's own paid booking
             # never makes their room look 'not free' (fix round 4)
-            view = Enquiry(place=enq.place, room_picks=enq.room_picks, language=enq.language)
             facts = self._photos(view, prop, kind, room_type, lang)
-        else:
+        elif not (enq.check_in and enq.check_out):  # owner, 2026-11-26: no dates -> the form first, photos only if
+            if not insist:                         # the guest insists
+                got = {"check_in": bool(enq.check_in), "check_out": bool(enq.check_out), "persons": bool(enq.adults),
+                       "rooms": enq.rooms or 0}
+                enq.save(repo, phone)
+                return self._result(True, {"photos": 0, "dates_missing": True, "form_lines": pp.form_lines(got),
+                                           "form_reason": "availability"}, start, enq,
+                                    "No photos yet: reply with the form (form_reason availability). Send photos only "
+                                    "if the guest insists (insist=true).")
+            facts = {**self._photos(view, prop, kind, room_type, lang), "dates_missing": True}
+            note = ("Photos sent. Add ONE short reminder (max 10 words), e.g. 'Please share your dates to check "
+                    "availability.' Never the full form again.")
+        elif purpose == "see":  # dates known, they only want to look: no availability check
+            facts = {**self._photos(view, prop, kind, room_type, lang), "availability_checked": False}
+            note = "Photos only: availability was NOT checked, so never say free or available."
+        else:  # consider: another room / switching / is it free, on THEIR dates (their own hold is not counted)
             facts = self._photos(enq, prop, kind, room_type, lang)
         enq.save(repo, phone)
-        return self._result("problem" not in facts, facts, start, enq, SENT_NOTE)
+        return self._result("problem" not in facts, facts, start, enq, note)
 
     def _paid_stay(self, enq: Enquiry) -> bool:
         """The guest has a PAID booking for the enquiry's dates (or any upcoming one when no dates are known)."""

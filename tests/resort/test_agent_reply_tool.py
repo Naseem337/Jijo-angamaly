@@ -140,7 +140,7 @@ def test_the_provider_name_and_booking_ids_are_stripped():
 
 
 def test_no_length_limit_banned_phrase_or_sent_claim_check_is_left(world):
-    long = ("Yes, rooms are available for your dates. We have a lovely beach view room for you. "
+    long = ("Yes, there is a pool. We have a lovely beach view for you. "
             "Would you like to see photos? Feel free to ask anything else. I have sent the details.")
     res, box = go(world, "rooms?", answer(long))
     assert res.guard == [] and sent_texts(box) == [long]

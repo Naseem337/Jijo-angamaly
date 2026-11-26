@@ -273,7 +273,7 @@ def test_another_room_is_shown_never_switched(pw):  # noqa: F811
     w = pw
     prun(w, "update_enquiry", STAY)
     result, items, _ = prun(w, "send_photos", {"kind": "other_room"})
-    assert keys(items)[:2] == ["room_label", "photos:2"]
+    assert keys(items)[:3] == ["also_free", "room_label", "photos:2"]
     assert result["facts"]["also_free_for_your_dates"] == "Family Suite"
     assert Enquiry.load(w.repo, GUEST).checked["summary"] == "1 Deluxe"  # the offer is still the Deluxe
 

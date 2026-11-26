@@ -67,14 +67,16 @@ def test_the_prompt_and_room_picks_say_what_choosing_is():
 
 
 def test_the_photo_rule_is_in_the_prompt_and_the_tool():
-    assert "Photos → send_photos, any stage" in SYSTEM
-    assert PHOTO_RULE in spec("send_photos").description and "after payment" in spec("send_photos").description
+    # owner, 2026-11-26: no dates -> the form first; photos only if the guest insists; see vs consider
+    assert "no dates yet" in SYSTEM and "purpose consider" in SYSTEM
+    desc = spec("send_photos").description
+    assert "insist=true" in desc and "purpose: see" in desc and "consider" in desc
 
 
 def test_photos_before_any_dates_go_without_asking_for_dates(pw):  # noqa: F811
     w = pw
     Enquiry(place=w.p1.id).save(w.repo, GUEST)
-    result, items, _ = prun(w, "send_photos", {"kind": "default"})
+    result, items, _ = prun(w, "send_photos", {"insist": True, "kind": "default"})
     assert keys(items)[:2] == ["room_label", "photos:2"] and "form" not in keys(items)[:2]
 
 
