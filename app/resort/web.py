@@ -12,11 +12,13 @@ import os
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, wait
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+from app.resort.i18n import t
 from app.resort.payments import PaymentEvent, parse_event, verify_webhook_signature
 from app.resort.services import ResortServices, build_resort_services, get_services
 from app.whatsapp.parse import parse_echoes, parse_webhook, verify_signature
@@ -115,6 +117,9 @@ def handle_payment_event(services: ResortServices, event: PaymentEvent) -> str:
     bot = services.bot
     ids = {"booking_id": event.booking_id, "link_id": event.payment_link_id}
     if event.kind == "paid":
+        if bot.config.agent_mode == "agent":  # a payment after the 9-minute hold: rooms re-checked (agent/late_pay.py)
+            from app.resort.agent import late_pay
+            return late_pay.mark_paid(bot, **ids, payment_id=event.payment_id)
         return bot.mark_paid(**ids, payment_id=event.payment_id)
     if event.kind == "failed":
         return bot.payment_failed(**ids, payment_id=event.payment_id)
@@ -162,11 +167,16 @@ def sweep(now=None, services: ResortServices | None = None) -> dict[str, int]:
 
 
 def agent_sweep(bot, now=None) -> dict[str, int]:
-    """BookingBot.sweep() without its hold-expiry reminder: the same steps, in the same order."""
+    """BookingBot.sweep() for the agent: payments found, ONE reminder before the hold ends, the Razorpay link cancelled
+    when our hold ends (9 min; the link itself lives at least 15), then the rooms released."""
     now = now or bot.clock.now()
     found = bot.check_payments()
+    reminded = remind_once(bot, now)
+    closed = close_due_links(bot, now)
     expired = bot.repo.expire_holds(now)  # released quietly: no "expired" message to the guest
-    out = {"expired": len(expired), "reminded": 0}
+    out = {"expired": len(expired), "reminded": reminded}
+    if closed:
+        out["links_closed"] = closed
     try:  # owner, 2026-11-26: one open hold per guest (all but each guest's newest stay are cancelled as replaced)
         from app.resort.agent import holds
         if cleaned := holds.cleanup_all(bot):
@@ -184,6 +194,51 @@ def agent_sweep(bot, now=None) -> dict[str, int]:
     except Exception:
         log.exception("ID reminder / purge failed")
     return out
+
+
+REMIND_BEFORE = timedelta(minutes=3)  # owner, 2026-11-27: one reminder before the 9-minute hold ends
+
+
+def _link_holds(bot, now) -> list:
+    """Unpaid holds that carry a payment link (the first part of a stay over two room types holds the link)."""
+    return [b for b in bot.repo.list_bookings(status="hold", limit=500)
+            if b.payment_link_id and not (b.group_id and b.group_id != b.id) and b.hold_expires_at]
+
+
+def close_due_links(bot, now) -> int:
+    """Our hold ended (9 min) but Razorpay's link lives at least 15 min: the link is cancelled through the Razorpay API
+    before the rooms are released, so it can no longer be paid."""
+    closed = 0
+    for b in _link_holds(bot, now):
+        if b.hold_expires_at > now:
+            continue
+        try:
+            bot.payments.cancel_link(b.payment_link_id)
+            closed += 1
+        except Exception as exc:  # the rooms are still released; a late payment is re-checked (agent/late_pay.py)
+            log.warning("Could not cancel the payment link of %s: %s", b.id, exc)
+    return closed
+
+
+def remind_once(bot, now) -> int:
+    """ONE short reminder per link, REMIND_BEFORE the hold ends; never after STOP, never for a replaced enquiry."""
+    sent = 0
+    for b in _link_holds(bot, now):
+        left = b.hold_expires_at - now
+        if "[reminded]" in (b.notes or "") or not (timedelta(0) < left <= REMIND_BEFORE):
+            continue
+        if bot.st_of(b.guest_phone).get("opted_out"):
+            continue
+        if any(o.created_at > b.created_at and o.id != b.id and o.group_id != b.id and o.status == "hold"
+               for o in bot.repo.list_bookings(phone=b.guest_phone, limit=20)):
+            continue  # a newer stay of this guest replaces this one
+        b.notes = (b.notes + " [reminded]").strip()
+        bot.repo.save_booking(b)
+        mins = max(1, int(left.total_seconds() // 60))
+        bot._notify_guest(b, t("pending", b.language, id=b.id, minutes=mins, url=b.payment_link_url),
+                          "pending", bot._params(b))
+        sent += 1
+    return sent
 
 
 def start_sweeper(services: ResortServices, every_seconds: int = 15) -> Callable[[], None]:

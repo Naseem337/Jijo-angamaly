@@ -1633,7 +1633,11 @@ class AgentTools:
                 self.out.marker("confirmed")
                 return self._result(True, {"paid": True, "applied": False}, start, enq,
                                     "Dry run: the payment was found but nothing was applied.")
-            outcome = bot.mark_paid(booking_id=b.id, payment_id=status.get("payment_id", ""), out=self.out)
+            from app.resort.agent import late_pay
+            outcome = late_pay.mark_paid(bot, booking_id=b.id, payment_id=status.get("payment_id", ""), out=self.out)
+            if outcome == "late_rooms_gone":  # paid after our hold ended and the rooms are gone: guest + team told
+                return self._result(True, {"paid": True, "rooms_released": True}, start, enq,
+                                    "The guest was told the team will contact them: write nothing more.")
             if outcome == "paid":
                 enq.paid, enq.link_open = True, False
                 enq.save(repo, phone)

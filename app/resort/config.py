@@ -29,7 +29,7 @@ class ResortConfig(BaseModel):
     display_name: str = "Resort Booking Assistant"
     bot_name: str = "Resort Assistant"
     languages: list[str] = ["en", "ml", "ta", "hi"]
-    hold_minutes: int = 15
+    hold_minutes: int = 9  # RESORT_HOLD_MINUTES (owner, 2026-11-27: was 15)
     max_audio_seconds: int = 60
     # Which brain answers guests (docs/AI_AGENT_DESIGN.md): old = today's bot, shadow = old answers and the AI-first
     # agent runs dry on the same message, agent = the AI-first agent answers. Set with AGENT_MODE.
